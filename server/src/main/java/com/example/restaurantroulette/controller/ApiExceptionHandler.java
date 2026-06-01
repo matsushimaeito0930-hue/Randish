@@ -4,6 +4,7 @@ import com.example.restaurantroulette.dto.ApiDtos.ErrorResponse;
 import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.exception.ConflictException;
 import com.example.restaurantroulette.exception.NotFoundException;
+import com.example.restaurantroulette.exception.UnauthorizedException;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +33,11 @@ public class ApiExceptionHandler {
   @ExceptionHandler(ConflictException.class)
   public ResponseEntity<ErrorResponse> handleConflict(ConflictException exception) {
     return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("CONFLICT", exception.getMessage(), List.of()));
+  }
+
+  @ExceptionHandler(UnauthorizedException.class)
+  public ResponseEntity<ErrorResponse> handleUnauthorized(UnauthorizedException exception) {
+    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ErrorResponse("UNAUTHORIZED", exception.getMessage(), List.of()));
   }
 
   @ExceptionHandler(NoResourceFoundException.class)

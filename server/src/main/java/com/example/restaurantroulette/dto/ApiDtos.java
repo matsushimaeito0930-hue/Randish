@@ -79,6 +79,11 @@ public final class ApiDtos {
       String displayName) {
   }
 
+  public record UserLoginRequest(
+      String email,
+      String password) {
+  }
+
   public record UserResponse(
       String id,
       String email,
@@ -86,6 +91,11 @@ public final class ApiDtos {
       String authProvider,
       Instant createdAt,
       Instant updatedAt) {
+  }
+
+  public record AuthResponse(
+      UserResponse user,
+      String accessToken) {
   }
 
   public record FavoriteCreateRequest(String userId, String restaurantId) {

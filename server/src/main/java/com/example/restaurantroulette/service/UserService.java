@@ -53,6 +53,30 @@ public class UserService {
         .orElseThrow(() -> new NotFoundException("User not found."));
   }
 
+  public UserResponse syncSupabaseUser(SupabaseAuthService.SupabaseAuthUser authUser, String fallbackDisplayName) {
+    String userId = authUser.id();
+    if (userId == null || userId.isBlank()) {
+      throw new BadRequestException("Supabase user id is required.");
+    }
+
+    String email = normalizeEmail(authUser.email());
+    String displayName = normalizeDisplayName(resolveDisplayName(authUser, fallbackDisplayName, email));
+    Instant now = Instant.now();
+    AppUser user = new AppUser(userId, email, displayName, "SUPABASE", now, now);
+    return mapper.toUserResponse(userRepository.upsertExternalUser(user));
+  }
+
+  private String resolveDisplayName(SupabaseAuthService.SupabaseAuthUser authUser, String fallbackDisplayName, String email) {
+    String metadataName = authUser.displayName();
+    if (metadataName != null && !metadataName.isBlank()) {
+      return metadataName;
+    }
+    if (fallbackDisplayName != null && !fallbackDisplayName.isBlank()) {
+      return fallbackDisplayName;
+    }
+    return email.substring(0, email.indexOf('@'));
+  }
+
   private String normalizeEmail(String email) {
     if (email == null || email.isBlank()) {
       throw new BadRequestException("email is required.");

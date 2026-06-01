@@ -47,6 +47,11 @@ type UserLocation = {
   label: string;
 };
 
+type DistanceOrigin = {
+  location: UserLocation | null;
+  label: string;
+};
+
 type AreaPreset = {
   label: string;
   group: string;
@@ -814,22 +819,47 @@ const MOCK_RESTAURANTS: Restaurant[] = [
 const formatPrice = (restaurant: ApiRestaurant) =>
   `${restaurant.budgetMin?.toLocaleString() ?? '?'}円〜${restaurant.budgetMax?.toLocaleString() ?? '?'}円`;
 
+const toOptionalNumber = (value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : undefined;
+  }
+  return undefined;
+};
+
 const normalizeRestaurant = (restaurant: ApiRestaurant): Restaurant => {
   const locationSource = restaurant as ApiRestaurant & {
-    latitude?: number;
-    longitude?: number;
-    lat?: number;
-    lng?: number;
+    latitude?: number | string | null;
+    longitude?: number | string | null;
+    lat?: number | string | null;
+    lng?: number | string | null;
   };
+  const rating = toOptionalNumber(restaurant.googleRating) ?? toOptionalNumber(restaurant.rating) ?? 0;
 
   return {
     ...restaurant,
-    latitude: locationSource.latitude ?? locationSource.lat,
-    longitude: locationSource.longitude ?? locationSource.lng,
-    rating: restaurant.googleRating ?? restaurant.rating,
+    latitude: toOptionalNumber(locationSource.latitude ?? locationSource.lat),
+    longitude: toOptionalNumber(locationSource.longitude ?? locationSource.lng),
+    rating,
     priceRange: formatPrice(restaurant),
   };
 };
+
+const getRatingValue = (restaurant: Restaurant) => {
+  const rating = toOptionalNumber(restaurant.googleRating) ?? toOptionalNumber(restaurant.rating);
+  return rating != null && rating > 0 ? rating : null;
+};
+
+const getRatingLabel = (restaurant: Restaurant) => {
+  const rating = getRatingValue(restaurant);
+  return rating == null ? '評価取得中' : `★ ${rating.toFixed(1)}`;
+};
+
+const getStoredMinutesLabel = (restaurant: Restaurant) =>
+  restaurant.minutes && restaurant.minutes > 0 ? `${restaurant.minutes}分` : '地図で確認';
 
 const getDistanceKm = (from: UserLocation | null, restaurant: Restaurant) => {
   if (!from || restaurant.latitude == null || restaurant.longitude == null) {
@@ -853,7 +883,15 @@ const getDistanceLabel = (from: UserLocation | null, restaurant: Restaurant) => 
   if (km != null) {
     return km < 1 ? `約${Math.round(km * 1000)}m` : `約${km.toFixed(1)}km`;
   }
-  return restaurant.minutes ? `徒歩約${restaurant.minutes}分` : '距離を計算中';
+  return restaurant.minutes && restaurant.minutes > 0 ? `徒歩約${restaurant.minutes}分` : '地図で確認';
+};
+
+const getWalkingMinutesLabel = (from: UserLocation | null, restaurant: Restaurant) => {
+  const km = getDistanceKm(from, restaurant);
+  if (km != null) {
+    return `${Math.max(1, Math.round(km * 12.5))}分`;
+  }
+  return restaurant.minutes && restaurant.minutes > 0 ? `${restaurant.minutes}分` : '地図で確認';
 };
 
 const getPresetPrefecture = (preset: AreaPreset) => preset.group.split('/')[0].trim();
@@ -901,6 +939,47 @@ const formatLocationStatus = (prefecture: string | undefined, areaLabel: string)
 };
 
 const getAreaPreset = (area: string) => ALL_AREA_PRESETS.find((preset) => preset.label === area);
+
+const hasUsablePresetCoordinates = (preset: AreaPreset) =>
+  preset.label !== '現在地' && preset.useCoordinates !== false && preset.latitude !== 0 && preset.longitude !== 0;
+
+const getCoordinatePresetForArea = (area: string) => {
+  const cleanArea = area.trim();
+  if (!cleanArea || cleanArea === '現在地') {
+    return null;
+  }
+
+  const exactPreset = ALL_AREA_PRESETS.find((preset) => preset.label === cleanArea && hasUsablePresetCoordinates(preset));
+  if (exactPreset) {
+    return { preset: exactPreset, label: exactPreset.label };
+  }
+
+  const selectedPreset = getAreaPreset(cleanArea);
+  const prefecture = isPrefectureName(cleanArea)
+    ? cleanArea
+    : selectedPreset
+      ? getPresetPrefecture(selectedPreset)
+      : getPrefectureFromText(cleanArea);
+
+  if (!prefecture) {
+    return null;
+  }
+
+  const simplifiedArea = cleanArea.replace(/[市区町村]$/, '');
+  const sameAreaPreset = ALL_AREA_PRESETS.find(
+    (preset) =>
+      getPresetPrefecture(preset) === prefecture
+      && hasUsablePresetCoordinates(preset)
+      && (preset.label === simplifiedArea || preset.label === cleanArea || preset.group.includes(cleanArea)),
+  );
+  const prefectureAnchor = ALL_AREA_PRESETS.find((preset) => getPresetPrefecture(preset) === prefecture && hasUsablePresetCoordinates(preset));
+  const preset = sameAreaPreset ?? prefectureAnchor;
+  if (!preset) {
+    return null;
+  }
+
+  return { preset, label: isPrefectureName(cleanArea) ? `${cleanArea}中心` : cleanArea };
+};
 
 const getRestaurantAreaLabel = (restaurant: Restaurant) => {
   const source = `${restaurant.area} ${restaurant.address} ${restaurant.name}`;
@@ -1032,6 +1111,18 @@ const filterMockRestaurants = (genre: string, area: string, budgetMin: string, b
 };
 
 const includesAny = (source: string, keywords: string[]) => keywords.some((keyword) => source.includes(keyword));
+
+const pickRandomRestaurant = (items: Restaurant[]) => items[Math.floor(Math.random() * items.length)];
+
+const pickFreshRestaurant = (items: Restaurant[], recentIds: Set<string>, currentId?: string) => {
+  const freshItems = items.filter((item) => !recentIds.has(item.id));
+  if (freshItems.length) {
+    return pickRandomRestaurant(freshItems);
+  }
+
+  const differentItems = currentId ? items.filter((item) => item.id !== currentId) : [];
+  return differentItems.length ? pickRandomRestaurant(differentItems) : null;
+};
 
 const restaurantMatchesSelectedGenre = (restaurant: Restaurant, selectedGenre: string) => {
   const genre = selectedGenre.trim();
@@ -1173,7 +1264,7 @@ export default function App() {
     () => {
       const selectedPreset = getAreaPreset(area);
       const usePresetCoordinates = selectedPreset != null && selectedPreset.label !== '現在地' && selectedPreset.useCoordinates !== false;
-      const useCurrentLocationCoordinates = !selectedPreset && (!area.trim() || area === '現在地');
+      const useCurrentLocationCoordinates = (!selectedPreset || selectedPreset.label === '現在地') && (!area.trim() || area === '現在地');
       const coordinateSource =
         usePresetCoordinates
           ? { latitude: selectedPreset.latitude, longitude: selectedPreset.longitude }
@@ -1193,6 +1284,32 @@ export default function App() {
     },
     [area, budgetMax, budgetMin, distance, genre, userLocation],
   );
+
+  const distanceOrigin = useMemo<DistanceOrigin>(() => {
+    const coordinatePreset = getCoordinatePresetForArea(area);
+    if (coordinatePreset) {
+      return {
+        label: `${coordinatePreset.label}から`,
+        location: {
+          latitude: coordinatePreset.preset.latitude,
+          longitude: coordinatePreset.preset.longitude,
+          label: coordinatePreset.label,
+        },
+      };
+    }
+
+    if (area.trim() && area !== '現在地') {
+      return {
+        label: `${area}から`,
+        location: null,
+      };
+    }
+
+    return {
+      label: '現在地から',
+      location: userLocation,
+    };
+  }, [area, userLocation]);
 
   const visibleRestaurants = restaurants;
 
@@ -1302,6 +1419,17 @@ export default function App() {
     setActiveTab('random');
     setIsLoading(true);
     const drawAnimation = startDrawAnimation();
+    const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
+    let alternativesCache: Restaurant[] | null = null;
+    const loadAlternatives = async () => {
+      if (alternativesCache) {
+        return alternativesCache;
+      }
+      alternativesCache = (await randishApi.getRestaurants(apiBaseUrlCandidates, apiParams))
+        .map(normalizeRestaurant)
+        .filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
+      return alternativesCache;
+    };
 
     try {
       const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
@@ -1311,17 +1439,21 @@ export default function App() {
       syncWorkingApiBaseUrl();
       let normalized = normalizeRestaurant(data);
       if (!restaurantMatchesSelectedGenre(normalized, genre)) {
-        const alternatives = (await randishApi.getRestaurants(apiBaseUrlCandidates, apiParams))
-          .map(normalizeRestaurant)
-          .filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
+        const alternatives = await loadAlternatives();
         if (!alternatives.length) {
           throw new Error(`${genre}に合う候補が見つかりませんでした。`);
         }
-        normalized = alternatives[Math.floor(Math.random() * alternatives.length)];
+        normalized = pickFreshRestaurant(alternatives, recentIds, normalized.id) ?? pickRandomRestaurant(alternatives);
+      } else if (recentIds.has(normalized.id)) {
+        const alternatives = await loadAlternatives();
+        const freshAlternative = pickFreshRestaurant(alternatives, recentIds, normalized.id);
+        if (freshAlternative) {
+          normalized = freshAlternative;
+        }
       }
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
-      setMessage(drawAnimation.doneMessage);
+      setMessage(recentIds.has(normalized.id) ? '候補が一巡しています。条件を広げると新しい店が出やすくなります。' : drawAnimation.doneMessage);
       setTimeout(revealSelectedRestaurant, 980);
     } catch (error) {
       setSelectedRestaurant(null);
@@ -1330,22 +1462,30 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, apiParams, genre, revealSelectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId, visibleRestaurants]);
+  }, [apiBaseUrlCandidates, apiParams, genre, randomHistory, revealSelectedRestaurant, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
     setIsLoading(true);
     const drawAnimation = startDrawAnimation(true);
+    const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
 
     try {
       const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
         userId,
       });
       syncWorkingApiBaseUrl();
-      const normalized = normalizeRestaurant(data);
+      let normalized = normalizeRestaurant(data);
+      if (recentIds.has(normalized.id)) {
+        const alternatives = (await randishApi.getRestaurants(apiBaseUrlCandidates)).map(normalizeRestaurant);
+        const freshAlternative = pickFreshRestaurant(alternatives, recentIds, normalized.id);
+        if (freshAlternative) {
+          normalized = freshAlternative;
+        }
+      }
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
-      setMessage(`ぜんぶおまかせ。${drawAnimation.doneMessage}`);
+      setMessage(recentIds.has(normalized.id) ? 'ぜんぶおまかせの候補が一巡しています。条件を少し変えると広がります。' : `ぜんぶおまかせ。${drawAnimation.doneMessage}`);
       setTimeout(revealSelectedRestaurant, 980);
     } catch (error) {
       setSelectedRestaurant(null);
@@ -1354,7 +1494,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, revealSelectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, randomHistory, revealSelectedRestaurant, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
 
   const saveSelectedRestaurant = useCallback(async () => {
     if (!selectedRestaurant) {
@@ -1395,14 +1535,13 @@ export default function App() {
 
   const updateArea = (value: string) => {
     const preset = ALL_AREA_PRESETS.find((item) => item.label === value && item.label !== '現在地');
-    if (preset?.useCoordinates === false) {
-      setUserLocation(null);
+    if (value === '現在地') {
+      setLocationStatus(userLocation ? `${userLocation.label} 周辺から探します` : '現在地を確認できます');
+    } else if (preset?.useCoordinates === false) {
       setLocationStatus(`${preset.group} / ${preset.label} 周辺から探します`);
     } else if (preset) {
-      setUserLocation({ latitude: preset.latitude, longitude: preset.longitude, label: preset.label });
       setLocationStatus(`${preset.group} / ${preset.label} 周辺から探します`);
     } else if (isPrefectureName(value)) {
-      setUserLocation(null);
       setLocationStatus(formatLocationStatus(value, '全域'));
     }
     setArea(value);
@@ -1513,7 +1652,7 @@ export default function App() {
             message={message}
             isLoading={isLoading}
             selectedRestaurant={selectedRestaurant}
-            userLocation={userLocation}
+            distanceOrigin={distanceOrigin}
             history={randomHistory}
             drawAnimationKey={drawAnimationKey}
             spinValue={spinValue}
@@ -1605,16 +1744,45 @@ function LoginScreen({
     setIsSubmitting(true);
     setAuthNotice('');
     try {
-      const user = await randishApi.registerUser(apiBaseUrlCandidates, {
+      const auth = await randishApi.registerUser(apiBaseUrlCandidates, {
         email,
         password,
         displayName,
       });
+      randishApi.setAuthToken(auth.accessToken);
       onApiConnected();
-      onStart(user.id);
+      if (!auth.accessToken && auth.user.authProvider === 'SUPABASE') {
+        setAuthNotice('登録しました。メール確認が有効な場合は、確認後にこの画面でログインしてください。');
+        return;
+      }
+      onStart(auth.user.id);
     } catch (error) {
       const reason = error instanceof Error ? error.message : '登録に失敗しました。';
       setAuthNotice(`登録できませんでした。${reason}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleLogin = async () => {
+    if (isSubmitting) {
+      return;
+    }
+    if (!email.trim() || !password) {
+      setAuthNotice('メールアドレスとパスワードを入力してください。');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setAuthNotice('');
+    try {
+      const auth = await randishApi.login(apiBaseUrlCandidates, { email, password });
+      randishApi.setAuthToken(auth.accessToken);
+      onApiConnected();
+      onStart(auth.user.id);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'ログインに失敗しました。';
+      setAuthNotice(`ログインできませんでした。${reason}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -1716,7 +1884,7 @@ function LoginScreen({
         <RegisterSocialButton text="Appleで登録" onPress={() => handleSocialPress('Apple')} />
         <RegisterSocialButton text="LINEで登録" onPress={() => handleSocialPress('LINE')} />
 
-        <Pressable style={styles.registerLoginBox} onPress={() => onStart()}>
+        <Pressable style={styles.registerLoginBox} onPress={handleLogin}>
           <Text style={styles.registerLoginText}>すでにアカウントをお持ちですか？</Text>
           <Text style={styles.registerLoginLink}>ログイン</Text>
         </Pressable>
@@ -2434,7 +2602,7 @@ function RandomTab({
   message,
   isLoading,
   selectedRestaurant,
-  userLocation,
+  distanceOrigin,
   history,
   drawAnimationKey,
   spinValue,
@@ -2451,7 +2619,7 @@ function RandomTab({
   message: string;
   isLoading: boolean;
   selectedRestaurant: Restaurant | null;
-  userLocation: UserLocation | null;
+  distanceOrigin: DistanceOrigin;
   history: Restaurant[];
   drawAnimationKey: DrawAnimationKey;
   spinValue: Animated.Value;
@@ -2461,10 +2629,10 @@ function RandomTab({
   onGoPress: () => void;
 }) {
   const drawAnimation = DRAW_ANIMATION_PROFILES[drawAnimationKey];
-  const rotate = spinValue.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '1460deg'] });
+  const rotate = spinValue.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '1440deg'] });
   const dartDrop = spinValue.interpolate({ inputRange: [0, 0.72, 1], outputRange: [-18, -18, 0] });
-  const dartWiggle = spinValue.interpolate({ inputRange: [0, 0.78, 0.9, 1], outputRange: ['-10deg', '-10deg', '8deg', '0deg'] });
-  const wheelScale = spinValue.interpolate({ inputRange: [0, 0.22, 0.5, 0.76, 1], outputRange: [1, 0.96, 1.04, 0.99, 1] });
+  const dartWiggle = spinValue.interpolate({ inputRange: [0, 0.74, 0.88, 1], outputRange: ['-8deg', '-8deg', '6deg', '0deg'] });
+  const wheelScale = spinValue.interpolate({ inputRange: [0, 0.18, 0.52, 0.82, 1], outputRange: [1, 0.98, 1.03, 0.995, 1] });
   const ticketOpacity = spinValue.interpolate({ inputRange: [0, 0.08, 0.9, 1], outputRange: [0, 1, 1, 0.96] });
   const ticketLift = spinValue.interpolate({ inputRange: [0, 0.28, 0.68, 1], outputRange: [46, 22, -10, 0] });
   const ticketRotate = spinValue.interpolate({ inputRange: [0, 0.52, 1], outputRange: ['-8deg', '7deg', '0deg'] });
@@ -2486,6 +2654,22 @@ function RandomTab({
     { top: 90, left: 27, color: '#f05a28' },
     { top: 36, left: 50, color: '#7c5cff' },
     { top: 153, left: 132, color: '#00a884' },
+  ];
+  const roulettePockets = [
+    { label: '1', top: 8, left: 101, color: ORANGE },
+    { label: '2', top: 27, left: 155, color: '#4285f4' },
+    { label: '3', top: 80, left: 181, color: '#34a853' },
+    { label: '4', top: 136, left: 166, color: '#fbbc04' },
+    { label: '5', top: 171, left: 105, color: '#ea4335' },
+    { label: '6', top: 150, left: 43, color: '#00a884' },
+    { label: '7', top: 88, left: 16, color: '#7c5cff' },
+    { label: '8', top: 29, left: 46, color: '#f05a28' },
+  ];
+  const rouletteLabels = [
+    { text: genre, style: styles.rouletteLabelTop },
+    { text: area, style: styles.rouletteLabelBottom },
+    { text: '近場', style: styles.rouletteLabelRight },
+    { text: '予算内', style: styles.rouletteLabelLeft },
   ];
 
   return (
@@ -2513,18 +2697,33 @@ function RandomTab({
             </Animated.View>
           )}
           <Animated.View style={[styles.rouletteWheel, { transform: [{ rotate }, { scale: wheelScale }] }]}>
-            <View style={styles.rouletteGridLineVertical} />
-            <View style={styles.rouletteGridLineHorizontal} />
+            <View style={styles.rouletteMapTint} />
+            <View style={[styles.rouletteDivider, styles.rouletteDividerVertical]} />
+            <View style={[styles.rouletteDivider, styles.rouletteDividerHorizontal]} />
+            <View style={[styles.rouletteDivider, styles.rouletteDividerDiagonalOne]} />
+            <View style={[styles.rouletteDivider, styles.rouletteDividerDiagonalTwo]} />
             <View style={[styles.mapRoad, styles.mapRoadOne]} />
             <View style={[styles.mapRoad, styles.mapRoadTwo]} />
             <View style={[styles.mapRoad, styles.mapRoadThree]} />
             <View style={[styles.mapPark, styles.mapParkOne]} />
             <View style={[styles.mapPark, styles.mapParkTwo]} />
+            {roulettePockets.map((pocket) => (
+              <View key={pocket.label} style={[styles.roulettePocket, { top: pocket.top, left: pocket.left, backgroundColor: pocket.color }]}>
+                <Text style={styles.roulettePocketText}>{pocket.label}</Text>
+              </View>
+            ))}
+            {rouletteLabels.map((label) => (
+              <View key={label.text} style={[styles.rouletteLabelChip, label.style]}>
+                <Text style={styles.rouletteLabelText} numberOfLines={1}>{label.text}</Text>
+              </View>
+            ))}
             {mapPins.map((pin, index) => (
               <View key={`${pin.color}-${index}`} style={[styles.mapPin, { top: pin.top, left: pin.left, backgroundColor: pin.color }]} />
             ))}
             <View style={styles.wheelCore}>
               <Image source={RANDISH_LOGO} style={styles.wheelLogo} resizeMode="contain" />
+              <Text style={styles.wheelCoreTitle}>RANDISH</Text>
+              <Text style={styles.wheelCoreSub}>MAP</Text>
             </View>
           </Animated.View>
           {drawAnimationKey === 'radar' && (
@@ -2583,7 +2782,7 @@ function RandomTab({
       {selectedRestaurant ? (
         <Animated.View style={[styles.resultWrap, { opacity: resultRevealValue, transform: [{ translateY: resultTranslateY }, { scale: resultScale }] }]}>
           <Text style={styles.resultKicker}>TODAY'S PICK</Text>
-          <ResultCard restaurant={selectedRestaurant} userLocation={userLocation} onMapPress={onGoPress} />
+          <ResultCard restaurant={selectedRestaurant} distanceOrigin={distanceOrigin} onMapPress={onGoPress} />
           <View style={styles.resultActions}>
             <Pressable style={styles.secondaryAction} onPress={onRandomPress}>
               <Text style={styles.secondaryActionText}>もう一回引く</Text>
@@ -2774,14 +2973,15 @@ function AnalyticsMetric({ icon, label, value }: { icon: string; label: string; 
 
 function ResultCard({
   restaurant,
-  userLocation,
+  distanceOrigin,
   onMapPress,
 }: {
   restaurant: Restaurant;
-  userLocation: UserLocation | null;
+  distanceOrigin: DistanceOrigin;
   onMapPress: () => void;
 }) {
-  const distanceLabel = getDistanceLabel(userLocation, restaurant);
+  const distanceLabel = getDistanceLabel(distanceOrigin.location, restaurant);
+  const minutesLabel = getWalkingMinutesLabel(distanceOrigin.location, restaurant);
 
   return (
     <View style={styles.resultCard}>
@@ -2790,7 +2990,7 @@ function ResultCard({
         <Text style={styles.resultName}>{restaurant.name}</Text>
         <View style={styles.resultDistanceBand}>
           <View>
-            <Text style={styles.resultDistanceLabel}>現在地から</Text>
+            <Text style={styles.resultDistanceLabel}>{distanceOrigin.label}</Text>
             <Text style={styles.resultDistanceValue}>{distanceLabel}</Text>
           </View>
           <Pressable style={styles.resultMapShortcut} onPress={onMapPress}>
@@ -2800,10 +3000,10 @@ function ResultCard({
         <View style={styles.metaRow}>
           <MetaPill label={restaurant.genre} />
           <MetaPill label={restaurant.priceRange ?? formatPrice(restaurant)} />
-          <MetaPill label={`${restaurant.minutes ?? 10}分`} />
+          <MetaPill label={minutesLabel} />
         </View>
         <View style={styles.ratingRow}>
-          <Text style={styles.ratingText}>★ {Number(restaurant.rating ?? 4.2).toFixed(1)}</Text>
+          <Text style={[styles.ratingText, getRatingValue(restaurant) == null && styles.ratingTextPending]}>{getRatingLabel(restaurant)}</Text>
           {restaurant.openNow != null && (
             <Text style={[styles.openNowText, restaurant.openNow ? styles.openNowActiveText : styles.openNowInactiveText]}>
               {restaurant.openNow ? '営業中' : '営業時間外'}
@@ -2856,11 +3056,11 @@ function RestaurantCard({ restaurant }: { restaurant: Restaurant }) {
       <View style={styles.restaurantBody}>
         <View style={styles.restaurantTitleRow}>
           <Text style={styles.restaurantName} numberOfLines={1}>{restaurant.name}</Text>
-          <Text style={styles.restaurantRating}>★ {Number(restaurant.rating ?? 4.2).toFixed(1)}</Text>
+          <Text style={[styles.restaurantRating, getRatingValue(restaurant) == null && styles.restaurantRatingPending]}>{getRatingLabel(restaurant)}</Text>
         </View>
         <Text style={styles.restaurantSub} numberOfLines={1}>{restaurant.area} / {restaurant.genre}</Text>
         <View style={styles.restaurantMetaRow}>
-          <Text style={styles.restaurantMetaPill}>{restaurant.minutes ?? 10}分</Text>
+          <Text style={styles.restaurantMetaPill}>{getStoredMinutesLabel(restaurant)}</Text>
           <Text style={styles.restaurantMetaPill}>{restaurant.priceRange ?? formatPrice(restaurant)}</Text>
         </View>
       </View>
@@ -2875,7 +3075,7 @@ function CandidateCard({ restaurant }: { restaurant: Restaurant }) {
         <RestaurantVisual restaurant={restaurant} large />
         <View style={styles.candidateShade} />
         <View style={styles.candidateTopBadge}>
-          <Text style={styles.candidateTopBadgeText}>★ {Number(restaurant.rating ?? 4.2).toFixed(1)}</Text>
+          <Text style={styles.candidateTopBadgeText}>{getRatingLabel(restaurant)}</Text>
         </View>
         <View style={styles.candidateGenreBadge}>
           <Text style={styles.candidateGenreText}>{restaurant.genre}</Text>
@@ -2885,7 +3085,7 @@ function CandidateCard({ restaurant }: { restaurant: Restaurant }) {
         <Text style={styles.candidateName} numberOfLines={1}>{restaurant.name}</Text>
         <Text style={styles.candidateMeta} numberOfLines={1}>{restaurant.area}</Text>
         <View style={styles.candidateInfoRow}>
-          <Text style={styles.candidateInfoPill}>{restaurant.minutes ?? 10}分</Text>
+          <Text style={styles.candidateInfoPill}>{getStoredMinutesLabel(restaurant)}</Text>
           <Text style={styles.candidateInfoPill}>{restaurant.priceRange ?? formatPrice(restaurant)}</Text>
         </View>
       </View>
@@ -5742,6 +5942,32 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
   },
+  rouletteMapTint: {
+    position: 'absolute',
+    width: 226,
+    height: 226,
+    borderRadius: 113,
+    backgroundColor: '#f7f2e8',
+  },
+  rouletteDivider: {
+    position: 'absolute',
+    width: 2,
+    height: 226,
+    backgroundColor: 'rgba(255,255,255,0.86)',
+    zIndex: 2,
+  },
+  rouletteDividerVertical: {
+    transform: [{ rotate: '0deg' }],
+  },
+  rouletteDividerHorizontal: {
+    transform: [{ rotate: '90deg' }],
+  },
+  rouletteDividerDiagonalOne: {
+    transform: [{ rotate: '45deg' }],
+  },
+  rouletteDividerDiagonalTwo: {
+    transform: [{ rotate: '-45deg' }],
+  },
   rouletteGridLineVertical: {
     position: 'absolute',
     width: 2,
@@ -5760,6 +5986,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#ffffff',
     opacity: 0.92,
+    borderWidth: 1,
+    borderColor: '#ece5d9',
+    zIndex: 3,
   },
   mapRoadOne: {
     width: 213,
@@ -5771,6 +6000,8 @@ const styles = StyleSheet.create({
     width: 184,
     top: 115,
     left: 25,
+    backgroundColor: '#f8d47a',
+    borderColor: '#ecc866',
     transform: [{ rotate: '-18deg' }],
   },
   mapRoadThree: {
@@ -5784,6 +6015,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: '#dff1d8',
     opacity: 0.92,
+    zIndex: 1,
   },
   mapParkOne: {
     width: 72,
@@ -5801,26 +6033,100 @@ const styles = StyleSheet.create({
   },
   mapPin: {
     position: 'absolute',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     borderWidth: 3,
     borderColor: '#ffffff',
+    zIndex: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  roulettePocket: {
+    position: 'absolute',
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    zIndex: 7,
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  roulettePocketText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#ffffff',
+  },
+  rouletteLabelChip: {
+    position: 'absolute',
+    minWidth: 58,
+    maxWidth: 78,
+    height: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderWidth: 1,
+    borderColor: '#eadfca',
+    zIndex: 8,
+  },
+  rouletteLabelTop: {
+    top: 47,
+    left: 84,
+  },
+  rouletteLabelRight: {
+    top: 101,
+    right: 20,
+  },
+  rouletteLabelBottom: {
+    bottom: 42,
+    left: 76,
+  },
+  rouletteLabelLeft: {
+    top: 101,
+    left: 20,
+  },
+  rouletteLabelText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: INK,
   },
   wheelCore: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
     borderWidth: 5,
     borderColor: '#191512',
+    zIndex: 9,
   },
   wheelLogo: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+  },
+  wheelCoreTitle: {
+    marginTop: 2,
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: '900',
+    color: INK,
+  },
+  wheelCoreSub: {
+    fontSize: 8,
+    lineHeight: 10,
+    fontWeight: '900',
+    color: '#8d8479',
   },
   lotteryMotionLayer: {
     position: 'absolute',
@@ -6169,6 +6475,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
     color: ORANGE,
+  },
+  ratingTextPending: {
+    color: '#8a8175',
   },
   openNowText: {
     alignSelf: 'flex-start',
@@ -6991,6 +7300,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
     color: ORANGE,
+  },
+  restaurantRatingPending: {
+    backgroundColor: '#f4eee7',
+    color: '#756b60',
   },
   restaurantSub: {
     marginTop: 4,

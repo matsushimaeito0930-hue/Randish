@@ -49,6 +49,16 @@ export type UserCreateParams = {
   displayName: string;
 };
 
+export type UserLoginParams = {
+  email: string;
+  password: string;
+};
+
+export type AuthResponse = {
+  user: User;
+  accessToken: string | null;
+};
+
 export type RandomHistory = {
   id: string;
   userId: string;
@@ -112,8 +122,12 @@ export class RandishApiError extends Error {
 }
 
 let lastSuccessfulBaseUrl: string | null = null;
+let authToken: string | null = null;
 
 export const getLastSuccessfulBaseUrl = () => lastSuccessfulBaseUrl;
+export const setAuthToken = (token: string | null) => {
+  authToken = token;
+};
 
 export const isApiConnectivityError = (error: unknown) =>
   error instanceof RandishApiError && (error.kind === 'connection' || error.kind === 'timeout');
@@ -162,9 +176,17 @@ const requestUrl = async <T>(url: string, options: RequestOptions = {}): Promise
 
   let response: Response;
   try {
+    const headers: Record<string, string> = {};
+    if (options.body) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
+
     response = await fetch(url, {
       method: options.method ?? 'GET',
-      headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
       body: options.body ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
     });
@@ -218,6 +240,7 @@ const request = async <T>(
 
 export const randishApi = {
   getLastSuccessfulBaseUrl,
+  setAuthToken,
 
   getRestaurants: (baseUrl: ApiBaseUrlInput, params?: RestaurantSearchParams) =>
     request<Restaurant[]>(baseUrl, 'api/restaurants', params),
@@ -226,10 +249,19 @@ export const randishApi = {
     request<Restaurant>(baseUrl, `api/restaurants/${restaurantId}`),
 
   registerUser: (baseUrl: ApiBaseUrlInput, params: UserCreateParams) =>
-    request<User>(baseUrl, 'api/users', undefined, {
+    request<AuthResponse>(baseUrl, 'api/auth/register', undefined, {
       method: 'POST',
       body: params,
     }),
+
+  login: (baseUrl: ApiBaseUrlInput, params: UserLoginParams) =>
+    request<AuthResponse>(baseUrl, 'api/auth/login', undefined, {
+      method: 'POST',
+      body: params,
+    }),
+
+  getCurrentUser: (baseUrl: ApiBaseUrlInput) =>
+    request<AuthResponse>(baseUrl, 'api/users/me'),
 
   getUser: (baseUrl: ApiBaseUrlInput, userId: string) =>
     request<User>(baseUrl, `api/users/${userId}`),

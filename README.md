@@ -23,6 +23,8 @@ Useful endpoints:
 
 - `GET http://localhost:8080/api/restaurants`
 - `GET http://localhost:8080/api/restaurants/random`
+- `POST http://localhost:8080/api/auth/register`
+- `POST http://localhost:8080/api/auth/login`
 - `GET http://localhost:8080/api/favorites/user/{userId}`
 - `GET http://localhost:8080/api/visits/user/{userId}`
 - `GET http://localhost:8080/api/statistics/user/{userId}`
@@ -54,6 +56,15 @@ RANDISH_DATABASE_URI=postgresql://postgres.project-ref:YOUR_PASSWORD@aws-1-ap-no
 ```
 
 The Spring Boot server converts this URI into JDBC settings at startup.
+
+For Supabase Auth, add the project URL and anon public key to the same `.env.local`:
+
+```env
+SUPABASE_URL=https://project-ref.supabase.co
+SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_PUBLIC_KEY
+```
+
+When these are present, registration and login go through Supabase Auth first, then the authenticated user is synced into `app_users`.
 
 ## Database
 

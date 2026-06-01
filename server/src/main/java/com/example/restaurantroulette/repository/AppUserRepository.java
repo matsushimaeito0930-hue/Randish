@@ -33,6 +33,39 @@ public class AppUserRepository {
     return user;
   }
 
+  public AppUser upsertExternalUser(AppUser user) {
+    int updatedRows = jdbcClient.sql("""
+        UPDATE app_users
+        SET email = :email,
+            display_name = :displayName,
+            auth_provider = :authProvider,
+            updated_at = :updatedAt
+        WHERE id = :id
+        """)
+        .param("id", user.id())
+        .param("email", user.email())
+        .param("displayName", user.displayName())
+        .param("authProvider", user.authProvider())
+        .param("updatedAt", Timestamp.from(user.updatedAt()))
+        .update();
+    if (updatedRows > 0) {
+      return user;
+    }
+
+    jdbcClient.sql("""
+        INSERT INTO app_users (id, email, display_name, auth_provider, created_at, updated_at)
+        VALUES (:id, :email, :displayName, :authProvider, :createdAt, :updatedAt)
+        """)
+        .param("id", user.id())
+        .param("email", user.email())
+        .param("displayName", user.displayName())
+        .param("authProvider", user.authProvider())
+        .param("createdAt", Timestamp.from(user.createdAt()))
+        .param("updatedAt", Timestamp.from(user.updatedAt()))
+        .update();
+    return user;
+  }
+
   public Optional<AppUser> findById(String id) {
     return jdbcClient.sql("""
         SELECT id, email, display_name, auth_provider, created_at, updated_at
