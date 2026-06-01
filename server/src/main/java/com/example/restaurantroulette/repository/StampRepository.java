@@ -4,6 +4,7 @@ import com.example.restaurantroulette.entity.Stamp;
 import com.example.restaurantroulette.entity.StampType;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -25,7 +26,7 @@ public class StampRepository {
         .param("userId", stamp.userId())
         .param("restaurantId", stamp.restaurantId())
         .param("stampType", stamp.stampType().name())
-        .param("awardedAt", stamp.awardedAt())
+        .param("awardedAt", Timestamp.from(stamp.awardedAt()))
         .update();
     return stamp;
   }

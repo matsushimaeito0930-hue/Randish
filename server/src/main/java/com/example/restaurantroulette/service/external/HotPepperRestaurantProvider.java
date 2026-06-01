@@ -24,8 +24,8 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   private static final String PROVIDER = "HOTPEPPER";
   private static final String API_URL = "https://webservice.recruit.co.jp/hotpepper/gourmet/v1/";
   private static final String ALL_GENRES = "\u3059\u3079\u3066";
-  private static final int PAGE_SIZE = 100;
-  private static final int MAX_RESULTS_PER_PLAN = 10000;
+  private static final int PAGE_SIZE = 30;
+  private static final int MAX_RESULTS_PER_PLAN = 60;
   private static final Pattern PRICE_PATTERN = Pattern.compile("(\\d[\\d,]*)");
   private static final Map<String, List<SearchPlan>> GENRE_SEARCH_PLANS = Map.ofEntries(
       Map.entry("ラーメン", List.of(new SearchPlan(List.of("G013"), List.of()))),

@@ -3,6 +3,7 @@ package com.example.restaurantroulette.repository;
 import com.example.restaurantroulette.entity.VisitCollection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -27,7 +28,7 @@ public class VisitCollectionRepository {
         .param("photoUrl", visit.photoUrl())
         .param("memo", visit.memo())
         .param("rating", visit.rating())
-        .param("createdAt", visit.createdAt())
+        .param("createdAt", Timestamp.from(visit.createdAt()))
         .update();
     return visit;
   }

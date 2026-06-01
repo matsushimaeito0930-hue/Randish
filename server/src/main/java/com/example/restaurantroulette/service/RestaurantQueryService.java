@@ -50,7 +50,6 @@ public class RestaurantQueryService {
       Integer range) {
     return searchEntities(area, genre, budgetMin, budgetMax, latitude, longitude, range).stream()
         .map(mapper::toRestaurantResponse)
-        .map(googlePlacesEnrichmentService::enrich)
         .toList();
   }
 

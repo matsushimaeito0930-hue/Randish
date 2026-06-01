@@ -3,6 +3,7 @@ package com.example.restaurantroulette.repository;
 import com.example.restaurantroulette.entity.RandomHistory;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -28,7 +29,7 @@ public class RandomHistoryRepository {
         .param("genre", history.genre())
         .param("budgetMin", history.budgetMin())
         .param("budgetMax", history.budgetMax())
-        .param("createdAt", history.createdAt())
+        .param("createdAt", Timestamp.from(history.createdAt()))
         .update();
     return history;
   }

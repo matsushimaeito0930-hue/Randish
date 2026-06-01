@@ -3,6 +3,7 @@ package com.example.restaurantroulette.repository;
 import com.example.restaurantroulette.entity.FavoriteRestaurant;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -24,7 +25,7 @@ public class FavoriteRestaurantRepository {
         .param("id", favorite.id())
         .param("userId", favorite.userId())
         .param("restaurantId", favorite.restaurantId())
-        .param("createdAt", favorite.createdAt())
+        .param("createdAt", Timestamp.from(favorite.createdAt()))
         .update();
     return favorite;
   }
