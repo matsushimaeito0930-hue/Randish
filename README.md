@@ -47,6 +47,14 @@ Create `.env.local` from `.env.example` when API keys or database credentials ar
 
 Never commit `.env.local`, database passwords, API keys, keystores, or production secrets.
 
+For Supabase Postgres, put the Supabase connection URI in `.env.local`:
+
+```env
+RANDISH_DATABASE_URI=postgresql://postgres.project-ref:YOUR_PASSWORD@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
+```
+
+The Spring Boot server converts this URI into JDBC settings at startup.
+
 ## Database
 
 Local development currently uses H2:

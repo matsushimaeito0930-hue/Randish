@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS restaurant_enrichments (
   rating DOUBLE PRECISION,
   maps_uri VARCHAR(1000),
   open_now BOOLEAN,
-  raw_payload CLOB,
+  raw_payload TEXT,
   fetched_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at TIMESTAMP WITH TIME ZONE,
   PRIMARY KEY (restaurant_id, provider),
