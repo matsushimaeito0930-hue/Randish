@@ -6,6 +6,7 @@ import {
   Image,
   ImageSourcePropType,
   Linking,
+  NativeModules,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -66,10 +67,70 @@ type RegionGroup = {
 };
 
 const APP_USER_ID = 'guest';
-const FALLBACK_API_HOST = '10.230.36.60';
-const DEFAULT_BASE_URL = `http://${FALLBACK_API_HOST}:8080`;
-const STALE_TETHER_HOST_PATTERN = /10\.230\.36\.(?!60(?::|\/|$))\d+/;
+const API_PORT = '8080';
+const STATIC_FALLBACK_API_BASE_URL = 'http://10.230.36.60:8080';
+const LOCAL_API_BASE_URLS = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://10.0.2.2:8080'];
+const TETHER_HOST_PATTERN = /^http:\/\/10\.230\.36\.\d+(?::8080)?$/;
 const RANDISH_LOGO = require('./assets/randish-logo-square1.png');
+
+const normalizeApiBaseUrl = (value: string) =>
+  value.trim().replace(/\/+$/, '').replace(/\/api\/restaurants$/, '');
+
+const getHostFromUrl = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return null;
+  }
+};
+
+const toApiBaseUrlFromHost = (host: string | null) => {
+  if (!host) {
+    return null;
+  }
+  return `http://${host}:${API_PORT}`;
+};
+
+const getMetroScriptUrl = () => {
+  const sourceCode = NativeModules.SourceCode as { scriptURL?: string } | undefined;
+  return sourceCode?.scriptURL;
+};
+
+const getWebLocationUrl = () => {
+  const runtimeGlobal = globalThis as typeof globalThis & { location?: { href?: string } };
+  return runtimeGlobal.location?.href;
+};
+
+const getRuntimeApiBaseUrl = () =>
+  toApiBaseUrlFromHost(getHostFromUrl(getMetroScriptUrl()))
+  ?? toApiBaseUrlFromHost(getHostFromUrl(getWebLocationUrl()))
+  ?? STATIC_FALLBACK_API_BASE_URL;
+
+const uniqueApiBaseUrls = (baseUrls: string[]) => {
+  const seen = new Set<string>();
+  return baseUrls
+    .map(normalizeApiBaseUrl)
+    .filter(Boolean)
+    .filter((baseUrl) => {
+      if (seen.has(baseUrl)) {
+        return false;
+      }
+      seen.add(baseUrl);
+      return true;
+    });
+};
+
+const buildApiBaseUrlCandidates = (primaryBaseUrl: string, runtimeBaseUrl: string) =>
+  uniqueApiBaseUrls([primaryBaseUrl, runtimeBaseUrl, ...LOCAL_API_BASE_URLS, STATIC_FALLBACK_API_BASE_URL]);
+
+const shouldReplaceWithRuntimeApiBaseUrl = (currentBaseUrl: string, runtimeBaseUrl: string) => {
+  const current = normalizeApiBaseUrl(currentBaseUrl);
+  const runtime = normalizeApiBaseUrl(runtimeBaseUrl);
+  return !current || (current !== runtime && (current === STATIC_FALLBACK_API_BASE_URL || TETHER_HOST_PATTERN.test(current)));
+};
 
 const ORANGE = '#f05a28';
 const INK = '#171411';
@@ -844,7 +905,8 @@ const filterMockRestaurants = (genre: string, area: string, budgetMin: string, b
 export default function App() {
   const [stage, setStage] = useState<AppStage>('splash');
   const [activeTab, setActiveTab] = useState<TabKey>('home');
-  const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_BASE_URL);
+  const runtimeApiBaseUrl = useMemo(getRuntimeApiBaseUrl, []);
+  const [apiBaseUrl, setApiBaseUrl] = useState(runtimeApiBaseUrl);
   const [area, setArea] = useState('現在地');
   const [genre, setGenre] = useState('ラーメン');
   const [budgetMin, setBudgetMin] = useState('1000');
@@ -866,11 +928,20 @@ export default function App() {
   const didAskLocation = useRef(false);
 
   useEffect(() => {
-    if (apiBaseUrl !== DEFAULT_BASE_URL && STALE_TETHER_HOST_PATTERN.test(apiBaseUrl)) {
-      setApiBaseUrl(DEFAULT_BASE_URL);
-      setMessage(`API URLを現在のPCに更新しました: ${DEFAULT_BASE_URL}`);
+    setApiBaseUrl((current) => shouldReplaceWithRuntimeApiBaseUrl(current, runtimeApiBaseUrl) ? runtimeApiBaseUrl : current);
+  }, [runtimeApiBaseUrl]);
+
+  const apiBaseUrlCandidates = useMemo(
+    () => buildApiBaseUrlCandidates(apiBaseUrl, runtimeApiBaseUrl),
+    [apiBaseUrl, runtimeApiBaseUrl],
+  );
+
+  const syncWorkingApiBaseUrl = useCallback(() => {
+    const workingBaseUrl = randishApi.getLastSuccessfulBaseUrl();
+    if (workingBaseUrl) {
+      setApiBaseUrl((current) => current === workingBaseUrl ? current : workingBaseUrl);
     }
-  }, [apiBaseUrl]);
+  }, []);
 
   useEffect(() => {
     Animated.parallel([
@@ -917,18 +988,19 @@ export default function App() {
   const loadRestaurants = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await randishApi.getRestaurants(apiBaseUrl, apiParams);
+      const data = await randishApi.getRestaurants(apiBaseUrlCandidates, apiParams);
+      syncWorkingApiBaseUrl();
       const normalized = data.map(normalizeRestaurant);
       setRestaurants(normalized);
       setMessage(normalized.length ? `${normalized.length}件から候補を整えました。` : 'この条件で見つかるお店がありませんでした。エリアやジャンルを変えてみてください。');
     } catch (error) {
       setRestaurants([]);
       const reason = error instanceof Error ? error.message : '通信エラー';
-      setMessage(`APIに接続できませんでした。接続先: ${apiBaseUrl} / ${reason}`);
+      setMessage(`APIに接続できませんでした。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrl, apiParams, area, budgetMax, budgetMin, genre]);
+  }, [apiBaseUrlCandidates, apiParams, area, budgetMax, budgetMin, genre, syncWorkingApiBaseUrl]);
 
   useEffect(() => {
     loadRestaurants();
@@ -1012,10 +1084,11 @@ export default function App() {
     runRandomAnimation();
 
     try {
-      const data = await randishApi.chooseRandom(apiBaseUrl, {
+      const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
         userId: APP_USER_ID,
         ...apiParams,
       });
+      syncWorkingApiBaseUrl();
       const normalized = normalizeRestaurant(data);
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
@@ -1024,11 +1097,11 @@ export default function App() {
     } catch (error) {
       setSelectedRestaurant(null);
       const reason = error instanceof Error ? error.message : '通信エラー';
-      setMessage(`APIから抽選できませんでした。接続先: ${apiBaseUrl} / ${reason}`);
+      setMessage(`APIから抽選できませんでした。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrl, apiParams, revealSelectedRestaurant, runRandomAnimation, visibleRestaurants]);
+  }, [apiBaseUrlCandidates, apiParams, revealSelectedRestaurant, runRandomAnimation, syncWorkingApiBaseUrl, visibleRestaurants]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
@@ -1037,9 +1110,10 @@ export default function App() {
     runRandomAnimation();
 
     try {
-      const data = await randishApi.chooseRandom(apiBaseUrl, {
+      const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
         userId: APP_USER_ID,
       });
+      syncWorkingApiBaseUrl();
       const normalized = normalizeRestaurant(data);
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
@@ -1048,11 +1122,11 @@ export default function App() {
     } catch (error) {
       setSelectedRestaurant(null);
       const reason = error instanceof Error ? error.message : '通信エラー';
-      setMessage(`全部ランダム抽選に失敗しました。接続先: ${apiBaseUrl} / ${reason}`);
+      setMessage(`全部ランダム抽選に失敗しました。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrl, revealSelectedRestaurant, runRandomAnimation]);
+  }, [apiBaseUrlCandidates, revealSelectedRestaurant, runRandomAnimation, syncWorkingApiBaseUrl]);
 
   const saveSelectedRestaurant = useCallback(async () => {
     if (!selectedRestaurant) {
@@ -1068,12 +1142,13 @@ export default function App() {
     });
 
     try {
-      await randishApi.addFavorite(apiBaseUrl, APP_USER_ID, selectedRestaurant.id);
+      await randishApi.addFavorite(apiBaseUrlCandidates, APP_USER_ID, selectedRestaurant.id);
+      syncWorkingApiBaseUrl();
       setMessage('保存しました。');
     } catch {
       setMessage('端末内に保存しました。API接続後はサーバー保存もできます。');
     }
-  }, [apiBaseUrl, selectedRestaurant]);
+  }, [apiBaseUrlCandidates, selectedRestaurant, syncWorkingApiBaseUrl]);
 
   const openMap = useCallback(() => {
     if (!selectedRestaurant) return;
