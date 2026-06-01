@@ -1,0 +1,64 @@
+package com.example.restaurantroulette.controller;
+
+import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
+import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
+import com.example.restaurantroulette.service.RandomRestaurantService;
+import com.example.restaurantroulette.service.RestaurantQueryService;
+import java.util.List;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@CrossOrigin
+@RestController
+@RequestMapping("/api/restaurants")
+public class RestaurantController {
+  private final RestaurantQueryService restaurantQueryService;
+  private final RandomRestaurantService randomRestaurantService;
+
+  public RestaurantController(RestaurantQueryService restaurantQueryService, RandomRestaurantService randomRestaurantService) {
+    this.restaurantQueryService = restaurantQueryService;
+    this.randomRestaurantService = randomRestaurantService;
+  }
+
+  @GetMapping
+  public List<RestaurantResponse> findAll(
+      @RequestParam(required = false) String area,
+      @RequestParam(required = false) String genre,
+      @RequestParam(required = false) Integer budgetMin,
+      @RequestParam(required = false) Integer budgetMax,
+      @RequestParam(required = false) Double latitude,
+      @RequestParam(required = false) Double longitude,
+      @RequestParam(required = false) Integer range) {
+    return restaurantQueryService.search(area, genre, budgetMin, budgetMax, latitude, longitude, range);
+  }
+
+  @GetMapping("/random")
+  public RestaurantResponse chooseRandom(
+      @RequestParam(required = false) String userId,
+      @RequestParam(required = false) String area,
+      @RequestParam(required = false) String genre,
+      @RequestParam(required = false) Integer budgetMin,
+      @RequestParam(required = false) Integer budgetMax,
+      @RequestParam(required = false) Double latitude,
+      @RequestParam(required = false) Double longitude,
+      @RequestParam(required = false) Integer range) {
+    return randomRestaurantService.choose(new RandomRestaurantRequest(
+        userId == null || userId.isBlank() ? "guest" : userId,
+        area,
+        genre,
+        budgetMin,
+        budgetMax,
+        latitude,
+        longitude,
+        range));
+  }
+
+  @GetMapping("/{id}")
+  public RestaurantResponse findById(@PathVariable String id) {
+    return restaurantQueryService.findById(id);
+  }
+}

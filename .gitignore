@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Expo / React Native
+.expo/
+**/.expo/
+dist/
+build/
+
+# Java / Maven
+target/
+**/target/
+
+# Local databases and runtime data
+data/
+**/data/
+*.db
+*.mv.db
+*.trace.db
+
+# Secrets and local-only config
+.env
+.env.*
+!.env.example
+
+# Logs and OS/editor files
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Machine conflict/back-up files
+*-LAPTOP-*.tsx
+*-LAPTOP-*.json
+*-backup-*/
+*audit*.png
+*preview*.png
+
+# Legacy duplicate snapshot kept locally, but not part of the app repo
+mobile/server/
+server/App.tsx
+server/package.json
+server/package-lock.json

@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "RANDISH",
+    "slug": "randish",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/randish-logo-square1.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/randish-logo-square1.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f8fafc"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/randish-logo-square1.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
