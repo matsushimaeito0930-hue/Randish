@@ -21,6 +21,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 type AppStage = 'splash' | 'login' | 'main';
 type TabKey = 'home' | 'search' | 'random' | 'save' | 'analytics';
+type DrawAnimationKey = 'roulette' | 'lottery' | 'shuffle' | 'radar';
 
 type Restaurant = ApiRestaurant & {
   priceRange?: string;
@@ -51,6 +52,7 @@ type AreaPreset = {
   group: string;
   latitude: number;
   longitude: number;
+  useCoordinates?: boolean;
 };
 
 type PrefectureRegion = {
@@ -66,9 +68,20 @@ type RegionGroup = {
   prefectures: string[];
 };
 
+type DrawAnimationProfile = {
+  key: DrawAnimationKey;
+  idleStatus: string;
+  activeStatus: string;
+  hint: string;
+  accent: string;
+  loadingMessage: string;
+  doneMessage: string;
+  icon: keyof typeof Ionicons.glyphMap;
+};
+
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
-const STATIC_FALLBACK_API_BASE_URL = 'http://10.230.36.60:8080';
+const STATIC_FALLBACK_API_BASE_URL = 'http://10.230.36.34:8080';
 const LOCAL_API_BASE_URLS = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://10.0.2.2:8080'];
 const TETHER_HOST_PATTERN = /^http:\/\/10\.230\.36\.\d+(?::8080)?$/;
 const RANDISH_LOGO = require('./assets/randish-logo-square1.png');
@@ -137,6 +150,56 @@ const INK = '#171411';
 const PAPER = '#ffffff';
 const CARD = '#ffffff';
 const LINE = '#ebe2d4';
+
+const DRAW_ANIMATION_KEYS: DrawAnimationKey[] = ['roulette', 'lottery', 'shuffle', 'radar'];
+
+const DRAW_ANIMATION_PROFILES: Record<DrawAnimationKey, DrawAnimationProfile> = {
+  roulette: {
+    key: 'roulette',
+    idleStatus: 'RANDISH ROULETTE',
+    activeStatus: 'ルーレット回転中',
+    hint: '候補を回して',
+    accent: '一店に決定',
+    loadingMessage: '候補を回しています。',
+    doneMessage: '今日の一店が決まりました。',
+    icon: 'refresh',
+  },
+  lottery: {
+    key: 'lottery',
+    idleStatus: 'RANDISH KUJI',
+    activeStatus: 'くじを引いています',
+    hint: 'くじを一枚',
+    accent: 'そっと引く',
+    loadingMessage: 'くじを混ぜて、一枚だけ引いています。',
+    doneMessage: 'くじが開きました。',
+    icon: 'ticket-outline',
+  },
+  shuffle: {
+    key: 'shuffle',
+    idleStatus: 'CARD SHUFFLE',
+    activeStatus: '候補を切っています',
+    hint: 'カードを切って',
+    accent: '直感で選ぶ',
+    loadingMessage: '候補カードを切っています。',
+    doneMessage: 'カードが一枚めくれました。',
+    icon: 'albums-outline',
+  },
+  radar: {
+    key: 'radar',
+    idleStatus: 'NEARBY SCAN',
+    activeStatus: '近くをスキャン中',
+    hint: '近くの気配を',
+    accent: '拾い上げる',
+    loadingMessage: '近くの候補をスキャンしています。',
+    doneMessage: '近くの候補から一店を拾いました。',
+    icon: 'radio-outline',
+  },
+};
+
+const pickNextDrawAnimation = (current: DrawAnimationKey) => {
+  const candidates = DRAW_ANIMATION_KEYS.filter((key) => key !== current);
+  return candidates[Math.floor(Math.random() * candidates.length)] ?? current;
+};
 
 const DISTANCE_OPTIONS = ['500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
 
@@ -589,6 +652,66 @@ const AREA_PRESETS: AreaPreset[] = [
   { label: '浦添', group: '沖縄県 / 浦添市', latitude: 26.2458, longitude: 127.7219 },
 ];
 
+const SUPPLEMENTAL_AREA_NAMES: Record<string, string[]> = {
+  北海道: ['北見市', '室蘭市', '苫小牧市', '江別市', '千歳市', '岩見沢市', '網走市', '稚内市', '名寄市', '根室市', '富良野市', '登別市', '北斗市'],
+  青森県: ['五所川原市', '十和田市', 'むつ市', '三沢市', '黒石市', 'つがる市', '平川市', '七戸町', '藤崎町', '鰺ヶ沢町'],
+  岩手県: ['宮古市', '大船渡市', '北上市', '奥州市', '久慈市', '遠野市', '釜石市', '二戸市', '八幡平市', '滝沢市', '紫波町'],
+  宮城県: ['塩竈市', '気仙沼市', '白石市', '名取市', '角田市', '多賀城市', '岩沼市', '登米市', '栗原市', '東松島市', '大崎市', '富谷市'],
+  秋田県: ['能代市', '男鹿市', '湯沢市', '由利本荘市', '潟上市', '大仙市', '北秋田市', 'にかほ市', '仙北市', '鹿角市', '羽後町'],
+  山形県: ['鶴岡市', '新庄市', '寒河江市', '上山市', '村山市', '長井市', '天童市', '東根市', '尾花沢市', '南陽市', '河北町'],
+  福島県: ['会津若松市', '白河市', '須賀川市', '喜多方市', '相馬市', '二本松市', '田村市', '南相馬市', '伊達市', '本宮市', '猪苗代町'],
+  茨城県: ['日立市', '古河市', '石岡市', '結城市', '龍ケ崎市', '下妻市', '常総市', '常陸太田市', '笠間市', '取手市', '牛久市', '鹿嶋市', '守谷市', 'ひたちなか市'],
+  栃木県: ['足利市', '栃木市', '佐野市', '鹿沼市', '日光市', '真岡市', '大田原市', '矢板市', 'さくら市', '那須烏山市', '下野市', '壬生町'],
+  群馬県: ['桐生市', '伊勢崎市', '沼田市', '館林市', '渋川市', '藤岡市', '富岡市', '安中市', 'みどり市', '草津町', '中之条町'],
+  埼玉県: ['熊谷市', '川口市', '行田市', '秩父市', '飯能市', '加須市', '本庄市', '春日部市', '狭山市', '深谷市', '上尾市', '草加市', '越谷市', '入間市', '朝霞市'],
+  千葉県: ['銚子市', '市川市', '館山市', '木更津市', '野田市', '茂原市', '成田市', '佐倉市', '東金市', '旭市', '習志野市', '市原市', '流山市', '八千代市', '鴨川市'],
+  東京都: ['八王子市', '立川市', '武蔵野市', '三鷹市', '青梅市', '調布市', '町田市', '小金井市', '日野市', '国分寺市', '国立市', '福生市', '狛江市', '東村山市', '多摩市'],
+  神奈川県: ['横須賀市', '平塚市', '小田原市', '茅ヶ崎市', '逗子市', '相模原市', '三浦市', '秦野市', '厚木市', '大和市', '伊勢原市', '海老名市', '座間市'],
+  新潟県: ['三条市', '柏崎市', '新発田市', '小千谷市', '加茂市', '十日町市', '見附市', '村上市', '燕市', '糸魚川市', '妙高市', '佐渡市', '南魚沼市'],
+  富山県: ['氷見市', '滑川市', '黒部市', '砺波市', '小矢部市', '南砺市', '射水市', '入善町', '立山町', '上市町'],
+  石川県: ['七尾市', '輪島市', '珠洲市', '加賀市', '羽咋市', 'かほく市', '白山市', '能美市', '野々市市', '津幡町', '志賀町'],
+  福井県: ['小浜市', '大野市', '勝山市', 'あわら市', '越前市', '坂井市', '永平寺町', '越前町', '若狭町', '高浜町'],
+  山梨県: ['山梨市', '大月市', '韮崎市', '南アルプス市', '北杜市', '甲斐市', '笛吹市', '上野原市', '甲州市', '中央市', '富士河口湖町'],
+  長野県: ['岡谷市', '諏訪市', '飯田市', '伊那市', '駒ヶ根市', '中野市', '大町市', '飯山市', '茅野市', '塩尻市', '佐久市', '千曲市', '安曇野市', '軽井沢町'],
+  岐阜県: ['多治見市', '関市', '中津川市', '美濃市', '瑞浪市', '羽島市', '恵那市', '美濃加茂市', '土岐市', '各務原市', '可児市', '郡上市', '下呂市'],
+  静岡県: ['熱海市', '三島市', '富士宮市', '伊東市', '島田市', '富士市', '磐田市', '焼津市', '掛川市', '藤枝市', '御殿場市', '袋井市', '下田市', '伊豆市', '菊川市'],
+  愛知県: ['一宮市', '瀬戸市', '半田市', '春日井市', '豊川市', '碧南市', '刈谷市', '豊田市', '安城市', '西尾市', '蒲郡市', '犬山市', '常滑市', '小牧市', '稲沢市'],
+  三重県: ['亀山市', '熊野市', 'いなべ市', '志摩市', '尾鷲市', '菰野町', '多気町', '明和町', '玉城町', '紀北町'],
+  滋賀県: ['甲賀市', '野洲市', '湖南市', '高島市', '東近江市', '米原市', '日野町', '愛荘町', '多賀町'],
+  京都府: ['亀岡市', '城陽市', '向日市', '八幡市', '京田辺市', '京丹後市', '南丹市', '木津川市', '久御山町', '精華町'],
+  大阪府: ['箕面市', '摂津市', '大東市', '四條畷市', '交野市', '富田林市', '河内長野市', '和泉市', '貝塚市', '泉大津市', '羽曳野市', '藤井寺市', '松原市', '高石市', '泉南市', '阪南市'],
+  兵庫県: ['三田市', '丹波篠山市', '丹波市', '洲本市', '淡路市', '南あわじ市', '赤穂市', '相生市', '西脇市', '小野市', '加西市', '宍粟市', '養父市', '朝来市', 'たつの市'],
+  奈良県: ['桜井市', '五條市', '御所市', '香芝市', '葛城市', '宇陀市', '斑鳩町', '田原本町', '広陵町', '吉野町', '大淀町'],
+  和歌山県: ['有田市', '新宮市', '紀の川市', 'かつらぎ町', '湯浅町', '有田川町', '美浜町', 'みなべ町', '串本町', '那智勝浦町'],
+  鳥取県: ['倉吉市', '境港市', '岩美町', '若桜町', '智頭町', '八頭町', '三朝町', '琴浦町', '北栄町', '大山町'],
+  島根県: ['浜田市', '益田市', '大田市', '安来市', '江津市', '雲南市', '奥出雲町', '飯南町', '川本町', '隠岐の島町'],
+  岡山県: ['津山市', '玉野市', '笠岡市', '井原市', '総社市', '高梁市', '新見市', '備前市', '瀬戸内市', '赤磐市', '真庭市', '美作市'],
+  広島県: ['呉市', '竹原市', '三原市', '尾道市', '三次市', '庄原市', '大竹市', '東広島市', '廿日市市', '安芸高田市', '江田島市'],
+  山口県: ['宇部市', '萩市', '防府市', '下松市', '岩国市', '光市', '長門市', '柳井市', '美祢市', '周南市', '山陽小野田市', '周防大島町'],
+  徳島県: ['小松島市', '阿南市', '吉野川市', '阿波市', '美馬市', '三好市', '石井町', '藍住町', '松茂町', '北島町', '海陽町'],
+  香川県: ['坂出市', '善通寺市', '観音寺市', 'さぬき市', '東かがわ市', '三豊市', '土庄町', '小豆島町', '宇多津町', '琴平町', '多度津町'],
+  愛媛県: ['宇和島市', '八幡浜市', '新居浜市', '西条市', '大洲市', '伊予市', '四国中央市', '西予市', '東温市', '松前町', '砥部町', '内子町'],
+  高知県: ['室戸市', '安芸市', '南国市', '土佐市', '須崎市', '宿毛市', '土佐清水市', '四万十市', '香南市', '香美市', 'いの町', '佐川町'],
+  福岡県: ['大牟田市', '直方市', '飯塚市', '柳川市', '八女市', '筑後市', '大川市', '行橋市', '豊前市', '中間市', '小郡市', '筑紫野市', '春日市', '宗像市', '太宰府市', '糸島市'],
+  佐賀県: ['鳥栖市', '多久市', '伊万里市', '武雄市', '鹿島市', '小城市', '嬉野市', '神埼市', '吉野ヶ里町', '有田町', '白石町'],
+  長崎県: ['島原市', '諫早市', '大村市', '平戸市', '松浦市', '対馬市', '壱岐市', '五島市', '西海市', '雲仙市', '南島原市', '波佐見町'],
+  熊本県: ['人吉市', '荒尾市', '水俣市', '玉名市', '山鹿市', '菊池市', '宇土市', '上天草市', '宇城市', '阿蘇市', '天草市', '合志市', '菊陽町'],
+  大分県: ['中津市', '日田市', '佐伯市', '臼杵市', '津久見市', '竹田市', '豊後高田市', '杵築市', '宇佐市', '豊後大野市', '由布市', '国東市'],
+  宮崎県: ['延岡市', '日南市', '小林市', '日向市', '串間市', '西都市', 'えびの市', '三股町', '高鍋町', '新富町', '高千穂町'],
+  鹿児島県: ['鹿屋市', '枕崎市', '阿久根市', '出水市', '指宿市', '西之表市', '垂水市', '薩摩川内市', '日置市', '曽於市', 'いちき串木野市', '南さつま市', '奄美市'],
+  沖縄県: ['宜野湾市', '名護市', '糸満市', '豊見城市', 'うるま市', '宮古島市', '石垣市', '南城市', '北谷町', '読谷村', '恩納村', '本部町', '与那原町'],
+};
+
+const SUPPLEMENTAL_AREA_PRESETS: AreaPreset[] = Object.entries(SUPPLEMENTAL_AREA_NAMES).flatMap(([prefecture, labels]) =>
+  labels.map((label) => ({
+    label,
+    group: `${prefecture} / ${label}`,
+    latitude: 0,
+    longitude: 0,
+    useCoordinates: false,
+  })),
+);
+
 const FOOTER_ITEMS: FooterItem[] = [
   { key: 'home', label: 'ホーム', icon: 'home' },
   { key: 'search', label: '条件', icon: 'search' },
@@ -749,6 +872,8 @@ const uniqueAreaPresets = (items: AreaPreset[]) => {
   });
 };
 
+const ALL_AREA_PRESETS = uniqueAreaPresets([...AREA_PRESETS, ...SUPPLEMENTAL_AREA_PRESETS]);
+
 const getPrefectureFromText = (value?: string | null) => {
   if (!value) {
     return undefined;
@@ -775,11 +900,11 @@ const formatLocationStatus = (prefecture: string | undefined, areaLabel: string)
   return `${areaLabel} 周辺から探します`;
 };
 
-const getAreaPreset = (area: string) => AREA_PRESETS.find((preset) => preset.label === area);
+const getAreaPreset = (area: string) => ALL_AREA_PRESETS.find((preset) => preset.label === area);
 
 const getRestaurantAreaLabel = (restaurant: Restaurant) => {
   const source = `${restaurant.area} ${restaurant.address} ${restaurant.name}`;
-  const matchedPreset = AREA_PRESETS.find((preset) => preset.label !== '現在地' && source.includes(preset.label));
+  const matchedPreset = ALL_AREA_PRESETS.find((preset) => preset.label !== '現在地' && source.includes(preset.label));
   if (matchedPreset) {
     return matchedPreset.label;
   }
@@ -800,12 +925,16 @@ const buildAreaSearchKeyword = (value: string) => {
     return undefined;
   }
 
-  const preset = AREA_PRESETS.find((item) => item.label === cleanArea);
+  const preset = ALL_AREA_PRESETS.find((item) => item.label === cleanArea);
   if (!preset) {
     return cleanArea;
   }
 
   // API検索では都道府県と市区町村も添えて、同名エリアの誤爆を減らす。
+  if (preset.useCoordinates === false) {
+    return `${getPresetPrefecture(preset)} ${preset.label}`;
+  }
+
   const group = preset.group.replace(/\s*\/\s*/g, ' ');
   return `${group} ${preset.label}`;
 };
@@ -902,8 +1031,85 @@ const filterMockRestaurants = (genre: string, area: string, budgetMin: string, b
   return createAreaMockRestaurants(area, genre).filter((restaurant) => restaurant.budgetMax >= min && restaurant.budgetMin <= max);
 };
 
+const includesAny = (source: string, keywords: string[]) => keywords.some((keyword) => source.includes(keyword));
+
+const restaurantMatchesSelectedGenre = (restaurant: Restaurant, selectedGenre: string) => {
+  const genre = selectedGenre.trim();
+  if (!genre || genre === 'すべて') {
+    return true;
+  }
+
+  const source = `${restaurant.genre ?? ''} ${restaurant.name ?? ''} ${restaurant.note ?? ''}`;
+  switch (genre) {
+    case '定食':
+      return !includesAny(source, ['韓国', '焼肉', 'カラオケ', 'バー'])
+        && includesAny(source, ['定食', '食堂', '和食', 'ごはん', '御膳', '膳']);
+    case '居酒屋':
+      return includesAny(source, ['居酒屋', '酒場', '炉端', 'バル']);
+    case '韓国料理':
+      return includesAny(source, ['韓国', 'サムギョプサル', 'チーズタッカルビ', '冷麺']);
+    case 'ラーメン':
+      return includesAny(source, ['ラーメン', 'らーめん', 'つけ麺', '麺']);
+    case '焼肉':
+      return includesAny(source, ['焼肉', 'ホルモン', 'ジンギスカン']);
+    case 'カレー':
+      return includesAny(source, ['カレー', 'スパイス']);
+    case 'うどん':
+      return includesAny(source, ['うどん']);
+    case 'そば':
+      return includesAny(source, ['そば', '蕎麦']);
+    case 'たこ焼き':
+      return includesAny(source, ['たこ焼き']);
+    case 'お好み焼き':
+      return includesAny(source, ['お好み焼き', 'もんじゃ']);
+    case '焼き鳥':
+      return includesAny(source, ['焼き鳥', '焼鳥']);
+    case 'ピザ':
+      return includesAny(source, ['ピザ', 'ピッツァ']);
+    case 'ハンバーガー':
+      return includesAny(source, ['ハンバーガー', 'バーガー']);
+    case '串カツ':
+      return includesAny(source, ['串カツ', '串かつ']);
+    case '餃子':
+      return includesAny(source, ['餃子']);
+    case '和食':
+      return includesAny(source, ['和食', '日本料理', '定食', '食堂', '懐石', '割烹']);
+    case '洋食':
+      return includesAny(source, ['洋食', 'ステーキ', 'ハンバーグ', 'オムライス']);
+    case 'イタリアン':
+      return includesAny(source, ['イタリアン', 'パスタ', 'ピザ', 'ピッツァ', 'トラットリア']);
+    case '中華':
+      return includesAny(source, ['中華', '中国料理', '餃子', '四川']);
+    case '寿司':
+      return includesAny(source, ['寿司', '鮨', 'すし']);
+    case '海鮮':
+      return includesAny(source, ['海鮮', '魚', '刺身', '浜焼き']);
+    case '肉料理':
+      return includesAny(source, ['肉', '焼肉', 'ステーキ', 'ハンバーグ', 'ホルモン']);
+    case 'サラダ・野菜':
+      return includesAny(source, ['サラダ', '野菜', 'ベジ']);
+    case 'スープ':
+      return includesAny(source, ['スープ', '汁', '鍋']);
+    case 'スイーツ':
+      return includesAny(source, ['スイーツ', 'デザート', 'ケーキ', 'パフェ', '甘味']);
+    case 'カフェ':
+      return includesAny(source, ['カフェ', '喫茶']);
+    case 'パン':
+      return includesAny(source, ['パン', 'ベーカリー']);
+    case 'ファストフード':
+      return includesAny(source, ['ファストフード', 'ハンバーガー', 'バーガー', 'サンド', 'フライド']);
+    case 'お酒・バー':
+      return includesAny(source, ['バー', 'ダイニングバー', '居酒屋', 'ワイン', 'ビール', '酒']);
+    case '各国料理':
+      return includesAny(source, ['各国料理', '韓国', 'アジア', 'エスニック', 'タイ', 'インド', 'メキシコ', 'スペイン', 'ベトナム']);
+    default:
+      return true;
+  }
+};
+
 export default function App() {
   const [stage, setStage] = useState<AppStage>('splash');
+  const [userId, setUserId] = useState(APP_USER_ID);
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const runtimeApiBaseUrl = useMemo(getRuntimeApiBaseUrl, []);
   const [apiBaseUrl, setApiBaseUrl] = useState(runtimeApiBaseUrl);
@@ -920,6 +1126,7 @@ export default function App() {
   const [locationStatus, setLocationStatus] = useState('現在地を確認できます');
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('条件を選んで、今日の一店を決めましょう。');
+  const [drawAnimationKey, setDrawAnimationKey] = useState<DrawAnimationKey>('roulette');
 
   const logoScale = useRef(new Animated.Value(0.88)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
@@ -965,10 +1172,14 @@ export default function App() {
   const apiParams = useMemo(
     () => {
       const selectedPreset = getAreaPreset(area);
+      const usePresetCoordinates = selectedPreset != null && selectedPreset.label !== '現在地' && selectedPreset.useCoordinates !== false;
+      const useCurrentLocationCoordinates = !selectedPreset && (!area.trim() || area === '現在地');
       const coordinateSource =
-        selectedPreset && selectedPreset.label !== '現在地'
+        usePresetCoordinates
           ? { latitude: selectedPreset.latitude, longitude: selectedPreset.longitude }
-          : userLocation;
+          : useCurrentLocationCoordinates
+            ? userLocation
+            : null;
 
       return {
         area: buildAreaSearchKeyword(area),
@@ -990,9 +1201,10 @@ export default function App() {
     try {
       const data = await randishApi.getRestaurants(apiBaseUrlCandidates, apiParams);
       syncWorkingApiBaseUrl();
-      const normalized = data.map(normalizeRestaurant);
+      const normalized = data.map(normalizeRestaurant).filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
       setRestaurants(normalized);
-      setMessage(normalized.length ? `${normalized.length}件から候補を整えました。` : 'この条件で見つかるお店がありませんでした。エリアやジャンルを変えてみてください。');
+      const genreLabel = genre === 'すべて' ? 'すべてのジャンル' : genre;
+      setMessage(normalized.length ? `${genreLabel}で${normalized.length}件から候補を整えました。` : `${genreLabel}に合うお店が見つかりませんでした。エリアやジャンルを変えてみてください。`);
     } catch (error) {
       setRestaurants([]);
       const reason = error instanceof Error ? error.message : '通信エラー';
@@ -1067,6 +1279,15 @@ export default function App() {
     }).start();
   }, [resultRevealValue, spinValue]);
 
+  const startDrawAnimation = useCallback((isEverythingRandom = false) => {
+    const nextAnimationKey = pickNextDrawAnimation(drawAnimationKey);
+    const nextAnimation = DRAW_ANIMATION_PROFILES[nextAnimationKey];
+    setDrawAnimationKey(nextAnimationKey);
+    setMessage(isEverythingRandom ? `ぜんぶおまかせ。${nextAnimation.loadingMessage}` : nextAnimation.loadingMessage);
+    runRandomAnimation();
+    return nextAnimation;
+  }, [drawAnimationKey, runRandomAnimation]);
+
   const revealSelectedRestaurant = useCallback(() => {
     resultRevealValue.setValue(0);
     Animated.spring(resultRevealValue, {
@@ -1080,20 +1301,28 @@ export default function App() {
   const chooseRandomRestaurant = useCallback(async () => {
     setActiveTab('random');
     setIsLoading(true);
-    setMessage('候補カードをシャッフルしています。');
-    runRandomAnimation();
+    const drawAnimation = startDrawAnimation();
 
     try {
       const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
-        userId: APP_USER_ID,
+        userId,
         ...apiParams,
       });
       syncWorkingApiBaseUrl();
-      const normalized = normalizeRestaurant(data);
+      let normalized = normalizeRestaurant(data);
+      if (!restaurantMatchesSelectedGenre(normalized, genre)) {
+        const alternatives = (await randishApi.getRestaurants(apiBaseUrlCandidates, apiParams))
+          .map(normalizeRestaurant)
+          .filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
+        if (!alternatives.length) {
+          throw new Error(`${genre}に合う候補が見つかりませんでした。`);
+        }
+        normalized = alternatives[Math.floor(Math.random() * alternatives.length)];
+      }
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
-      setMessage('今日の一店が決まりました。');
-      setTimeout(revealSelectedRestaurant, 180);
+      setMessage(drawAnimation.doneMessage);
+      setTimeout(revealSelectedRestaurant, 980);
     } catch (error) {
       setSelectedRestaurant(null);
       const reason = error instanceof Error ? error.message : '通信エラー';
@@ -1101,24 +1330,23 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, apiParams, revealSelectedRestaurant, runRandomAnimation, syncWorkingApiBaseUrl, visibleRestaurants]);
+  }, [apiBaseUrlCandidates, apiParams, genre, revealSelectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId, visibleRestaurants]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
     setIsLoading(true);
-    setMessage('エリアもジャンルもおまかせでシャッフルしています。');
-    runRandomAnimation();
+    const drawAnimation = startDrawAnimation(true);
 
     try {
       const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
-        userId: APP_USER_ID,
+        userId,
       });
       syncWorkingApiBaseUrl();
       const normalized = normalizeRestaurant(data);
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
-      setMessage('ぜんぶおまかせで今日の一店が決まりました。');
-      setTimeout(revealSelectedRestaurant, 180);
+      setMessage(`ぜんぶおまかせ。${drawAnimation.doneMessage}`);
+      setTimeout(revealSelectedRestaurant, 980);
     } catch (error) {
       setSelectedRestaurant(null);
       const reason = error instanceof Error ? error.message : '通信エラー';
@@ -1126,7 +1354,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, revealSelectedRestaurant, runRandomAnimation, syncWorkingApiBaseUrl]);
+  }, [apiBaseUrlCandidates, revealSelectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
 
   const saveSelectedRestaurant = useCallback(async () => {
     if (!selectedRestaurant) {
@@ -1142,13 +1370,13 @@ export default function App() {
     });
 
     try {
-      await randishApi.addFavorite(apiBaseUrlCandidates, APP_USER_ID, selectedRestaurant.id);
+      await randishApi.addFavorite(apiBaseUrlCandidates, userId, selectedRestaurant.id);
       syncWorkingApiBaseUrl();
       setMessage('保存しました。');
     } catch {
       setMessage('端末内に保存しました。API接続後はサーバー保存もできます。');
     }
-  }, [apiBaseUrlCandidates, selectedRestaurant, syncWorkingApiBaseUrl]);
+  }, [apiBaseUrlCandidates, selectedRestaurant, syncWorkingApiBaseUrl, userId]);
 
   const openMap = useCallback(() => {
     if (!selectedRestaurant) return;
@@ -1166,11 +1394,15 @@ export default function App() {
   };
 
   const updateArea = (value: string) => {
-    const preset = AREA_PRESETS.find((item) => item.label === value && item.label !== '現在地');
-    if (preset) {
+    const preset = ALL_AREA_PRESETS.find((item) => item.label === value && item.label !== '現在地');
+    if (preset?.useCoordinates === false) {
+      setUserLocation(null);
+      setLocationStatus(`${preset.group} / ${preset.label} 周辺から探します`);
+    } else if (preset) {
       setUserLocation({ latitude: preset.latitude, longitude: preset.longitude, label: preset.label });
       setLocationStatus(`${preset.group} / ${preset.label} 周辺から探します`);
     } else if (isPrefectureName(value)) {
+      setUserLocation(null);
       setLocationStatus(formatLocationStatus(value, '全域'));
     }
     setArea(value);
@@ -1191,6 +1423,11 @@ export default function App() {
     setActiveTab('random');
   };
 
+  const enterMain = useCallback((nextUserId = APP_USER_ID) => {
+    setUserId(nextUserId);
+    setStage('main');
+  }, []);
+
   if (stage === 'splash') {
     return (
       <SafeAreaView style={styles.splashScreen}>
@@ -1206,7 +1443,13 @@ export default function App() {
   }
 
   if (stage === 'login') {
-    return <LoginScreen onStart={() => setStage('main')} />;
+    return (
+      <LoginScreen
+        apiBaseUrlCandidates={apiBaseUrlCandidates}
+        onApiConnected={syncWorkingApiBaseUrl}
+        onStart={enterMain}
+      />
+    );
   }
 
   return (
@@ -1272,6 +1515,7 @@ export default function App() {
             selectedRestaurant={selectedRestaurant}
             userLocation={userLocation}
             history={randomHistory}
+            drawAnimationKey={drawAnimationKey}
             spinValue={spinValue}
             resultRevealValue={resultRevealValue}
             onRandomPress={chooseRandomRestaurant}
@@ -1320,16 +1564,60 @@ function AppHeader({
   );
 }
 
-function LoginScreen({ onStart }: { onStart: () => void }) {
+function LoginScreen({
+  apiBaseUrlCandidates,
+  onApiConnected,
+  onStart,
+}: {
+  apiBaseUrlCandidates: string[];
+  onApiConnected: () => void;
+  onStart: (userId?: string) => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [authNotice, setAuthNotice] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
+    if (isSubmitting) {
+      return;
+    }
     if (!acceptedTerms) {
       setAuthNotice('利用規約とプライバシーポリシーへの同意が必要です。');
       return;
     }
-    onStart();
+    if (!email.trim() || !displayName.trim()) {
+      setAuthNotice('メールアドレスとニックネームを入力してください。');
+      return;
+    }
+    if (password.length < 8) {
+      setAuthNotice('パスワードは8文字以上で入力してください。');
+      return;
+    }
+    if (password !== passwordConfirm) {
+      setAuthNotice('確認用パスワードが一致していません。');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setAuthNotice('');
+    try {
+      const user = await randishApi.registerUser(apiBaseUrlCandidates, {
+        email,
+        password,
+        displayName,
+      });
+      onApiConnected();
+      onStart(user.id);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : '登録に失敗しました。';
+      setAuthNotice(`登録できませんでした。${reason}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSocialPress = (provider: string) => {
@@ -1357,6 +1645,8 @@ function LoginScreen({ onStart }: { onStart: () => void }) {
             keyboardType="email-address"
             autoCapitalize="none"
             textContentType="emailAddress"
+            value={email}
+            onChangeText={setEmail}
           />
 
           <RegisterLabel text="パスワード" />
@@ -1366,6 +1656,8 @@ function LoginScreen({ onStart }: { onStart: () => void }) {
             placeholderTextColor="#aaa"
             secureTextEntry
             textContentType="newPassword"
+            value={password}
+            onChangeText={setPassword}
           />
 
           <RegisterLabel text="パスワード（確認）" />
@@ -1375,6 +1667,8 @@ function LoginScreen({ onStart }: { onStart: () => void }) {
             placeholderTextColor="#aaa"
             secureTextEntry
             textContentType="newPassword"
+            value={passwordConfirm}
+            onChangeText={setPasswordConfirm}
           />
 
           <RegisterLabel text="ニックネーム" />
@@ -1382,6 +1676,8 @@ function LoginScreen({ onStart }: { onStart: () => void }) {
             style={styles.registerInput}
             placeholder="例）ランディッシュ太郎"
             placeholderTextColor="#aaa"
+            value={displayName}
+            onChangeText={setDisplayName}
           />
 
           <Pressable style={styles.registerCheckRow} onPress={() => setAcceptedTerms((value) => !value)}>
@@ -1395,9 +1691,23 @@ function LoginScreen({ onStart }: { onStart: () => void }) {
 
           {!!authNotice && <Text style={styles.registerNotice}>{authNotice}</Text>}
 
-          <Pressable style={styles.registerMainButton} onPress={handleRegister}>
-            <Text style={styles.registerMainButtonText}>登録する</Text>
+          <Pressable
+            style={[styles.registerMainButton, isSubmitting && styles.registerButtonDisabled]}
+            onPress={handleRegister}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={styles.registerMainButtonText}>登録する</Text>
+            )}
           </Pressable>
+
+          <Pressable style={styles.registerGuestButton} onPress={() => onStart()}>
+            <Ionicons name="person-outline" size={18} color="#ef552e" />
+            <Text style={styles.registerGuestButtonText}>ゲストではじめる</Text>
+          </Pressable>
+          <Text style={styles.registerGuestNote}>登録なしでRANDISHを試せます</Text>
         </View>
 
         <Text style={styles.registerOr}>または</Text>
@@ -1406,7 +1716,7 @@ function LoginScreen({ onStart }: { onStart: () => void }) {
         <RegisterSocialButton text="Appleで登録" onPress={() => handleSocialPress('Apple')} />
         <RegisterSocialButton text="LINEで登録" onPress={() => handleSocialPress('LINE')} />
 
-        <Pressable style={styles.registerLoginBox} onPress={onStart}>
+        <Pressable style={styles.registerLoginBox} onPress={() => onStart()}>
           <Text style={styles.registerLoginText}>すでにアカウントをお持ちですか？</Text>
           <Text style={styles.registerLoginLink}>ログイン</Text>
         </Pressable>
@@ -1486,7 +1796,7 @@ function HomeTab({
             genre={genre}
             budgetMin={budgetMin}
             distance={distance}
-            presets={AREA_PRESETS}
+            presets={ALL_AREA_PRESETS}
             history={history}
             locationStatus={locationStatus}
             onAreaChange={onAreaChange}
@@ -1550,10 +1860,16 @@ function HomeLocationPanel({
   const [query, setQuery] = useState('');
   const [showAllFavorites, setShowAllFavorites] = useState(false);
   const selectedPreset = presets.find((preset) => preset.label === area);
-  const selectedPrefecture = getPrefectureFromText(area) ?? (selectedPreset ? getPresetPrefecture(selectedPreset) : undefined) ?? getPrefectureFromText(locationStatus) ?? '北海道';
+  const areaPrefecture = getPrefectureFromText(area) ?? (selectedPreset ? getPresetPrefecture(selectedPreset) : undefined);
+  const [selectedHomePrefecture, setSelectedHomePrefecture] = useState<string | null>(
+    areaPrefecture && area !== '現在地' ? areaPrefecture : null,
+  );
+  const selectedPrefecture = selectedHomePrefecture;
   const selectedRegion = getRegionGroupForPrefecture(selectedPrefecture) ?? AREA_REGION_GROUPS[0].label;
   const [expandedRegion, setExpandedRegion] = useState<string | null>(selectedRegion);
-  const prefecturePresets = uniqueAreaPresets(presets.filter((preset) => getPresetPrefecture(preset) === selectedPrefecture && preset.label !== '現在地'));
+  const prefecturePresets = selectedPrefecture
+    ? uniqueAreaPresets(presets.filter((preset) => getPresetPrefecture(preset) === selectedPrefecture && preset.label !== '現在地' && preset.label !== selectedPrefecture))
+    : [];
   const prefecturePool = prefecturePresets.map((preset) => preset.label);
   const historyAreas = history
     .map(getRestaurantAreaLabel)
@@ -1562,11 +1878,12 @@ function HomeLocationPanel({
       const preset = presets.find((item) => item.label === label);
       return preset ? getPresetPrefecture(preset) === selectedPrefecture : false;
     });
-  const currentAreaLabel = selectedPreset && getPresetPrefecture(selectedPreset) === selectedPrefecture ? area : undefined;
-  const favoriteAreas = Array.from(new Set([...(currentAreaLabel ? [currentAreaLabel] : []), ...historyAreas, ...prefecturePool, selectedPrefecture]))
+  const currentAreaLabel = selectedPreset && selectedPrefecture && getPresetPrefecture(selectedPreset) === selectedPrefecture ? area : undefined;
+  const allFavoriteAreas = Array.from(new Set([...(currentAreaLabel ? [currentAreaLabel] : []), ...historyAreas, ...prefecturePool]))
     .filter((label) => label !== '現在地')
-    .slice(0, showAllFavorites ? 24 : 8);
-  const favoriteAreaTitle = `${selectedPrefecture}のエリア`;
+    .slice(0, 24);
+  const favoriteAreas = allFavoriteAreas.slice(0, showAllFavorites ? 24 : 8);
+  const favoriteAreaTitle = selectedPrefecture ? `${selectedPrefecture}の市町村` : '県を選ぶと市町村が出ます';
   const regionRows = AREA_REGION_GROUPS.map((group) => ({
     ...group,
     prefectures: group.prefectures
@@ -1590,6 +1907,12 @@ function HomeLocationPanel({
     setExpandedRegion(selectedRegion);
   }, [selectedRegion]);
 
+  useEffect(() => {
+    if (areaPrefecture && area !== '現在地') {
+      setSelectedHomePrefecture(areaPrefecture);
+    }
+  }, [area, areaPrefecture]);
+
   const searchResults = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) {
@@ -1603,9 +1926,23 @@ function HomeLocationPanel({
     setQuery('');
   };
 
-  const pickPrefecture = (value: string) => {
+  const openConditionsForArea = (value: string) => {
     pickArea(value);
     onOpenFilters();
+  };
+
+  const pickPrefecture = (value: string) => {
+    setSelectedHomePrefecture(value);
+    setExpandedRegion(getRegionGroupForPrefecture(value) ?? expandedRegion);
+    setShowAllFavorites(false);
+    setQuery('');
+  };
+
+  const exploreSelectedPrefecture = () => {
+    if (!selectedPrefecture) {
+      return;
+    }
+    openConditionsForArea(selectedPrefecture);
   };
 
   return (
@@ -1618,8 +1955,8 @@ function HomeLocationPanel({
           <Ionicons name="person-outline" size={24} color={INK} />
         </Pressable>
       </View>
-      <Text style={styles.homeLocationTitle}>場所を選択</Text>
-      <Text style={styles.homeLocationLead}>食べたいエリアを選んでください</Text>
+      <Text style={styles.homeLocationTitle}>今日はどの街で{'\n'}食べる？</Text>
+      <Text style={styles.homeLocationLead}>駅名でも地図でも、ピンときた場所から一店へ。</Text>
 
       <View style={styles.homeSearchBox}>
         <Ionicons name="search" size={28} color={INK} />
@@ -1627,10 +1964,10 @@ function HomeLocationPanel({
           value={query}
           onChangeText={setQuery}
           style={styles.homeSearchInput}
-          placeholder="駅名・エリア名で検索"
+          placeholder="梅田・渋谷・駅名でつまみ食い検索"
           placeholderTextColor="#a29b94"
         />
-        <Pressable style={styles.homeSearchFilterButton} onPress={onOpenFilters}>
+        <Pressable style={[styles.homeSearchFilterButton, !selectedPrefecture && styles.homeSearchFilterButtonMuted]} onPress={selectedPrefecture ? exploreSelectedPrefecture : undefined}>
           <Ionicons name="options-outline" size={26} color={INK} />
         </Pressable>
       </View>
@@ -1638,7 +1975,11 @@ function HomeLocationPanel({
       {query.trim() ? (
         <View style={styles.homeSearchResults}>
           {searchResults.map((item, index) => (
-            <Pressable key={`${getAreaPresetKey(item)}-${index}`} style={styles.homeAreaRow} onPress={() => pickArea(item.label)}>
+            <Pressable
+              key={`${getAreaPresetKey(item)}-${index}`}
+              style={styles.homeAreaRow}
+              onPress={() => isPrefectureName(item.label) ? pickPrefecture(item.label) : openConditionsForArea(item.label)}
+            >
               <View style={styles.homeAreaRowDot} />
               <View style={styles.homeAreaRowBody}>
                 <Text style={styles.homeAreaRowName}>{item.label}</Text>
@@ -1647,54 +1988,46 @@ function HomeLocationPanel({
               <Text style={styles.homeAreaChevron}>›</Text>
             </Pressable>
           ))}
-          {searchResults.length === 0 && <Text style={styles.areaNoResult}>該当エリアがありません</Text>}
+          {searchResults.length === 0 && <Text style={styles.areaNoResult}>その街はまだ隠れています</Text>}
         </View>
       ) : (
         <>
           <View style={styles.homeLocationCards}>
             <Pressable style={styles.homeCurrentCard} onPress={onLocationPress}>
               <View style={styles.homeCurrentBadge}>
-                <Ionicons name="navigate" size={13} color="#ffffff" />
-                <Text style={styles.homeCurrentBadgeText}>現在地</Text>
+                <Ionicons name="navigate" size={13} color={ORANGE} />
+                <Text style={styles.homeCurrentBadgeText}>いまここ</Text>
+              </View>
+              <View style={styles.homeTargetMark}>
+                <View style={styles.homeTargetOuter}>
+                  <View style={styles.homeTargetInner} />
+                </View>
               </View>
               <View style={styles.homeCurrentBottom}>
                 <View style={styles.homeCurrentTextWrap}>
-                  <Text style={styles.homeCurrentTitle}>現在地を使う</Text>
+                  <Text style={styles.homeCurrentTitle}>近くのごはんを引く</Text>
                   <Text style={styles.homeCurrentText}>{locationStatus}</Text>
                 </View>
               </View>
             </Pressable>
-            <Pressable style={styles.homeMapPreview} onPress={onOpenFilters}>
-              <Ionicons name="location-sharp" size={44} color={INK} />
+            <Pressable style={styles.homeMapPreview} onPress={selectedPrefecture ? exploreSelectedPrefecture : undefined}>
+              <View style={[styles.homeMapRoad, styles.homeMapRoadOne]} />
+              <View style={[styles.homeMapRoad, styles.homeMapRoadTwo]} />
+              <View style={[styles.homeMapRoad, styles.homeMapRoadThree]} />
+              <View style={styles.homeMapPark} />
+              <View style={styles.homeMapPin} />
+              <Ionicons name="location-sharp" size={38} color={INK} style={styles.homeMapMarkerIcon} />
               <View style={styles.homeMapBottom}>
-                <Text style={styles.homeMapTitle}>地図から選ぶ</Text>
-                <Text style={styles.homeMapLead}>地図を見ながら{'\n'}エリアを選択</Text>
+                <Text style={styles.homeMapTitle}>{selectedPrefecture ? `${selectedPrefecture}を探検` : 'まず県を選ぶ'}</Text>
+                <Text style={styles.homeMapLead}>{selectedPrefecture ? '市町村を決めずに県全体で探す' : '県を選ぶと市町村が出ます'}</Text>
               </View>
             </Pressable>
-          </View>
-
-          <View style={styles.homeSubsection}>
-            <View style={styles.homeSubsectionHeader}>
-              <Ionicons name="star-outline" size={28} color={INK} />
-              <Text style={styles.homeSubsectionTitle}>{favoriteAreaTitle}</Text>
-              <Pressable onPress={() => setShowAllFavorites((current) => !current)}>
-                <Text style={styles.homeSectionSeeAll}>{showAllFavorites ? '閉じる' : 'すべて見る ＞'}</Text>
-              </Pressable>
-            </View>
-            <View style={styles.homeFavoriteWrap}>
-              {favoriteAreas.map((item, index) => (
-                <Pressable key={`${item}-${index}`} style={[styles.homeFavoriteChip, area === item && styles.homeFavoriteChipActive]} onPress={() => pickArea(item)}>
-                  {area === item && <Ionicons name="checkmark" size={20} color={ORANGE} />}
-                  <Text style={[styles.homeFavoriteText, area === item && styles.homeFavoriteTextActive]}>{item}</Text>
-                </Pressable>
-              ))}
-            </View>
           </View>
 
           <View style={styles.homeSubsection}>
             <View style={styles.homeSubsectionHeader}>
               <Ionicons name="map-outline" size={28} color={INK} />
-              <Text style={styles.homeSubsectionTitle}>地方から選ぶ</Text>
+              <Text style={styles.homeSubsectionTitle}>エリア図鑑をめくる</Text>
             </View>
             <View style={styles.homeRegionList}>
               {regionRows.map((group, groupIndex) => {
@@ -1718,7 +2051,7 @@ function HomeLocationPanel({
                       </View>
                       <View style={styles.homeAreaRowBody}>
                         <Text style={[styles.homeRegionName, isRegionSelected && styles.homeRegionNameActive]}>{group.label}</Text>
-                        <Text style={styles.homeRegionMeta}>{group.prefectures.length}都道府県から選択</Text>
+                        <Text style={styles.homeRegionMeta}>{group.prefectures.length}都道府県のまち札</Text>
                       </View>
                       <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={isRegionSelected ? ORANGE : INK} />
                     </Pressable>
@@ -1754,6 +2087,45 @@ function HomeLocationPanel({
                 );
               })}
             </View>
+          </View>
+
+          <View style={styles.homeSubsection}>
+            <View style={styles.homeSubsectionHeader}>
+              <Ionicons name="trail-sign-outline" size={28} color={INK} />
+              <Text style={styles.homeSubsectionTitle}>{favoriteAreaTitle}</Text>
+              {!!selectedPrefecture && allFavoriteAreas.length > 8 && (
+                <Pressable onPress={() => setShowAllFavorites((current) => !current)}>
+                  <Text style={styles.homeSectionSeeAll}>{showAllFavorites ? 'きゅっと戻す' : 'もっとまちを見る ＞'}</Text>
+                </Pressable>
+              )}
+            </View>
+            {selectedPrefecture ? (
+              <>
+                <Pressable style={styles.homeExplorePrefectureButton} onPress={exploreSelectedPrefecture}>
+                  <View style={styles.homeExploreIcon}>
+                    <Ionicons name="compass-outline" size={21} color="#ffffff" />
+                  </View>
+                  <View style={styles.homeExploreBody}>
+                    <Text style={styles.homeExploreTitle}>{selectedPrefecture}をまるごと探検</Text>
+                    <Text style={styles.homeExploreText}>市町村を決めずに、この県全体で条件へ進みます</Text>
+                  </View>
+                  <Ionicons name="arrow-forward" size={20} color="#ffffff" />
+                </Pressable>
+                <View style={styles.homeFavoriteWrap}>
+                  {favoriteAreas.map((item, index) => (
+                    <Pressable key={`${item}-${index}`} style={[styles.homeFavoriteChip, area === item && styles.homeFavoriteChipActive]} onPress={() => openConditionsForArea(item)}>
+                      <Ionicons name={area === item ? 'checkmark-circle' : 'sparkles-outline'} size={18} color={area === item ? ORANGE : '#9b9184'} />
+                      <Text style={[styles.homeFavoriteText, area === item && styles.homeFavoriteTextActive]}>{item}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            ) : (
+              <View style={styles.homePrefecturePrompt}>
+                <Ionicons name="map-outline" size={22} color={ORANGE} />
+                <Text style={styles.homePrefecturePromptText}>先に都道府県を選ぶと、市町村のまち札がここに並びます。</Text>
+              </View>
+            )}
           </View>
         </>
       )}
@@ -1857,7 +2229,7 @@ function AreaPresetPicker({
   const selectedPreset = presets.find((preset) => preset.label === selectedArea);
   const [areaQuery, setAreaQuery] = useState('');
   const [selectedPrefecture, setSelectedPrefecture] = useState(
-    selectedPreset ? getPresetPrefecture(selectedPreset) : prefectures[0] ?? '現在地',
+    selectedPreset ? getPresetPrefecture(selectedPreset) : isPrefectureName(selectedArea) ? selectedArea : prefectures[0] ?? '現在地',
   );
   const selectedPrefectureAreas = useMemo(
     () => uniqueAreaPresets(presets.filter((preset) => getPresetPrefecture(preset) === selectedPrefecture)),
@@ -2033,7 +2405,7 @@ function SearchTab({
         budgetMax={budgetMax}
         distance={distance}
         genres={GENRES}
-        areaPresets={AREA_PRESETS}
+        areaPresets={ALL_AREA_PRESETS}
         onAreaChange={onAreaChange}
         onGenreChange={onGenreChange}
         onBudgetMinChange={onBudgetMinChange}
@@ -2064,6 +2436,7 @@ function RandomTab({
   selectedRestaurant,
   userLocation,
   history,
+  drawAnimationKey,
   spinValue,
   resultRevealValue,
   onRandomPress,
@@ -2080,25 +2453,39 @@ function RandomTab({
   selectedRestaurant: Restaurant | null;
   userLocation: UserLocation | null;
   history: Restaurant[];
+  drawAnimationKey: DrawAnimationKey;
   spinValue: Animated.Value;
   resultRevealValue: Animated.Value;
   onRandomPress: () => void;
   onSavePress: () => void;
   onGoPress: () => void;
 }) {
+  const drawAnimation = DRAW_ANIMATION_PROFILES[drawAnimationKey];
   const rotate = spinValue.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '1460deg'] });
   const dartDrop = spinValue.interpolate({ inputRange: [0, 0.72, 1], outputRange: [-18, -18, 0] });
   const dartWiggle = spinValue.interpolate({ inputRange: [0, 0.78, 0.9, 1], outputRange: ['-10deg', '-10deg', '8deg', '0deg'] });
+  const wheelScale = spinValue.interpolate({ inputRange: [0, 0.22, 0.5, 0.76, 1], outputRange: [1, 0.96, 1.04, 0.99, 1] });
+  const ticketOpacity = spinValue.interpolate({ inputRange: [0, 0.08, 0.9, 1], outputRange: [0, 1, 1, 0.96] });
+  const ticketLift = spinValue.interpolate({ inputRange: [0, 0.28, 0.68, 1], outputRange: [46, 22, -10, 0] });
+  const ticketRotate = spinValue.interpolate({ inputRange: [0, 0.52, 1], outputRange: ['-8deg', '7deg', '0deg'] });
+  const shuffleOneX = spinValue.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: [-34, 30, -18, 16, -24] });
+  const shuffleTwoX = spinValue.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: [0, -28, 26, -12, 0] });
+  const shuffleThreeX = spinValue.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: [34, -18, 32, -26, 24] });
+  const shuffleCardY = spinValue.interpolate({ inputRange: [0, 0.35, 0.72, 1], outputRange: [0, -12, 10, 0] });
+  const shuffleCardScale = spinValue.interpolate({ inputRange: [0, 0.45, 1], outputRange: [1, 1.08, 1] });
+  const radarRotate = spinValue.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '720deg'] });
+  const radarPulseScale = spinValue.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.82, 1.2, 1.04] });
+  const radarPulseOpacity = spinValue.interpolate({ inputRange: [0, 0.42, 1], outputRange: [0.14, 0.58, 0.18] });
   const resultScale = resultRevealValue.interpolate({ inputRange: [0, 0.7, 1], outputRange: [0.92, 1.03, 1] });
   const resultTranslateY = resultRevealValue.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
   const mapPins = [
-    { top: 30, left: 122, color: '#ea4335' },
-    { top: 68, left: 204, color: '#fbbc04' },
-    { top: 162, left: 222, color: '#34a853' },
-    { top: 214, left: 96, color: '#4285f4' },
-    { top: 120, left: 36, color: '#f05a28' },
-    { top: 48, left: 66, color: '#7c5cff' },
-    { top: 204, left: 176, color: '#00a884' },
+    { top: 22, left: 91, color: '#ea4335' },
+    { top: 51, left: 153, color: '#fbbc04' },
+    { top: 122, left: 166, color: '#34a853' },
+    { top: 160, left: 72, color: '#4285f4' },
+    { top: 90, left: 27, color: '#f05a28' },
+    { top: 36, left: 50, color: '#7c5cff' },
+    { top: 153, left: 132, color: '#00a884' },
   ];
 
   return (
@@ -2111,7 +2498,7 @@ function RandomTab({
       </View>
       <Pressable style={styles.drawStage} onPress={onRandomPress}>
         <View style={styles.rouletteStatusPill}>
-          <Text style={styles.rouletteStatusText}>{isLoading ? 'SEARCHING NEARBY...' : 'RANDISH ROULETTE'}</Text>
+          <Text style={styles.rouletteStatusText}>{isLoading ? drawAnimation.activeStatus : drawAnimation.idleStatus}</Text>
         </View>
         <View style={styles.rouletteButton}>
           <Animated.View style={[styles.dart, { transform: [{ translateY: dartDrop }, { rotate: dartWiggle }] }]}>
@@ -2119,7 +2506,13 @@ function RandomTab({
             <View style={styles.dartTail} />
           </Animated.View>
           <View style={styles.rouletteHalo} />
-          <Animated.View style={[styles.rouletteWheel, { transform: [{ rotate }] }]}>
+          {drawAnimationKey === 'radar' && (
+            <Animated.View style={[styles.radarMotionLayer, { opacity: radarPulseOpacity, transform: [{ scale: radarPulseScale }] }]}>
+              <View style={styles.radarRingOuter} />
+              <View style={styles.radarRingInner} />
+            </Animated.View>
+          )}
+          <Animated.View style={[styles.rouletteWheel, { transform: [{ rotate }, { scale: wheelScale }] }]}>
             <View style={styles.rouletteGridLineVertical} />
             <View style={styles.rouletteGridLineHorizontal} />
             <View style={[styles.mapRoad, styles.mapRoadOne]} />
@@ -2134,9 +2527,38 @@ function RandomTab({
               <Image source={RANDISH_LOGO} style={styles.wheelLogo} resizeMode="contain" />
             </View>
           </Animated.View>
+          {drawAnimationKey === 'radar' && (
+            <Animated.View style={[styles.radarSweep, { transform: [{ rotate: radarRotate }] }]} />
+          )}
+          {drawAnimationKey === 'lottery' && (
+            <Animated.View style={[styles.lotteryMotionLayer, { opacity: ticketOpacity, transform: [{ translateY: ticketLift }, { rotate: ticketRotate }] }]}>
+              <View style={[styles.lotteryTicket, styles.lotteryTicketBackLeft]} />
+              <View style={[styles.lotteryTicket, styles.lotteryTicketBackRight]} />
+              <View style={styles.lotteryTicketFront}>
+                <Text style={styles.lotteryTicketLabel}>RANDISH</Text>
+                <Text style={styles.lotteryTicketTitle}>今日の一店</Text>
+              </View>
+            </Animated.View>
+          )}
+          {drawAnimationKey === 'shuffle' && (
+            <View style={styles.shuffleMotionLayer}>
+              <Animated.View style={[styles.shuffleCard, styles.shuffleCardOne, { transform: [{ translateX: shuffleOneX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '-8deg' }] }]}>
+                <Text style={styles.shuffleCardLabel}>AREA</Text>
+                <Text style={styles.shuffleCardValue} numberOfLines={1}>{area}</Text>
+              </Animated.View>
+              <Animated.View style={[styles.shuffleCard, styles.shuffleCardTwo, { transform: [{ translateX: shuffleTwoX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '5deg' }] }]}>
+                <Text style={styles.shuffleCardLabel}>GENRE</Text>
+                <Text style={styles.shuffleCardValue} numberOfLines={1}>{genre}</Text>
+              </Animated.View>
+              <Animated.View style={[styles.shuffleCard, styles.shuffleCardThree, { transform: [{ translateX: shuffleThreeX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '10deg' }] }]}>
+                <Text style={styles.shuffleCardLabel}>PRICE</Text>
+                <Text style={styles.shuffleCardValue} numberOfLines={1}>{budgetMax}円</Text>
+              </Animated.View>
+            </View>
+          )}
           <View style={styles.rouletteHintRow}>
-            <Text style={styles.rouletteHintText}>候補を回して</Text>
-            <Text style={styles.rouletteHintAccent}>一店に決定</Text>
+            <Text style={styles.rouletteHintText}>{drawAnimation.hint}</Text>
+            <Text style={styles.rouletteHintAccent}>{drawAnimation.accent}</Text>
           </View>
           <View style={styles.mapChoiceCard}>
             <Text style={styles.mapChoiceLabel}>GENRE</Text>
@@ -2150,7 +2572,7 @@ function RandomTab({
               <ActivityIndicator color="#ffffff" />
             ) : (
               <>
-                <Ionicons name="refresh" size={32} color="#ffffff" />
+                <Ionicons name={drawAnimation.icon} size={25} color="#ffffff" />
                 <Text style={styles.rouletteCtaText}>タップして回す</Text>
               </>
             )}
@@ -2712,10 +3134,38 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: '#f2552c',
   },
+  registerButtonDisabled: {
+    opacity: 0.7,
+  },
   registerMainButtonText: {
     color: '#ffffff',
     fontSize: 20,
     fontWeight: '900',
+  },
+  registerGuestButton: {
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+    borderRadius: 16,
+    backgroundColor: '#fff7f2',
+    borderWidth: 1.5,
+    borderColor: '#ffd8c6',
+  },
+  registerGuestButtonText: {
+    color: '#ef552e',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  registerGuestNote: {
+    marginTop: 8,
+    textAlign: 'center',
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#8a817a',
+    fontWeight: '800',
   },
   registerOr: {
     marginVertical: 24,
@@ -3361,14 +3811,14 @@ const styles = StyleSheet.create({
   },
   homeLocationTitle: {
     textAlign: 'center',
-    fontSize: 42,
-    lineHeight: 50,
+    fontSize: 33,
+    lineHeight: 39,
     fontWeight: '900',
     color: INK,
   },
   homeLocationLead: {
     marginTop: 8,
-    marginBottom: 34,
+    marginBottom: 26,
     textAlign: 'center',
     fontSize: 17,
     lineHeight: 24,
@@ -3382,13 +3832,13 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 20,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffdf9',
     borderWidth: 1,
-    borderColor: LINE,
+    borderColor: '#eadfca',
     shadowColor: '#000',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
   },
   homeSearchInput: {
     flex: 1,
@@ -3407,6 +3857,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 19,
+  },
+  homeSearchFilterButtonMuted: {
+    opacity: 0.35,
   },
   homeSearchFilterText: {
     fontSize: 25,
@@ -3763,15 +4216,15 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 178,
     justifyContent: 'space-between',
-    padding: 18,
+    padding: 16,
     borderRadius: 22,
-    backgroundColor: '#fff5ef',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#ffd7ca',
+    borderColor: '#efe4d8',
     shadowColor: '#000',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
   },
   homeCurrentBadge: {
     flexDirection: 'row',
@@ -3782,24 +4235,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 999,
-    backgroundColor: ORANGE,
+    backgroundColor: '#fff4ed',
+    borderWidth: 1,
+    borderColor: '#ffd7c6',
   },
   homeCurrentBadgeText: {
     fontSize: 12,
     fontWeight: '900',
-    color: '#ffffff',
+    color: ORANGE,
   },
   homeTargetMark: {
     alignItems: 'center',
     justifyContent: 'center',
-    height: 76,
+    height: 50,
   },
   homeTargetOuter: {
-    width: 66,
-    height: 66,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 33,
+    borderRadius: 24,
     backgroundColor: '#ffffff',
     shadowColor: ORANGE,
     shadowOpacity: 0.2,
@@ -3807,10 +4262,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
   },
   homeTargetInner: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 6,
     borderColor: '#fff2ea',
     backgroundColor: ORANGE,
   },
@@ -3844,16 +4299,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   homeCurrentTitle: {
-    fontSize: 21,
+    fontSize: 18,
+    lineHeight: 23,
     fontWeight: '900',
-    color: ORANGE,
+    color: INK,
   },
   homeCurrentText: {
     marginTop: 10,
     fontSize: 13,
     lineHeight: 21,
     fontWeight: '700',
-    color: INK,
+    color: '#756b60',
   },
   homeCurrentArrowCircle: {
     width: 44,
@@ -3876,14 +4332,14 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     padding: 18,
     borderRadius: 22,
-    backgroundColor: '#fafafa',
+    backgroundColor: '#f8f4ec',
     borderWidth: 1,
     borderColor: LINE,
     position: 'relative',
     shadowColor: '#000',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
   },
   homeMapRoad: {
     position: 'absolute',
@@ -3931,11 +4387,19 @@ const styles = StyleSheet.create({
     borderWidth: 8,
     borderColor: '#ffffff',
   },
+  homeMapMarkerIcon: {
+    position: 'absolute',
+    top: 17,
+    right: 17,
+    zIndex: 2,
+  },
   homeMapBottom: {
     marginTop: 18,
+    zIndex: 2,
   },
   homeMapTitle: {
-    fontSize: 21,
+    fontSize: 18,
+    lineHeight: 23,
     fontWeight: '900',
     color: INK,
   },
@@ -4115,10 +4579,67 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    marginTop: 2,
+    marginTop: 12,
+  },
+  homeExplorePrefectureButton: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 22,
+    backgroundColor: ORANGE,
+    shadowColor: ORANGE,
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  homeExploreIcon: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  homeExploreBody: {
+    flex: 1,
+  },
+  homeExploreTitle: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '900',
+    color: '#ffffff',
+  },
+  homeExploreText: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+    color: '#ffe7da',
+  },
+  homePrefecturePrompt: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: '#fff8f3',
+    borderWidth: 1,
+    borderColor: '#ffd7c6',
+  },
+  homePrefecturePromptText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '800',
+    color: '#756b60',
   },
   homeFavoriteChip: {
-    height: 42,
+    minHeight: 44,
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
@@ -4126,7 +4647,7 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 17,
     borderRadius: 999,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffdf9',
     borderWidth: 1,
     borderColor: LINE,
     shadowColor: '#000',
@@ -4135,7 +4656,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
   },
   homeFavoriteChipActive: {
-    backgroundColor: '#fff5ef',
+    backgroundColor: '#fff2ea',
     borderColor: ORANGE,
     shadowColor: '#000',
     shadowOpacity: 0.06,
@@ -4204,7 +4725,7 @@ const styles = StyleSheet.create({
     color: INK,
   },
   homeFavoriteTextActive: {
-    color: INK,
+    color: ORANGE,
   },
   homeFavoriteChipIcon: {
     fontSize: 17,
@@ -5102,11 +5623,11 @@ const styles = StyleSheet.create({
     color: INK,
   },
   drawStage: {
-    minHeight: 584,
-    paddingTop: 28,
-    paddingHorizontal: 16,
-    paddingBottom: 18,
-    borderRadius: 32,
+    minHeight: 430,
+    paddingTop: 18,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    borderRadius: 26,
     overflow: 'hidden',
     backgroundColor: '#171411',
     borderWidth: 1,
@@ -5119,10 +5640,10 @@ const styles = StyleSheet.create({
   drawConditionRow: {
     flexDirection: 'row',
     flexWrap: 'nowrap',
-    gap: 8,
-    marginBottom: 16,
-    padding: 10,
-    borderRadius: 24,
+    gap: 6,
+    marginBottom: 12,
+    padding: 8,
+    borderRadius: 20,
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: LINE,
@@ -5132,11 +5653,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
   },
   conditionPill: {
-    minHeight: 44,
+    minHeight: 36,
     flexShrink: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     borderRadius: 999,
     backgroundColor: '#f4eee7',
   },
@@ -5144,7 +5665,7 @@ const styles = StyleSheet.create({
     backgroundColor: ORANGE,
   },
   conditionPillText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '900',
     color: INK,
   },
@@ -5152,53 +5673,54 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   rouletteButton: {
-    minHeight: 528,
+    minHeight: 354,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 28,
     position: 'relative',
   },
   rouletteStatusPill: {
     zIndex: 5,
     alignSelf: 'center',
-    marginBottom: 14,
+    marginBottom: 10,
   },
   rouletteStatusText: {
-    fontSize: 16,
+    fontSize: 13,
     letterSpacing: 1.2,
     fontWeight: '900',
     color: ORANGE,
   },
   dart: {
     position: 'absolute',
-    top: 24,
+    top: 0,
     zIndex: 4,
     alignItems: 'center',
   },
   dartNeedle: {
     width: 0,
     height: 0,
-    borderLeftWidth: 14,
-    borderRightWidth: 14,
-    borderTopWidth: 44,
+    borderLeftWidth: 10,
+    borderRightWidth: 10,
+    borderTopWidth: 32,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
     borderTopColor: ORANGE,
   },
   dartTail: {
-    width: 32,
-    height: 18,
+    width: 25,
+    height: 14,
     marginTop: -2,
-    borderRadius: 9,
+    borderRadius: 7,
     backgroundColor: '#fff3e9',
     borderWidth: 3,
     borderColor: ORANGE,
   },
   rouletteHalo: {
     position: 'absolute',
-    top: 24,
-    width: 326,
-    height: 326,
-    borderRadius: 163,
+    top: 28,
+    width: 242,
+    height: 242,
+    borderRadius: 121,
     backgroundColor: 'rgba(240,90,40,0.12)',
     shadowColor: ORANGE,
     shadowOpacity: 0.45,
@@ -5206,107 +5728,254 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
   },
   rouletteWheel: {
-    width: 304,
-    height: 304,
-    borderRadius: 152,
+    width: 226,
+    height: 226,
+    borderRadius: 113,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
     backgroundColor: '#f5efe3',
-    borderWidth: 10,
+    borderWidth: 8,
     borderColor: '#fff7ea',
     shadowColor: '#000',
     shadowOpacity: 0.18,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 16 },
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
   },
   rouletteGridLineVertical: {
     position: 'absolute',
-    width: 3,
-    height: 304,
+    width: 2,
+    height: 226,
     backgroundColor: 'rgba(255,255,255,0.35)',
   },
   rouletteGridLineHorizontal: {
     position: 'absolute',
-    width: 304,
-    height: 3,
+    width: 226,
+    height: 2,
     backgroundColor: 'rgba(255,255,255,0.35)',
   },
   mapRoad: {
     position: 'absolute',
-    height: 20,
-    borderRadius: 10,
+    height: 15,
+    borderRadius: 8,
     backgroundColor: '#ffffff',
     opacity: 0.92,
   },
   mapRoadOne: {
-    width: 286,
-    top: 98,
-    left: -16,
+    width: 213,
+    top: 73,
+    left: -12,
     transform: [{ rotate: '23deg' }],
   },
   mapRoadTwo: {
-    width: 248,
-    top: 154,
-    left: 34,
+    width: 184,
+    top: 115,
+    left: 25,
     transform: [{ rotate: '-18deg' }],
   },
   mapRoadThree: {
-    width: 232,
-    top: 202,
-    left: -24,
+    width: 173,
+    top: 151,
+    left: -18,
     transform: [{ rotate: '62deg' }],
   },
   mapPark: {
     position: 'absolute',
-    borderRadius: 24,
+    borderRadius: 18,
     backgroundColor: '#dff1d8',
     opacity: 0.92,
   },
   mapParkOne: {
-    width: 96,
-    height: 66,
-    top: 42,
-    left: 42,
+    width: 72,
+    height: 49,
+    top: 31,
+    left: 31,
     transform: [{ rotate: '-18deg' }],
   },
   mapParkTwo: {
-    width: 104,
-    height: 70,
-    right: 24,
-    bottom: 38,
+    width: 78,
+    height: 52,
+    right: 18,
+    bottom: 28,
     transform: [{ rotate: '15deg' }],
   },
   mapPin: {
     position: 'absolute',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 3,
     borderColor: '#ffffff',
   },
   wheelCore: {
-    width: 112,
-    height: 112,
-    borderRadius: 56,
+    width: 82,
+    height: 82,
+    borderRadius: 41,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
-    borderWidth: 7,
+    borderWidth: 5,
     borderColor: '#191512',
   },
   wheelLogo: {
-    width: 62,
-    height: 62,
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+  },
+  lotteryMotionLayer: {
+    position: 'absolute',
+    top: 78,
+    width: 226,
+    height: 142,
+    zIndex: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lotteryTicket: {
+    position: 'absolute',
+    width: 74,
+    height: 112,
     borderRadius: 16,
+    backgroundColor: '#fffaf3',
+    borderWidth: 1,
+    borderColor: '#eadfca',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 7 },
+  },
+  lotteryTicketBackLeft: {
+    left: 50,
+    top: 17,
+    opacity: 0.84,
+    transform: [{ rotate: '-13deg' }],
+  },
+  lotteryTicketBackRight: {
+    right: 50,
+    top: 17,
+    opacity: 0.84,
+    transform: [{ rotate: '13deg' }],
+  },
+  lotteryTicketFront: {
+    width: 96,
+    height: 128,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 2,
+    borderColor: ORANGE,
+    shadowColor: ORANGE,
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  lotteryTicketLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1,
+    color: '#9b9184',
+  },
+  lotteryTicketTitle: {
+    marginTop: 8,
+    maxWidth: 64,
+    textAlign: 'center',
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: '900',
+    color: INK,
+  },
+  shuffleMotionLayer: {
+    position: 'absolute',
+    top: 102,
+    width: 252,
+    height: 118,
+    zIndex: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shuffleCard: {
+    position: 'absolute',
+    width: 104,
+    height: 74,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#eadfca',
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  shuffleCardOne: {
+    left: 18,
+    top: 8,
+  },
+  shuffleCardTwo: {
+    left: 74,
+    top: 26,
+    borderColor: '#ffd7c6',
+  },
+  shuffleCardThree: {
+    right: 18,
+    top: 8,
+  },
+  shuffleCardLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#9b9184',
+  },
+  shuffleCardValue: {
+    marginTop: 5,
+    fontSize: 17,
+    fontWeight: '900',
+    color: INK,
+  },
+  radarMotionLayer: {
+    position: 'absolute',
+    top: 34,
+    width: 260,
+    height: 260,
+    zIndex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radarRingOuter: {
+    position: 'absolute',
+    width: 252,
+    height: 252,
+    borderRadius: 126,
+    borderWidth: 2,
+    borderColor: '#ffb18f',
+  },
+  radarRingInner: {
+    position: 'absolute',
+    width: 178,
+    height: 178,
+    borderRadius: 89,
+    borderWidth: 2,
+    borderColor: '#fff0e8',
+  },
+  radarSweep: {
+    position: 'absolute',
+    top: 92,
+    left: '50%',
+    width: 4,
+    height: 126,
+    marginLeft: -2,
+    zIndex: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(240,90,40,0.44)',
   },
   mapChoiceCard: {
-    width: '94%',
-    marginTop: 18,
-    minHeight: 58,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 29,
+    width: '92%',
+    marginTop: 12,
+    minHeight: 46,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 23,
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#efe4d6',
@@ -5318,32 +5987,32 @@ const styles = StyleSheet.create({
   rouletteHintRow: {
     flexDirection: 'row',
     gap: 6,
-    marginTop: 20,
+    marginTop: 12,
   },
   rouletteHintText: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '900',
     color: '#f7eee5',
   },
   rouletteHintAccent: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '900',
     color: ORANGE,
   },
   mapChoiceLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
     color: '#9b9184',
   },
   mapChoiceValue: {
-    maxWidth: 96,
-    fontSize: 16,
+    maxWidth: 88,
+    fontSize: 14,
     fontWeight: '900',
     color: INK,
   },
   mapChoiceDivider: {
     width: 1,
-    height: 22,
+    height: 18,
     backgroundColor: '#eadfca',
     marginHorizontal: 2,
   },
@@ -5377,14 +6046,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   rouletteCta: {
-    width: '94%',
-    minHeight: 64,
-    marginTop: 18,
+    width: '92%',
+    minHeight: 52,
+    marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-    borderRadius: 32,
+    borderRadius: 26,
     backgroundColor: ORANGE,
     borderWidth: 2,
     borderColor: '#fff5ec',
@@ -5394,15 +6063,15 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
   },
   rouletteCtaText: {
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 19,
+    lineHeight: 24,
     fontWeight: '900',
     color: '#ffffff',
   },
   rouletteMessage: {
-    marginTop: 10,
-    fontSize: 13,
-    lineHeight: 19,
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: '800',
     color: '#d9cec2',
     textAlign: 'center',
@@ -5437,39 +6106,43 @@ const styles = StyleSheet.create({
     color: INK,
   },
   resultDistanceBand: {
-    minHeight: 78,
+    minHeight: 66,
     marginTop: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 22,
-    backgroundColor: '#171411',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+    backgroundColor: '#fffaf5',
+    borderWidth: 1,
+    borderColor: '#efe4d8',
   },
   resultDistanceLabel: {
     fontSize: 12,
     fontWeight: '900',
-    color: '#d9cfc7',
+    color: '#8a8175',
   },
   resultDistanceValue: {
     marginTop: 2,
-    fontSize: 27,
+    fontSize: 24,
     fontWeight: '900',
-    color: '#ffffff',
+    color: INK,
   },
   resultMapShortcut: {
-    minHeight: 42,
+    minHeight: 40,
     justifyContent: 'center',
-    paddingHorizontal: 14,
-    borderRadius: 15,
-    backgroundColor: ORANGE,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#ffd7c6',
   },
   resultMapShortcutText: {
     fontSize: 12,
     fontWeight: '900',
-    color: '#ffffff',
+    color: ORANGE,
   },
   metaRow: {
     marginTop: 12,

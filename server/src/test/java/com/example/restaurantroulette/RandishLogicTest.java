@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
+import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.VisitCreateRequest;
 import com.example.restaurantroulette.exception.ConflictException;
+import com.example.restaurantroulette.repository.AppUserRepository;
 import com.example.restaurantroulette.repository.FavoriteRestaurantRepository;
 import com.example.restaurantroulette.repository.RandomHistoryRepository;
 import com.example.restaurantroulette.repository.RestaurantRepository;
@@ -19,6 +21,7 @@ import com.example.restaurantroulette.service.RandomRestaurantService;
 import com.example.restaurantroulette.service.RestaurantQueryService;
 import com.example.restaurantroulette.service.StampService;
 import com.example.restaurantroulette.service.StatisticsService;
+import com.example.restaurantroulette.service.UserService;
 import com.example.restaurantroulette.service.ValidationService;
 import com.example.restaurantroulette.service.VisitCollectionService;
 import com.example.restaurantroulette.service.external.GooglePlacesEnrichmentService;
@@ -52,6 +55,7 @@ class RandishLogicTest {
       validationService,
       googlePlacesEnrichmentService);
   private final FavoriteService favoriteService = new FavoriteService(new FavoriteRestaurantRepository(jdbcClient), restaurantQueryService, mapper, validationService);
+  private final UserService userService = new UserService(new AppUserRepository(jdbcClient), mapper);
   private final StampService stampService = new StampService(new StampRepository(jdbcClient), mapper, validationService);
   private final VisitCollectionService visitCollectionService = new VisitCollectionService(new VisitCollectionRepository(jdbcClient), restaurantQueryService, stampService, mapper, validationService);
   private final StatisticsService statisticsService = new StatisticsService(visitCollectionService, restaurantQueryService, favoriteService, validationService);
@@ -73,6 +77,25 @@ class RandishLogicTest {
     assertThat(selected.id()).isNotBlank();
     assertThat(histories).hasSize(1);
     assertThat(histories.getFirst().restaurant().id()).isEqualTo(selected.id());
+  }
+
+  @Test
+  void registerUserPersistsInDatabase() {
+    var user = userService.register(new UserCreateRequest("RANDISH@example.com", "password123", "Randish User"));
+    var found = userService.findById(user.id());
+
+    assertThat(found.id()).isEqualTo(user.id());
+    assertThat(found.email()).isEqualTo("randish@example.com");
+    assertThat(found.displayName()).isEqualTo("Randish User");
+    assertThat(found.authProvider()).isEqualTo("EMAIL");
+  }
+
+  @Test
+  void registerUserPreventsDuplicateEmail() {
+    userService.register(new UserCreateRequest("duplicate@example.com", "password123", "First"));
+
+    assertThatThrownBy(() -> userService.register(new UserCreateRequest("DUPLICATE@example.com", "password123", "Second")))
+        .isInstanceOf(ConflictException.class);
   }
 
   @Test

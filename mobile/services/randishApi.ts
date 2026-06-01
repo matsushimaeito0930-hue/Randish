@@ -34,6 +34,21 @@ export type RandomRestaurantParams = RestaurantSearchParams & {
   userId: string;
 };
 
+export type User = {
+  id: string;
+  email: string;
+  displayName: string;
+  authProvider: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UserCreateParams = {
+  email: string;
+  password: string;
+  displayName: string;
+};
+
 export type RandomHistory = {
   id: string;
   userId: string;
@@ -209,6 +224,15 @@ export const randishApi = {
 
   getRestaurant: (baseUrl: ApiBaseUrlInput, restaurantId: string) =>
     request<Restaurant>(baseUrl, `api/restaurants/${restaurantId}`),
+
+  registerUser: (baseUrl: ApiBaseUrlInput, params: UserCreateParams) =>
+    request<User>(baseUrl, 'api/users', undefined, {
+      method: 'POST',
+      body: params,
+    }),
+
+  getUser: (baseUrl: ApiBaseUrlInput, userId: string) =>
+    request<User>(baseUrl, `api/users/${userId}`),
 
   chooseRandom: (baseUrl: ApiBaseUrlInput, params: RandomRestaurantParams) =>
     request<Restaurant>(baseUrl, 'api/restaurants/random', params),

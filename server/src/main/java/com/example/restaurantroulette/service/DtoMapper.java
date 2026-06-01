@@ -4,7 +4,9 @@ import com.example.restaurantroulette.dto.ApiDtos.FavoriteResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.dto.ApiDtos.StampResponse;
+import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.dto.ApiDtos.VisitResponse;
+import com.example.restaurantroulette.entity.AppUser;
 import com.example.restaurantroulette.entity.FavoriteRestaurant;
 import com.example.restaurantroulette.entity.RandomHistory;
 import com.example.restaurantroulette.entity.Restaurant;
@@ -47,6 +49,16 @@ public class DtoMapper {
         history.budgetMin(),
         history.budgetMax(),
         history.createdAt());
+  }
+
+  public UserResponse toUserResponse(AppUser user) {
+    return new UserResponse(
+        user.id(),
+        user.email(),
+        user.displayName(),
+        user.authProvider(),
+        user.createdAt(),
+        user.updatedAt());
   }
 
   public FavoriteResponse toFavoriteResponse(FavoriteRestaurant favorite, Restaurant restaurant) {

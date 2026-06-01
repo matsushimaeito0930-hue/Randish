@@ -73,6 +73,21 @@ public final class ApiDtos {
       Instant createdAt) {
   }
 
+  public record UserCreateRequest(
+      String email,
+      String password,
+      String displayName) {
+  }
+
+  public record UserResponse(
+      String id,
+      String email,
+      String displayName,
+      String authProvider,
+      Instant createdAt,
+      Instant updatedAt) {
+  }
+
   public record FavoriteCreateRequest(String userId, String restaurantId) {
   }
 
