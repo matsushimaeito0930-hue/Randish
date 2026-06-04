@@ -2600,8 +2600,8 @@ function MealTicketPanel({ state, compact = false }: { state: MealTicketState; c
     <View style={[styles.mealTicketPanel, compact && styles.mealTicketPanelCompact]}>
       <View style={styles.mealTicketHeader}>
         <View>
-          <Text style={styles.mealTicketKicker}>MEAL TICKETS</Text>
-          <Text style={styles.mealTicketTitle}>今日の食券</Text>
+          <Text style={styles.mealTicketKicker}>DAILY ACCESS</Text>
+          <Text style={styles.mealTicketTitle}>今日の利用枠</Text>
         </View>
         <View style={[styles.mealTicketCountBadge, current.available && styles.mealTicketCountBadgeActive]}>
           <Text style={[styles.mealTicketCountText, current.available && styles.mealTicketCountTextActive]}>
@@ -2823,7 +2823,7 @@ function HomeLocationPanel({
   const allFavoriteAreas = uniqueAreaPresets([...(currentAreaPreset ? [currentAreaPreset] : []), ...historyAreaPresets, ...prefecturePresets])
     .filter((preset) => preset.label !== '現在地');
   const favoriteAreas = showAllFavorites ? allFavoriteAreas : allFavoriteAreas.slice(0, 8);
-  const favoriteAreaTitle = selectedPrefecture ? `${selectedPrefecture}の市町村・まち札` : '県を選ぶと市町村が出ます';
+  const favoriteAreaTitle = selectedPrefecture ? `${selectedPrefecture}の市町村・主要エリア` : '県を選ぶと市町村が出ます';
   const regionRows = AREA_REGION_GROUPS.map((group) => ({
     ...group,
     prefectures: group.prefectures
@@ -2897,8 +2897,9 @@ function HomeLocationPanel({
           <Ionicons name="person-outline" size={24} color={INK} />
         </Pressable>
       </View>
-      <Text style={styles.homeLocationTitle}>今日はどの街で{'\n'}食べる？</Text>
-      <Text style={styles.homeLocationLead}>駅名でも地図でも、ピンときた場所から一店へ。</Text>
+      <Text style={styles.homeLocationEyebrow}>AREA SETUP</Text>
+      <Text style={styles.homeLocationTitle}>どの街から探す？</Text>
+      <Text style={styles.homeLocationLead}>現在地、駅名、市町村。今日の一店を決める起点を選びます。</Text>
       <MealTicketPanel state={mealTicketState} />
 
       <View style={styles.homeSearchBox}>
@@ -2970,7 +2971,7 @@ function HomeLocationPanel({
           <View style={styles.homeSubsection}>
             <View style={styles.homeSubsectionHeader}>
               <Ionicons name="map-outline" size={28} color={INK} />
-              <Text style={styles.homeSubsectionTitle}>エリア図鑑をめくる</Text>
+              <Text style={styles.homeSubsectionTitle}>地方から選ぶ</Text>
             </View>
             <View style={styles.homeRegionList}>
               {regionRows.map((group, groupIndex) => {
@@ -2994,7 +2995,7 @@ function HomeLocationPanel({
                       </View>
                       <View style={styles.homeAreaRowBody}>
                         <Text style={[styles.homeRegionName, isRegionSelected && styles.homeRegionNameActive]}>{group.label}</Text>
-                        <Text style={styles.homeRegionMeta}>{group.prefectures.length}都道府県のまち札</Text>
+                        <Text style={styles.homeRegionMeta}>{group.prefectures.length}都道府県</Text>
                       </View>
                       <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={isRegionSelected ? ORANGE : INK} />
                     </Pressable>
@@ -3049,8 +3050,8 @@ function HomeLocationPanel({
                     <Ionicons name="compass-outline" size={21} color="#ffffff" />
                   </View>
                   <View style={styles.homeExploreBody}>
-                    <Text style={styles.homeExploreTitle}>{selectedPrefecture}をまるごと探検</Text>
-                    <Text style={styles.homeExploreText}>市町村を決めずに、この県全体で条件へ進みます</Text>
+                    <Text style={styles.homeExploreTitle}>{selectedPrefecture}全体で探す</Text>
+                    <Text style={styles.homeExploreText}>市町村を絞らず、県全域を対象にします</Text>
                   </View>
                   <Ionicons name="arrow-forward" size={20} color="#ffffff" />
                 </Pressable>
@@ -4993,7 +4994,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   homeLocationPanel: {
-    paddingHorizontal: 2,
+    paddingHorizontal: 0,
     paddingBottom: 20,
   },
   homeBackButton: {
@@ -5023,40 +5024,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 18,
-    paddingTop: 18,
+    marginBottom: 22,
+    paddingTop: 12,
   },
   homeLogoButton: {
-    width: 56,
-    height: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 20,
-    backgroundColor: '#fff8f2',
-    borderWidth: 1,
-    borderColor: '#ffd7c6',
-    shadowColor: ORANGE,
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-  },
-  homeLogoImage: {
-    width: 42,
-    height: 42,
-  },
-  homeAccountButton: {
     width: 48,
     height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 24,
-    backgroundColor: '#fffaf5',
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#efe4d8',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    borderColor: '#e8ded3',
+  },
+  homeLogoImage: {
+    width: 36,
+    height: 36,
+  },
+  homeAccountButton: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e8ded3',
   },
   homeBrandRow: {
     flexDirection: 'row',
@@ -5130,33 +5123,40 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: ORANGE,
   },
+  homeLocationEyebrow: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '900',
+    color: ORANGE,
+  },
   homeLocationTitle: {
-    textAlign: 'center',
-    fontSize: 34,
-    lineHeight: 40,
+    marginTop: 8,
+    textAlign: 'left',
+    fontSize: 30,
+    lineHeight: 36,
     fontWeight: '900',
     color: INK,
   },
   homeLocationLead: {
     marginTop: 8,
-    marginBottom: 26,
-    textAlign: 'center',
-    fontSize: 17,
-    lineHeight: 24,
+    marginBottom: 18,
+    textAlign: 'left',
+    fontSize: 14,
+    lineHeight: 22,
     fontWeight: '700',
-    color: '#6f665c',
+    color: '#6f665f',
   },
   mealTicketPanel: {
-    marginBottom: 20,
-    padding: 16,
-    borderRadius: 24,
-    backgroundColor: '#fffaf2',
+    marginBottom: 18,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: '#fffdf9',
     borderWidth: 1,
-    borderColor: '#eadfca',
+    borderColor: '#e6ddd2',
     shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.03,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
   },
   mealTicketPanelCompact: {
     marginBottom: 12,
@@ -5172,21 +5172,21 @@ const styles = StyleSheet.create({
   mealTicketKicker: {
     fontSize: 11,
     fontWeight: '900',
-    color: ORANGE,
+    color: '#8d8277',
   },
   mealTicketTitle: {
     marginTop: 1,
-    fontSize: 24,
-    lineHeight: 29,
+    fontSize: 20,
+    lineHeight: 25,
     fontWeight: '900',
     color: INK,
   },
   mealTicketCountBadge: {
-    minWidth: 64,
-    height: 48,
+    minWidth: 58,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 16,
+    borderRadius: 13,
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#eadfca',
@@ -5214,8 +5214,8 @@ const styles = StyleSheet.create({
     color: '#f7d6c6',
   },
   mealTicketLead: {
-    marginTop: 8,
-    fontSize: 13,
+    marginTop: 7,
+    fontSize: 12,
     lineHeight: 18,
     fontWeight: '800',
     color: '#756b61',
@@ -5223,28 +5223,28 @@ const styles = StyleSheet.create({
   mealTicketGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
+    gap: 7,
+    marginTop: 11,
   },
   mealTicketCard: {
     width: '48.5%',
-    minHeight: 94,
+    minHeight: 82,
     padding: 10,
-    borderRadius: 18,
+    borderRadius: 14,
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#e8ddcf',
   },
   mealTicketCardActive: {
-    backgroundColor: '#fff3ea',
+    backgroundColor: '#fff8f2',
     borderColor: ORANGE,
   },
   mealTicketCardUsed: {
-    backgroundColor: '#f7f1ea',
+    backgroundColor: '#f6f1ea',
   },
   mealTicketCardPro: {
-    backgroundColor: '#f6f4ff',
-    borderColor: '#dad6ff',
+    backgroundColor: '#f7f6fb',
+    borderColor: '#dedbe8',
   },
   mealTicketCardTop: {
     flexDirection: 'row',
@@ -5252,19 +5252,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   mealTicketIcon: {
-    width: 31,
-    height: 31,
+    width: 29,
+    height: 29,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
   },
   mealTicketTextBlock: {
     flex: 1,
   },
   mealTicketName: {
-    fontSize: 16,
-    lineHeight: 19,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '900',
     color: INK,
   },
@@ -5283,7 +5283,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 8,
+    marginTop: 7,
   },
   mealTicketStatus: {
     flexShrink: 1,
@@ -5308,7 +5308,7 @@ const styles = StyleSheet.create({
   mealTicketNightRail: {
     marginTop: 12,
     padding: 12,
-    borderRadius: 18,
+    borderRadius: 14,
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#e5e0ff',
@@ -5343,23 +5343,23 @@ const styles = StyleSheet.create({
     color: '#514fd0',
   },
   homeSearchBox: {
-    height: 64,
+    height: 58,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 20,
-    borderRadius: 32,
+    gap: 10,
+    paddingHorizontal: 16,
+    borderRadius: 18,
     backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#eadfca',
+    borderColor: '#e6ddd2',
     shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
   },
   homeSearchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
     color: INK,
   },
@@ -5369,12 +5369,12 @@ const styles = StyleSheet.create({
     color: ORANGE,
   },
   homeSearchFilterButton: {
-    width: 38,
-    height: 38,
+    width: 34,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 19,
-    backgroundColor: '#fff2e8',
+    borderRadius: 12,
+    backgroundColor: '#f8f3ed',
   },
   homeSearchFilterButtonMuted: {
     opacity: 0.35,
@@ -5726,23 +5726,23 @@ const styles = StyleSheet.create({
     color: '#f7eee5',
   },
   homeLocationCards: {
-    marginTop: 26,
+    marginTop: 20,
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
   },
   homeCurrentCard: {
     flex: 1,
-    height: 178,
+    height: 156,
     justifyContent: 'space-between',
-    padding: 16,
-    borderRadius: 22,
-    backgroundColor: '#fff7ef',
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#ffd7c6',
-    shadowColor: ORANGE,
-    shadowOpacity: 0.15,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
+    borderColor: '#e6ddd2',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
   },
   homeCurrentBadge: {
     flexDirection: 'row',
@@ -5750,10 +5750,10 @@ const styles = StyleSheet.create({
     gap: 5,
     alignSelf: 'flex-start',
     overflow: 'hidden',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: '#fff4ed',
+    backgroundColor: '#fff8f4',
     borderWidth: 1,
     borderColor: '#ffd7c6',
   },
@@ -5765,25 +5765,25 @@ const styles = StyleSheet.create({
   homeTargetMark: {
     alignItems: 'center',
     justifyContent: 'center',
-    height: 50,
+    height: 42,
   },
   homeTargetOuter: {
-    width: 48,
-    height: 48,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 24,
+    borderRadius: 20,
     backgroundColor: '#fffdf9',
     shadowColor: ORANGE,
-    shadowOpacity: 0.25,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.11,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
   },
   homeTargetInner: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 5,
     borderColor: '#fff2ea',
     backgroundColor: ORANGE,
   },
@@ -5817,15 +5817,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   homeCurrentTitle: {
-    fontSize: 18,
-    lineHeight: 23,
+    fontSize: 16,
+    lineHeight: 21,
     fontWeight: '900',
     color: INK,
   },
   homeCurrentText: {
-    marginTop: 10,
-    fontSize: 13,
-    lineHeight: 21,
+    marginTop: 7,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '700',
     color: '#756b60',
   },
@@ -5845,26 +5845,26 @@ const styles = StyleSheet.create({
   },
   homeMapPreview: {
     flex: 1,
-    height: 178,
+    height: 156,
     overflow: 'hidden',
     justifyContent: 'flex-end',
-    padding: 18,
-    borderRadius: 22,
-    backgroundColor: '#edf5e8',
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: '#f2f5ef',
     borderWidth: 1,
     borderColor: '#d8ead1',
     position: 'relative',
     shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
   },
   homeMapRoad: {
     position: 'absolute',
     height: 14,
     borderRadius: 7,
     backgroundColor: '#ffffff',
-    opacity: 0.96,
+    opacity: 0.78,
     borderWidth: 1,
     borderColor: '#e5eadf',
   },
@@ -5901,17 +5901,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 54,
     left: '50%',
-    width: 38,
-    height: 38,
-    marginLeft: -19,
-    borderRadius: 19,
+    width: 32,
+    height: 32,
+    marginLeft: -16,
+    borderRadius: 16,
     backgroundColor: ORANGE,
-    borderWidth: 8,
+    borderWidth: 7,
     borderColor: '#fffdf9',
     shadowColor: ORANGE,
-    shadowOpacity: 0.28,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.14,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
   },
   homeMapMarkerIcon: {
     position: 'absolute',
@@ -5924,15 +5924,15 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   homeMapTitle: {
-    fontSize: 18,
-    lineHeight: 23,
+    fontSize: 16,
+    lineHeight: 21,
     fontWeight: '900',
     color: INK,
   },
   homeMapLead: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 21,
+    marginTop: 7,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '700',
     color: '#666666',
   },
@@ -6077,13 +6077,13 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   homeSubsection: {
-    marginTop: 30,
+    marginTop: 24,
   },
   homeSubsectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    marginBottom: 14,
+    gap: 8,
+    marginBottom: 12,
   },
   homeSubsectionIcon: {
     fontSize: 29,
@@ -6092,7 +6092,7 @@ const styles = StyleSheet.create({
   },
   homeSubsectionTitle: {
     flex: 1,
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: '900',
     color: INK,
   },
@@ -6108,39 +6108,39 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   homeExplorePrefectureButton: {
-    minHeight: 72,
+    minHeight: 66,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: 15,
     paddingVertical: 12,
-    borderRadius: 22,
-    backgroundColor: ORANGE,
-    shadowColor: ORANGE,
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
+    borderRadius: 18,
+    backgroundColor: INK,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
   },
   homeExploreIcon: {
-    width: 42,
-    height: 42,
+    width: 38,
+    height: 38,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 21,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.14)',
   },
   homeExploreBody: {
     flex: 1,
   },
   homeExploreTitle: {
-    fontSize: 17,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: '900',
     color: '#ffffff',
   },
   homeExploreText: {
     marginTop: 4,
-    fontSize: 12,
+    fontSize: 11,
     lineHeight: 17,
     fontWeight: '800',
     color: '#ffe7da',
@@ -6152,8 +6152,8 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 15,
     paddingVertical: 12,
-    borderRadius: 18,
-    backgroundColor: '#fff8f3',
+    borderRadius: 16,
+    backgroundColor: '#fffdf9',
     borderWidth: 1,
     borderColor: '#ffd7c6',
   },
@@ -6165,21 +6165,21 @@ const styles = StyleSheet.create({
     color: '#756b60',
   },
   homeFavoriteChip: {
-    minHeight: 44,
+    minHeight: 40,
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingHorizontal: 17,
+    paddingHorizontal: 14,
     borderRadius: 999,
     backgroundColor: '#fffdf9',
     borderWidth: 1,
     borderColor: LINE,
     shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
   },
   homeFavoriteChipActive: {
     backgroundColor: '#fff2ea',
@@ -6246,7 +6246,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   homeFavoriteText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '900',
     color: INK,
   },
@@ -6260,8 +6260,8 @@ const styles = StyleSheet.create({
   },
   homeRegionList: {
     overflow: 'hidden',
-    borderRadius: 22,
-    backgroundColor: '#fffdf9',
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: LINE,
   },
@@ -6277,24 +6277,24 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 18,
   },
   homeRegionRow: {
-    minHeight: 58,
+    minHeight: 54,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 9,
     backgroundColor: '#ffffff',
   },
   homeRegionRowActive: {
-    backgroundColor: '#fff2ea',
+    backgroundColor: '#fff8f3',
   },
   homeRegionIconFrame: {
-    width: 36,
-    height: 36,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
-    borderRadius: 18,
-    backgroundColor: '#fff8f1',
+    borderRadius: 12,
+    backgroundColor: '#fbf7f1',
     borderWidth: 1,
     borderColor: '#f2dfcf',
   },
@@ -6303,7 +6303,7 @@ const styles = StyleSheet.create({
     borderColor: '#ffd3c2',
   },
   homeRegionName: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '900',
     color: INK,
   },
@@ -6326,18 +6326,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#fffdfb',
   },
   homePrefecturePill: {
-    minHeight: 44,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: 12,
-    paddingRight: 14,
+    paddingLeft: 10,
+    paddingRight: 12,
     borderRadius: 999,
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: LINE,
   },
   homePrefecturePillActive: {
-    backgroundColor: '#fff5ef',
+    backgroundColor: '#fff8f3',
     borderColor: ORANGE,
   },
   homePrefectureList: {
