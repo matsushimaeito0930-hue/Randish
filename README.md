@@ -49,6 +49,21 @@ Create `.env.local` from `.env.example` when API keys or database credentials ar
 
 Never commit `.env.local`, database passwords, API keys, keystores, or production secrets.
 
+RANDISH uses Hot Pepper Gourmet as the primary restaurant source. Google Places is a paid fallback only:
+
+- Hot Pepper is queried first and owns the main candidate pool.
+- Google Places is disabled by default.
+- Google Places is used only when explicitly enabled and Hot Pepper does not fill the target candidate count.
+- Google fallback is capped per request and by a per-server-session request limit.
+
+To intentionally test Google fallback, set both values locally:
+
+```env
+RANDISH_GOOGLE_PLACES_ENABLED=true
+RANDISH_GOOGLE_PLACES_SESSION_LIMIT=30
+GOOGLE_PLACES_API_KEY=YOUR_LOCAL_KEY
+```
+
 For Supabase Postgres, put the Supabase connection URI in `.env.local`:
 
 ```env

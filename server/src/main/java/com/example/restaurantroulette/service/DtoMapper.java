@@ -36,6 +36,8 @@ public class DtoMapper {
         null,
         null,
         null,
+        null,
+        null,
         null);
   }
 

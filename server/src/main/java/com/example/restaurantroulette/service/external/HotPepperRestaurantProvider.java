@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
@@ -25,7 +26,8 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   private static final String API_URL = "https://webservice.recruit.co.jp/hotpepper/gourmet/v1/";
   private static final String ALL_GENRES = "\u3059\u3079\u3066";
   private static final int PAGE_SIZE = 30;
-  private static final int MAX_RESULTS_PER_PLAN = 60;
+  private static final int MAX_RESULTS_PER_PLAN = 300;
+  private static final int RANDOM_PAGE_COUNT_PER_PLAN = 5;
   private static final Pattern PRICE_PATTERN = Pattern.compile("(\\d[\\d,]*)");
   private static final Map<String, List<SearchPlan>> GENRE_SEARCH_PLANS = Map.ofEntries(
       Map.entry("ラーメン", List.of(new SearchPlan(List.of("G013"), List.of()))),
@@ -55,7 +57,15 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
       Map.entry("スイーツ", List.of(new SearchPlan(List.of("G014"), List.of("スイーツ")))),
       Map.entry("カフェ", List.of(new SearchPlan(List.of("G014"), List.of("カフェ")))),
       Map.entry("パン", List.of(new SearchPlan(List.of("G014"), List.of("パン")), new SearchPlan(List.of("G015"), List.of("パン")))),
-      Map.entry("ファストフード", List.of(new SearchPlan(List.of("G015"), List.of()), new SearchPlan(List.of(), List.of("ハンバーガー")))),
+      Map.entry("ファストフード", List.of(
+          new SearchPlan(List.of("G015"), List.of()),
+          new SearchPlan(List.of(), List.of("ハンバーガー")),
+          new SearchPlan(List.of(), List.of("バーガー")),
+          new SearchPlan(List.of(), List.of("マクドナルド")),
+          new SearchPlan(List.of(), List.of("マック")),
+          new SearchPlan(List.of(), List.of("モスバーガー")),
+          new SearchPlan(List.of(), List.of("ロッテリア")),
+          new SearchPlan(List.of(), List.of("ケンタッキー")))),
       Map.entry("お酒・バー", List.of(new SearchPlan(List.of("G012"), List.of()), new SearchPlan(List.of("G001"), List.of()))),
       Map.entry("各国料理", List.of(new SearchPlan(List.of("G010"), List.of()), new SearchPlan(List.of("G009"), List.of()), new SearchPlan(List.of("G017"), List.of())))
   );
@@ -126,10 +136,66 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
     Map<String, Restaurant> restaurantsById = new LinkedHashMap<>();
     for (SearchPlan plan : buildSearchPlans(genre)) {
       fetchAll(area, plan, latitude, longitude, range).stream()
+          .filter(restaurant -> matchesRequestedGenre(restaurant, genre))
           .filter(restaurant -> matchesBudget(restaurant, budgetMin, budgetMax))
           .forEach(restaurant -> restaurantsById.putIfAbsent(restaurant.id(), restaurant));
     }
     return List.copyOf(restaurantsById.values());
+  }
+
+  @Override
+  public synchronized List<Restaurant> searchRandomCandidates(
+      String area,
+      String genre,
+      Integer budgetMin,
+      Integer budgetMax,
+      Double latitude,
+      Double longitude,
+      Integer range,
+      int maxCandidates) {
+    if (!isAvailable()) {
+      return List.of();
+    }
+
+    Map<String, Restaurant> restaurantsById = new LinkedHashMap<>();
+    for (SearchPlan plan : buildSearchPlans(genre)) {
+      int available = fetchAvailableCount(area, plan, latitude, longitude, range);
+      if (available <= 0) {
+        continue;
+      }
+
+      int pageCount = Math.min(RANDOM_PAGE_COUNT_PER_PLAN, Math.max(1, maxCandidates / PAGE_SIZE + 1));
+      for (int index = 0; index < pageCount && restaurantsById.size() < maxCandidates; index++) {
+        int maxStart = Math.max(1, available - PAGE_SIZE + 1);
+        int randomStart = ThreadLocalRandom.current().nextInt(1, maxStart + 1);
+        HotPepperResponse response = requestPage(area, plan, randomStart, latitude, longitude, range);
+        if (response == null || response.results() == null || response.results().shop() == null) {
+          continue;
+        }
+        if (response.results().error() != null) {
+          throw new IllegalStateException("HotPepper API error: " + response.results().error().message());
+        }
+
+        response.results().shop().stream()
+            .map(this::toRestaurant)
+            .filter(restaurant -> matchesRequestedGenre(restaurant, genre))
+            .filter(restaurant -> matchesBudget(restaurant, budgetMin, budgetMax))
+            .forEach(restaurant -> restaurantsById.putIfAbsent(restaurant.id(), restaurant));
+      }
+    }
+
+    return restaurantsById.values().stream().limit(maxCandidates).toList();
+  }
+
+  private int fetchAvailableCount(String area, SearchPlan plan, Double latitude, Double longitude, Integer range) {
+    HotPepperResponse response = requestPage(area, plan, 1, latitude, longitude, range, 1);
+    if (response == null || response.results() == null) {
+      return 0;
+    }
+    if (response.results().error() != null) {
+      throw new IllegalStateException("HotPepper API error: " + response.results().error().message());
+    }
+    return response.results().resultsAvailable() == null ? 0 : response.results().resultsAvailable();
   }
 
   private List<Restaurant> fetchAll(String area, SearchPlan plan, Double latitude, Double longitude, Integer range) {
@@ -165,6 +231,10 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   }
 
   private HotPepperResponse requestPage(String area, SearchPlan plan, int start, Double latitude, Double longitude, Integer range) {
+    return requestPage(area, plan, start, latitude, longitude, range, PAGE_SIZE);
+  }
+
+  private HotPepperResponse requestPage(String area, SearchPlan plan, int start, Double latitude, Double longitude, Integer range, int count) {
     boolean hasCoordinates = latitude != null && longitude != null;
     String keyword = hasCoordinates ? buildKeyword(null, plan.extraKeywords()) : buildKeyword(area, plan.extraKeywords());
     if (!hasCoordinates && keyword.isBlank()) {
@@ -183,7 +253,7 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
             .queryParamIfPresent("order", hasCoordinates ? Optional.of(4) : Optional.empty())
             .queryParamIfPresent("genre", buildGenreCodes(plan))
             .queryParam("start", start)
-            .queryParam("count", PAGE_SIZE)
+            .queryParam("count", count)
             .queryParam("format", "json")
             .build())
         .retrieve()
@@ -289,8 +359,82 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   }
 
   private boolean matchesBudget(Restaurant restaurant, Integer budgetMin, Integer budgetMax) {
-    return (budgetMin == null || restaurant.budgetMax() >= budgetMin)
-        && (budgetMax == null || restaurant.budgetMin() <= budgetMax);
+    if (budgetMin == null && budgetMax == null) {
+      return true;
+    }
+    if (budgetMin == null || budgetMin <= 0) {
+      return budgetMax == null || restaurant.budgetMin() <= budgetMax;
+    }
+    int averageBudget = (restaurant.budgetMin() + restaurant.budgetMax()) / 2;
+    return averageBudget >= budgetMin
+        && (budgetMax == null || averageBudget <= budgetMax);
+  }
+
+  private boolean matchesRequestedGenre(Restaurant restaurant, String requestedGenre) {
+    if (requestedGenre == null || requestedGenre.isBlank() || ALL_GENRES.equals(requestedGenre.trim())) {
+      return true;
+    }
+
+    String genre = requestedGenre.trim();
+    String source = String.join(" ",
+        restaurant.genre() == null ? "" : restaurant.genre(),
+        restaurant.name() == null ? "" : restaurant.name(),
+        restaurant.note() == null ? "" : restaurant.note());
+
+    return switch (genre) {
+      case "定食" -> !containsAny(source, List.of("韓国", "焼肉", "カラオケ", "バー"))
+          && containsAny(source, List.of("定食", "食堂", "和食", "ごはん", "御膳", "膳"));
+      case "居酒屋" -> containsAny(source, List.of("居酒屋", "酒場", "炉端", "バル"));
+      case "韓国料理" -> containsAny(source, List.of("韓国", "サムギョプサル", "チーズタッカルビ", "冷麺"));
+      case "ラーメン" -> containsAny(source, List.of("ラーメン", "らーめん", "つけ麺", "麺"));
+      case "焼肉" -> containsAny(source, List.of("焼肉", "ホルモン", "ジンギスカン"));
+      case "カレー" -> containsAny(source, List.of("カレー", "スパイス"));
+      case "うどん" -> containsAny(source, List.of("うどん"));
+      case "そば" -> containsAny(source, List.of("そば", "蕎麦"));
+      case "たこ焼き" -> containsAny(source, List.of("たこ焼き"));
+      case "お好み焼き" -> containsAny(source, List.of("お好み焼き", "もんじゃ"));
+      case "焼き鳥" -> containsAny(source, List.of("焼き鳥", "焼鳥"));
+      case "ピザ" -> containsAny(source, List.of("ピザ", "ピッツァ"));
+      case "ハンバーガー" -> containsAny(source, List.of("ハンバーガー", "バーガー"));
+      case "串カツ" -> containsAny(source, List.of("串カツ", "串かつ"));
+      case "餃子" -> containsAny(source, List.of("餃子"));
+      case "和食" -> containsAny(source, List.of("和食", "日本料理", "定食", "食堂", "懐石", "割烹"));
+      case "洋食" -> containsAny(source, List.of("洋食", "ステーキ", "ハンバーグ", "オムライス"));
+      case "イタリアン" -> containsAny(source, List.of("イタリアン", "パスタ", "ピザ", "ピッツァ", "トラットリア"));
+      case "中華" -> containsAny(source, List.of("中華", "中国料理", "餃子", "四川"));
+      case "寿司" -> containsAny(source, List.of("寿司", "鮨", "すし"));
+      case "海鮮" -> containsAny(source, List.of("海鮮", "魚", "刺身", "浜焼き"));
+      case "肉料理" -> containsAny(source, List.of("肉", "焼肉", "ステーキ", "ハンバーグ", "ホルモン"));
+      case "サラダ・野菜" -> containsAny(source, List.of("サラダ", "野菜", "ベジ"));
+      case "スープ" -> containsAny(source, List.of("スープ", "汁", "鍋"));
+      case "スイーツ" -> containsAny(source, List.of("スイーツ", "デザート", "ケーキ", "パフェ", "甘味"));
+      case "カフェ" -> containsAny(source, List.of("カフェ", "喫茶"));
+      case "パン" -> containsAny(source, List.of("パン", "ベーカリー"));
+      case "ファストフード" -> containsAny(source, List.of(
+          "ファストフード",
+          "ファーストフード",
+          "ハンバーガー",
+          "バーガー",
+          "サンド",
+          "フライド",
+          "マクドナルド",
+          "マック",
+          "モスバーガー",
+          "ロッテリア",
+          "ケンタッキー",
+          "KFC",
+          "バーガーキング",
+          "フレッシュネス",
+          "サブウェイ",
+          "ドムドム"));
+      case "お酒・バー" -> containsAny(source, List.of("バー", "ダイニングバー", "居酒屋", "ワイン", "ビール", "酒"));
+      case "各国料理" -> containsAny(source, List.of("各国料理", "韓国", "アジア", "エスニック", "タイ", "インド", "メキシコ", "スペイン", "ベトナム"));
+      default -> true;
+    };
+  }
+
+  private boolean containsAny(String source, List<String> keywords) {
+    return keywords.stream().anyMatch(source::contains);
   }
 
   private String resolveApiKey() {

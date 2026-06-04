@@ -7,6 +7,7 @@ import com.example.restaurantroulette.dto.ApiDtos.FavoriteCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.VisitCreateRequest;
+import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.exception.ConflictException;
 import com.example.restaurantroulette.repository.AppUserRepository;
 import com.example.restaurantroulette.repository.FavoriteRestaurantRepository;
@@ -24,13 +25,12 @@ import com.example.restaurantroulette.service.StatisticsService;
 import com.example.restaurantroulette.service.UserService;
 import com.example.restaurantroulette.service.ValidationService;
 import com.example.restaurantroulette.service.VisitCollectionService;
-import com.example.restaurantroulette.service.external.GooglePlacesEnrichmentService;
+import com.example.restaurantroulette.service.external.ExternalRestaurantProvider;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
-import org.springframework.web.client.RestClient;
 
 class RandishLogicTest {
   private final JdbcClient jdbcClient = JdbcClient.create(new EmbeddedDatabaseBuilder()
@@ -40,20 +40,17 @@ class RandishLogicTest {
   private final RestaurantRepository restaurantRepository = new RestaurantRepository(jdbcClient);
   private final DtoMapper mapper = new DtoMapper();
   private final ValidationService validationService = new ValidationService();
-  private final GooglePlacesEnrichmentService googlePlacesEnrichmentService = new GooglePlacesEnrichmentService(RestClient.builder());
   private final RestaurantQueryService restaurantQueryService = new RestaurantQueryService(
       restaurantRepository,
       List.of(),
       mapper,
-      validationService,
-      googlePlacesEnrichmentService);
+      validationService);
   private final RandomHistoryService randomHistoryService = new RandomHistoryService(new RandomHistoryRepository(jdbcClient), restaurantQueryService, mapper, validationService);
   private final RandomRestaurantService randomRestaurantService = new RandomRestaurantService(
       restaurantQueryService,
       randomHistoryService,
       mapper,
-      validationService,
-      googlePlacesEnrichmentService);
+      validationService);
   private final FavoriteService favoriteService = new FavoriteService(new FavoriteRestaurantRepository(jdbcClient), restaurantQueryService, mapper, validationService);
   private final UserService userService = new UserService(new AppUserRepository(jdbcClient), mapper);
   private final StampService stampService = new StampService(new StampRepository(jdbcClient), mapper, validationService);
@@ -67,6 +64,19 @@ class RandishLogicTest {
     assertThat(restaurants).isNotEmpty();
     assertThat(restaurants).allMatch(restaurant -> restaurant.area().equals("梅田"));
     assertThat(restaurants).allMatch(restaurant -> restaurant.genre().equals("ラーメン"));
+  }
+
+  @Test
+  void searchFiltersByAverageBudget() {
+    var budgetLimitMatch = restaurantQueryService.search("梅田", "ラーメン", 0, 1000);
+    var budgetLimitTooLow = restaurantQueryService.search("梅田", "ラーメン", 0, 800);
+    var matching = restaurantQueryService.search("梅田", "ラーメン", 1000, 1200);
+    var tooHigh = restaurantQueryService.search("梅田", "ラーメン", 1300, 1500);
+
+    assertThat(budgetLimitMatch).extracting("id").contains("seed-umeda-ramen");
+    assertThat(budgetLimitTooLow).extracting("id").doesNotContain("seed-umeda-ramen");
+    assertThat(matching).extracting("id").contains("seed-umeda-ramen");
+    assertThat(tooHigh).extracting("id").doesNotContain("seed-umeda-ramen");
   }
 
   @Test
@@ -143,5 +153,107 @@ class RandishLogicTest {
     new RestaurantRepository(jdbcClient);
 
     assertThat(favoriteService.findByUserId("user-resync")).hasSize(1);
+  }
+
+  @Test
+  void hybridFallbackOnlyFillsMissingSlots() {
+    var hotPepperLikeProvider = new FixedProvider("hotpepper", false, 70);
+    var googleLikeProvider = new FixedProvider("google", true, 100);
+    var hybridQueryService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(hotPepperLikeProvider, googleLikeProvider),
+        mapper,
+        validationService);
+
+    var restaurants = hybridQueryService.searchRandomEntities("東成区", "ラーメン", 0, 2000, null, null, null, 100);
+
+    assertThat(restaurants).hasSize(100);
+    assertThat(restaurants.stream().filter(restaurant -> restaurant.externalProvider().equals("HOTPEPPER")).count()).isEqualTo(70);
+    assertThat(restaurants.stream().filter(restaurant -> restaurant.externalProvider().equals("GOOGLE_PLACES")).count()).isEqualTo(30);
+    assertThat(hotPepperLikeProvider.lastRandomMaxCandidates).isEqualTo(100);
+    assertThat(googleLikeProvider.lastRandomMaxCandidates).isEqualTo(30);
+  }
+
+  @Test
+  void hybridDoesNotUseFallbackWhenPrimaryHasEnoughCandidates() {
+    var hotPepperLikeProvider = new FixedProvider("hotpepper", false, 120);
+    var googleLikeProvider = new FixedProvider("google", true, 100);
+    var hybridQueryService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(hotPepperLikeProvider, googleLikeProvider),
+        mapper,
+        validationService);
+
+    var restaurants = hybridQueryService.searchRandomEntities("東成区", "ラーメン", 0, 2000, null, null, null, 100);
+
+    assertThat(restaurants).hasSize(100);
+    assertThat(restaurants).allMatch(restaurant -> restaurant.externalProvider().equals("HOTPEPPER"));
+    assertThat(googleLikeProvider.randomCallCount).isZero();
+  }
+
+  private static class FixedProvider implements ExternalRestaurantProvider {
+    private final String idPrefix;
+    private final boolean fallback;
+    private final int availableCount;
+    private int lastRandomMaxCandidates;
+    private int randomCallCount;
+
+    private FixedProvider(String idPrefix, boolean fallback, int availableCount) {
+      this.idPrefix = idPrefix;
+      this.fallback = fallback;
+      this.availableCount = availableCount;
+    }
+
+    @Override
+    public boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    public boolean isFallback() {
+      return fallback;
+    }
+
+    @Override
+    public List<Restaurant> search(String area, String genre, Integer budgetMin, Integer budgetMax, Double latitude, Double longitude, Integer range) {
+      return restaurants(Math.min(availableCount, 100), area, genre);
+    }
+
+    @Override
+    public List<Restaurant> searchRandomCandidates(
+        String area,
+        String genre,
+        Integer budgetMin,
+        Integer budgetMax,
+        Double latitude,
+        Double longitude,
+        Integer range,
+        int maxCandidates) {
+      randomCallCount++;
+      lastRandomMaxCandidates = maxCandidates;
+      return restaurants(Math.min(availableCount, maxCandidates), area, genre);
+    }
+
+    private List<Restaurant> restaurants(int count, String area, String genre) {
+      String provider = fallback ? "GOOGLE_PLACES" : "HOTPEPPER";
+      return java.util.stream.IntStream.range(0, count)
+          .mapToObj(index -> new Restaurant(
+              "%s-%03d".formatted(idPrefix, index),
+              provider,
+              "%s-%03d".formatted(idPrefix, index),
+              "%s 店 %03d".formatted(idPrefix, index),
+              area,
+              genre,
+              800,
+              1500,
+              4.0,
+              5,
+              "大阪府大阪市東成区%sテスト%03d".formatted(idPrefix, index),
+              null,
+              "test",
+              null,
+              null))
+          .toList();
+    }
   }
 }

@@ -49,10 +49,21 @@ public class RestaurantRepository {
     return findAll().stream()
         .filter(restaurant -> matchesArea(restaurant, area))
         .filter(restaurant -> genre == null || genre.isBlank() || genre.equals("すべて") || restaurant.genre().equals(genre))
-        .filter(restaurant -> budgetMin == null || restaurant.budgetMax() >= budgetMin)
-        .filter(restaurant -> budgetMax == null || restaurant.budgetMin() <= budgetMax)
+        .filter(restaurant -> matchesBudget(restaurant, budgetMin, budgetMax))
         .sorted(Comparator.comparing(Restaurant::name))
         .toList();
+  }
+
+  private boolean matchesBudget(Restaurant restaurant, Integer budgetMin, Integer budgetMax) {
+    if (budgetMin == null && budgetMax == null) {
+      return true;
+    }
+    if (budgetMin == null || budgetMin <= 0) {
+      return budgetMax == null || restaurant.budgetMin() <= budgetMax;
+    }
+    int averageBudget = (restaurant.budgetMin() + restaurant.budgetMax()) / 2;
+    return averageBudget >= budgetMin
+        && (budgetMax == null || averageBudget <= budgetMax);
   }
 
   private void save(Restaurant restaurant) {

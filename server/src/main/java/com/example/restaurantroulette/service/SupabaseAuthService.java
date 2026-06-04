@@ -39,6 +39,7 @@ public class SupabaseAuthService {
       SupabaseAuthApiResponse response = client().post()
           .uri("/auth/v1/signup")
           .header("apikey", anonKey)
+          .header("Authorization", "Bearer " + anonKey)
           .body(Map.of(
               "email", email,
               "password", password,
@@ -57,6 +58,7 @@ public class SupabaseAuthService {
       SupabaseAuthApiResponse response = client().post()
           .uri("/auth/v1/token?grant_type=password")
           .header("apikey", anonKey)
+          .header("Authorization", "Bearer " + anonKey)
           .body(Map.of("email", email, "password", password))
           .retrieve()
           .body(SupabaseAuthApiResponse.class);
@@ -86,13 +88,17 @@ public class SupabaseAuthService {
   }
 
   private SupabaseAuthResult toResult(SupabaseAuthApiResponse response) {
-    if (response == null || response.user() == null || response.user().id() == null || response.user().id().isBlank()) {
+    if (response == null) {
+      throw new BadRequestException("Supabase did not return a user.");
+    }
+    SupabaseAuthUser user = response.resolvedUser();
+    if (user == null || user.id() == null || user.id().isBlank()) {
       throw new BadRequestException("Supabase did not return a user.");
     }
     String accessToken = response.accessToken() != null
         ? response.accessToken()
         : response.session() == null ? null : response.session().accessToken();
-    return new SupabaseAuthResult(response.user(), accessToken);
+    return new SupabaseAuthResult(user, accessToken);
   }
 
   private RestClient client() {
@@ -132,7 +138,20 @@ public class SupabaseAuthService {
   public record SupabaseAuthApiResponse(
       @JsonProperty("access_token") String accessToken,
       SupabaseAuthSession session,
-      SupabaseAuthUser user) {
+      SupabaseAuthUser user,
+      String id,
+      String email,
+      @JsonProperty("user_metadata") Map<String, Object> userMetadata,
+      @JsonProperty("raw_user_meta_data") Map<String, Object> rawUserMetadata) {
+    public SupabaseAuthUser resolvedUser() {
+      if (user != null) {
+        return user;
+      }
+      if (id == null || id.isBlank()) {
+        return null;
+      }
+      return new SupabaseAuthUser(id, email, userMetadata, rawUserMetadata);
+    }
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
@@ -143,17 +162,19 @@ public class SupabaseAuthService {
   public record SupabaseAuthUser(
       String id,
       String email,
-      @JsonProperty("user_metadata") Map<String, Object> userMetadata) {
+      @JsonProperty("user_metadata") Map<String, Object> userMetadata,
+      @JsonProperty("raw_user_meta_data") Map<String, Object> rawUserMetadata) {
     public String displayName() {
-      if (userMetadata == null) {
+      Map<String, Object> metadata = userMetadata != null ? userMetadata : rawUserMetadata;
+      if (metadata == null) {
         return null;
       }
-      Object displayName = userMetadata.get("display_name");
+      Object displayName = metadata.get("display_name");
       if (displayName == null) {
-        displayName = userMetadata.get("displayName");
+        displayName = metadata.get("displayName");
       }
       if (displayName == null) {
-        displayName = userMetadata.get("name");
+        displayName = metadata.get("name");
       }
       return displayName == null ? null : String.valueOf(displayName);
     }

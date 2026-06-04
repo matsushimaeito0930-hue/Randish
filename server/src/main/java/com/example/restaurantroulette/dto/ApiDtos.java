@@ -29,6 +29,8 @@ public final class ApiDtos {
       Double googleRating,
       String googleMapsUri,
       Boolean openNow,
+      String nextOpenTime,
+      String nextCloseTime,
       String googlePlaceId) {
   }
 

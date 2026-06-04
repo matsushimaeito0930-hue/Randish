@@ -2,7 +2,7 @@
 
 ## Scope
 
-RANDISH is a restaurant roulette app. The database keeps the canonical restaurant cache and the user's actions around it: draws, favorites, visits, stamps, and later auth/profile data.
+RANDISH is a restaurant roulette app. The database keeps the canonical restaurant cache and the user's actions around it: draws, favorites, visits, stamps, auth/profile data, and Premium billing state.
 
 This design is applied to the current Spring Boot + JDBC + H2 setup in `src/main/resources/schema.sql`, while keeping the shape close to PostgreSQL/Supabase so it can be migrated later.
 
@@ -15,6 +15,11 @@ This design is applied to the current Spring Boot + JDBC + H2 setup in `src/main
 - Visits are append-only events, so the same user can visit the same restaurant multiple times.
 - Favorites and stamps are deduplicated by business rules with unique constraints.
 - Google/other provider enrichment can be cached separately from the base restaurant row.
+- Paid Premium state is normalized across Stripe, App Store, and Google Play in `subscriptions`.
+- Admin-granted Premium is kept separate in `premium_grants`.
+- Webhook and store notification idempotency is enforced by `payment_events`.
+
+See `premium-billing-design.md` for the App Store / Google Play ready Premium design.
 
 ## ER Diagram
 
