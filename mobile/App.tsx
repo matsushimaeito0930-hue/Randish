@@ -1,10 +1,12 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   Image,
   ImageSourcePropType,
+  Keyboard,
   Linking,
   NativeModules,
   Pressable,
@@ -19,15 +21,18 @@ import { randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
 import type { RandomHistory as ApiRandomHistory } from './services/randishApi';
 import { JAPAN_MUNICIPALITY_PRESETS } from './data/japanMunicipalities';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { INK, ORANGE } from './constants/theme';
 import { styles } from './styles/appStyles';
 
 type AppStage = 'splash' | 'login' | 'main';
 type TabKey = 'home' | 'search' | 'random' | 'save' | 'analytics';
 type DrawAnimationKey = 'roulette' | 'lottery' | 'shuffle' | 'radar';
-type DrawMode = 'condition' | 'everything';
+type DrawMode = 'condition' | 'everything' | 'travel';
 type ConditionRandomField = 'budget' | 'distance' | 'genre';
 type MealSlotKey = 'morning' | 'lunch' | 'dinner' | 'midnight';
+type TravelRevealStep = 'hidden' | 'genre' | 'area' | 'restaurant';
+type AppLanguage = 'ja' | 'en' | 'zh' | 'ko';
 
 type ConditionRandomState = Record<ConditionRandomField, boolean>;
 
@@ -139,6 +144,7 @@ const DEV_LAN_API_BASE_URLS = ['http://10.230.36.45:8080', 'http://10.230.36.34:
 const LOCAL_API_BASE_URLS = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://10.0.2.2:8080'];
 const TETHER_HOST_PATTERN = /^http:\/\/10\.230\.36\.\d+(?::8080)?$/;
 const RANDISH_LOGO = require('./assets/randish-logo-square1.png');
+const HOME_HEADER_MAP = require('./assets/home-map/homeHeader.png');
 const HOTPEPPER_CREDIT_URL = 'https://webservice.recruit.co.jp/';
 const HOTPEPPER_CREDIT_IMAGE_URL = 'https://webservice.recruit.co.jp/banner/hotpepper-m.gif';
 
@@ -266,6 +272,125 @@ const DISTANCE_OPTIONS = ['500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '
 const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
 const FREE_MEAL_TICKET_COUNT = 3;
 const IS_PRO_USER = false;
+
+const LANGUAGE_OPTIONS: { key: AppLanguage; label: string; nativeLabel: string }[] = [
+  { key: 'ja', label: 'Japanese', nativeLabel: '日本語' },
+  { key: 'en', label: 'English', nativeLabel: 'English' },
+  { key: 'zh', label: 'Chinese', nativeLabel: '中文' },
+  { key: 'ko', label: 'Korean', nativeLabel: '한국어' },
+];
+
+const UI_TEXT: Record<AppLanguage, {
+  accountSettings: string;
+  profile: string;
+  profileValue: string;
+  profileLocked: string;
+  displayName: string;
+  profilePlaceholder: string;
+  changeImage: string;
+  save: string;
+  language: string;
+  notifications: string;
+  notificationsValue: string;
+  dailyAccess: string;
+  creditTerms: string;
+  creditTermsValue: string;
+  areaSetup: string;
+  homeTitle: string;
+  homeLead: string;
+  travel: string;
+  travelSub: string;
+  searchPlaceholder: string;
+}> = {
+  ja: {
+    accountSettings: 'アカウント設定',
+    profile: 'プロフィール',
+    profileValue: '名前と画像を変更',
+    profileLocked: '会員登録後に変更できます',
+    displayName: '表示名',
+    profilePlaceholder: '表示名',
+    changeImage: '画像を変更',
+    save: '保存',
+    language: '言語',
+    notifications: '通知',
+    notificationsValue: '食券リマインド',
+    dailyAccess: '利用枠',
+    creditTerms: 'クレジット・規約',
+    creditTermsValue: 'サービス表記',
+    areaSetup: 'AREA SETUP',
+    homeTitle: 'どの街から探す？',
+    homeLead: '現在地、駅名、市町村。今日の一店を決める起点を選びます。',
+    travel: '旅をする',
+    travelSub: '県・街・距離・ジャンルをおまかせ',
+    searchPlaceholder: '梅田・美郷町・駅名で検索',
+  },
+  en: {
+    accountSettings: 'Account Settings',
+    profile: 'Profile',
+    profileValue: 'Edit name and photo',
+    profileLocked: 'Available after registration',
+    displayName: 'Display Name',
+    profilePlaceholder: 'Display name',
+    changeImage: 'Change Photo',
+    save: 'Save',
+    language: 'Language',
+    notifications: 'Notifications',
+    notificationsValue: 'Meal ticket reminders',
+    dailyAccess: 'Daily Access',
+    creditTerms: 'Credits & Terms',
+    creditTermsValue: 'Service info',
+    areaSetup: 'AREA SETUP',
+    homeTitle: 'Where should we search?',
+    homeLead: 'Choose your starting point: current location, station, city, or town.',
+    travel: 'Take a Food Trip',
+    travelSub: 'Random area, distance, and genre',
+    searchPlaceholder: 'Search Umeda, Misato, station...',
+  },
+  zh: {
+    accountSettings: '账户设置',
+    profile: '个人资料',
+    profileValue: '更改名称和头像',
+    profileLocked: '注册后可使用',
+    displayName: '显示名称',
+    profilePlaceholder: '显示名称',
+    changeImage: '更改头像',
+    save: '保存',
+    language: '语言',
+    notifications: '通知',
+    notificationsValue: '餐券提醒',
+    dailyAccess: '使用次数',
+    creditTerms: '版权与条款',
+    creditTermsValue: '服务说明',
+    areaSetup: '区域设置',
+    homeTitle: '从哪座城市开始找？',
+    homeLead: '选择当前位置、车站、市区町村，作为今天选店的起点。',
+    travel: '为了吃去旅行',
+    travelSub: '随机选择地区、距离和类型',
+    searchPlaceholder: '搜索梅田、美乡町、车站...',
+  },
+  ko: {
+    accountSettings: '계정 설정',
+    profile: '프로필',
+    profileValue: '이름과 사진 변경',
+    profileLocked: '회원가입 후 이용 가능',
+    displayName: '표시 이름',
+    profilePlaceholder: '표시 이름',
+    changeImage: '사진 변경',
+    save: '저장',
+    language: '언어',
+    notifications: '알림',
+    notificationsValue: '식권 리마인드',
+    dailyAccess: '이용 횟수',
+    creditTerms: '크레딧 및 약관',
+    creditTermsValue: '서비스 표기',
+    areaSetup: '지역 설정',
+    homeTitle: '어느 동네에서 찾을까?',
+    homeLead: '현재 위치, 역 이름, 시구정촌을 오늘 한 끼의 출발점으로 선택합니다.',
+    travel: '먹으러 여행하기',
+    travelSub: '지역, 거리, 장르를 랜덤 선택',
+    searchPlaceholder: '우메다, 미사토, 역 이름 검색...',
+  },
+};
 
 const MEAL_TICKET_DEFINITIONS: MealTicketDefinition[] = [
   {
@@ -865,6 +990,10 @@ const GENRES: GenreItem[] = [
 const getGenreVisual = (genre?: string | null) =>
   GENRES.find((item) => item.label === genre) ?? GENRES[0];
 
+const TRAVEL_GENRES = GENRES.filter((item) => item.label !== 'すべて').map((item) => item.label);
+
+const pickRandomTravelGenre = (currentGenre: string) => pickRandomDifferent(TRAVEL_GENRES, currentGenre);
+
 const pickRandomDifferent = <T,>(items: T[], current: T) => {
   if (items.length <= 1) {
     return items[0];
@@ -1286,6 +1415,14 @@ const getPrefectureFromText = (value?: string | null) => {
 
 const isPrefectureName = (value: string) => PREFECTURE_REGIONS.some((item) => item.prefecture === value);
 
+const TRAVEL_AREA_PRESETS: AreaPreset[] = JAPAN_MUNICIPALITY_PRESETS.filter((preset) => {
+  const areaValue = getAreaPresetValue(preset);
+  return areaValue !== '現在地' && !isPrefectureName(areaValue) && !isPrefectureName(preset.label);
+});
+
+const pickRandomTravelAreaPreset = () =>
+  TRAVEL_AREA_PRESETS[Math.floor(Math.random() * TRAVEL_AREA_PRESETS.length)] ?? ALL_AREA_PRESETS[0];
+
 const getPrefectureRegion = (prefecture?: string | null) =>
   PREFECTURE_REGIONS.find((item) => item.prefecture === prefecture)?.region;
 
@@ -1692,11 +1829,16 @@ export default function App() {
   const [drawHistories, setDrawHistories] = useState<DrawHistoryEntry[]>([]);
   const [savedRestaurants, setSavedRestaurants] = useState<Restaurant[]>([]);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const [profileName, setProfileName] = useState('RANDISH Guest');
+  const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
+  const [appLanguage, setAppLanguage] = useState<AppLanguage>('ja');
   const [locationStatus, setLocationStatus] = useState('現在地を確認できます');
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('条件を選んで、今日の一店を決めましょう。');
   const [drawAnimationKey, setDrawAnimationKey] = useState<DrawAnimationKey>('roulette');
   const [drawMode, setDrawMode] = useState<DrawMode>('condition');
+  const [travelRevealStep, setTravelRevealStep] = useState<TravelRevealStep>('hidden');
+  const [travelDisplayArea, setTravelDisplayArea] = useState<string | null>(null);
   const [conditionRandom, setConditionRandom] = useState<ConditionRandomState>({
     budget: false,
     distance: false,
@@ -1735,6 +1877,7 @@ export default function App() {
     () => buildMealTicketState(now, drawHistories, IS_PRO_USER),
     [drawHistories, now],
   );
+  const isRegisteredUser = userId !== APP_USER_ID;
 
   const apiBaseUrlCandidates = useMemo(
     () => buildApiBaseUrlCandidates(apiBaseUrl, runtimeApiBaseUrl),
@@ -1998,6 +2141,8 @@ export default function App() {
 
   const prepareDrawStage = useCallback((mode: DrawMode) => {
     setDrawMode(mode);
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(null);
     setSelectedRestaurant(null);
     spinValue.setValue(0);
     resultRevealValue.setValue(0);
@@ -2016,11 +2161,52 @@ export default function App() {
     prepareDrawStage('everything');
   }, [prepareDrawStage]);
 
+  const prepareTravelDraw = useCallback(() => {
+    const travelPreset = pickRandomTravelAreaPreset();
+    const travelPrefecture = getPresetPrefecture(travelPreset);
+    const travelPrefectureLabel = travelPrefecture ?? 'どこかの県';
+    const travelArea = travelPreset.label;
+    const travelDisplay = `${travelPrefectureLabel} / ${travelArea}`;
+    const travelSearchArea = getAreaPresetSearchValue(travelPreset);
+    const nextGenre = pickRandomTravelGenre(genre);
+    const nextDistance = pickRandomDifferent(DISTANCE_OPTIONS, distance);
+
+    setArea(travelSearchArea);
+    setGenre(nextGenre);
+    setDistance(nextDistance);
+    setBudgetMin('0');
+    setDrawMode('travel');
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(travelDisplay);
+    setConditionRandom({ budget: false, distance: false, genre: false });
+    setSelectedRestaurant(null);
+    spinValue.setValue(0);
+    resultRevealValue.setValue(0);
+    setLocationStatus(formatLocationStatus(travelPrefecture, travelArea));
+    setActiveTab('random');
+    setMessage('旅の行き先を伏せました。STARTするとジャンル、エリア、お店の順に開きます。');
+    scrollToContentTop();
+  }, [distance, genre, resultRevealValue, scrollToContentTop, spinValue]);
+
   const chooseRandomRestaurant = useCallback(async () => {
+    const isTravelDraw = drawMode === 'travel';
     setActiveTab('random');
     scrollToContentTop();
     setIsLoading(true);
     const drawAnimation = startDrawAnimation();
+    if (isTravelDraw) {
+      const travelGenreLabel = genre;
+      const travelAreaLabel = travelDisplayArea ?? area;
+      setTravelRevealStep('hidden');
+      setTimeout(() => {
+        setTravelRevealStep('genre');
+        setMessage(`ジャンルを開きました。${travelGenreLabel}`);
+      }, 320);
+      setTimeout(() => {
+        setTravelRevealStep('area');
+        setMessage(`エリアを開きました。${travelAreaLabel}`);
+      }, 920);
+    }
     const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
     let alternativesCache: Restaurant[] | null = null;
     const loadAlternatives = async () => {
@@ -2056,8 +2242,15 @@ export default function App() {
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
       recordDrawForAnalytics(normalized);
-      setMessage(recentIds.has(normalized.id) ? '候補が一巡しています。条件を広げると新しい店が出やすくなります。' : drawAnimation.doneMessage);
-      setTimeout(revealSelectedRestaurant, 980);
+      const doneMessage = recentIds.has(normalized.id) ? '候補が一巡しています。条件を広げると新しい店が出やすくなります。' : drawAnimation.doneMessage;
+      setMessage(isTravelDraw ? '最後にお店を開きます。' : doneMessage);
+      if (isTravelDraw) {
+        setTimeout(() => {
+          setTravelRevealStep('restaurant');
+          setMessage(`旅の一店を開きました。${normalized.name}`);
+        }, 1500);
+      }
+      setTimeout(revealSelectedRestaurant, isTravelDraw ? 1680 : 980);
     } catch (error) {
       setSelectedRestaurant(null);
       const reason = error instanceof Error ? error.message : '通信エラー';
@@ -2066,7 +2259,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, apiParams, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToContentTop, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, apiParams, area, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToContentTop, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
@@ -2160,6 +2353,8 @@ export default function App() {
   const updateGenre = (value: string) => {
     setGenre(value);
     setDrawMode('condition');
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, genre: false }));
     setSelectedRestaurant(null);
   };
@@ -2177,12 +2372,16 @@ export default function App() {
     }
     setArea(value);
     setDrawMode('condition');
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(null);
     setSelectedRestaurant(null);
   };
 
   const updateBudgetMin = (value: string) => {
     setBudgetMin(value);
     setDrawMode('condition');
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, budget: false }));
     setSelectedRestaurant(null);
   };
@@ -2191,6 +2390,8 @@ export default function App() {
     setBudgetMin('0');
     setBudgetMax(value);
     setDrawMode('condition');
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, budget: false }));
     setSelectedRestaurant(null);
   };
@@ -2198,18 +2399,24 @@ export default function App() {
   const updateDistance = (value: string) => {
     setDistance(value);
     setDrawMode('condition');
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, distance: false }));
     setSelectedRestaurant(null);
   };
 
   const markConditionRandom = useCallback((field: ConditionRandomField) => {
     setDrawMode('condition');
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, [field]: !current[field] }));
     setSelectedRestaurant(null);
   }, []);
 
   const openRandomTab = useCallback(() => {
     setDrawMode('condition');
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(null);
     setActiveTab('random');
     setMessage('抽選カードを押すとスタートします。');
     scrollToContentTop();
@@ -2224,8 +2431,14 @@ export default function App() {
     scrollToContentTop(false);
   }, [openRandomTab, scrollToContentTop]);
 
-  const enterMain = useCallback((nextUserId = APP_USER_ID) => {
+  const enterMain = useCallback((nextUserId = APP_USER_ID, nextProfileName?: string) => {
     setUserId(nextUserId);
+    if (nextUserId === APP_USER_ID) {
+      setProfileName('RANDISH Guest');
+      setProfileImageUri(null);
+    } else if (nextProfileName?.trim()) {
+      setProfileName(nextProfileName.trim());
+    }
     setStage('main');
   }, []);
 
@@ -2257,7 +2470,14 @@ export default function App() {
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="dark-content" />
       {activeTab !== 'home' && <AppHeader area={area} locationStatus={locationStatus} onLocationPress={requestCurrentLocation} />}
-      <ScrollView ref={scrollViewRef} style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollViewRef}
+        style={styles.content}
+        contentContainerStyle={styles.contentInner}
+        showsVerticalScrollIndicator={false}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+      >
         {activeTab === 'home' && (
           <HomeTab
             area={area}
@@ -2270,8 +2490,16 @@ export default function App() {
             history={randomHistory}
             message={message}
             locationStatus={locationStatus}
+            userLocation={userLocation}
+            profileName={profileName}
+            profileImageUri={profileImageUri}
+            appLanguage={appLanguage}
+            isRegisteredUser={isRegisteredUser}
             isLoading={isLoading}
             mealTicketState={mealTicketState}
+            onProfileNameChange={setProfileName}
+            onProfileImageChange={setProfileImageUri}
+            onLanguageChange={setAppLanguage}
             onAreaChange={updateArea}
             onGenreChange={updateGenre}
             onBudgetMinChange={updateBudgetMin}
@@ -2282,6 +2510,7 @@ export default function App() {
             onOpenRandom={openRandomTab}
             onRandomPress={prepareConditionDraw}
             onAllRandomPress={prepareEverythingDraw}
+            onTravelPress={prepareTravelDraw}
             onLocationPress={requestCurrentLocation}
           />
         )}
@@ -2323,6 +2552,8 @@ export default function App() {
             userLocation={userLocation}
             history={randomHistory}
             conditionRandom={conditionRandom}
+            travelRevealStep={travelRevealStep}
+            travelDisplayArea={travelDisplayArea}
             drawAnimationKey={drawAnimationKey}
             drawMode={drawMode}
             mealTicketState={mealTicketState}
@@ -2382,7 +2613,7 @@ function LoginScreen({
 }: {
   apiBaseUrlCandidates: string[];
   onApiConnected: () => void;
-  onStart: (userId?: string) => void;
+  onStart: (userId?: string, displayName?: string) => void;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -2427,7 +2658,7 @@ function LoginScreen({
         setAuthNotice('登録しました。メール確認が有効な場合は、確認後にこの画面でログインしてください。');
         return;
       }
-      onStart(auth.user.id);
+      onStart(auth.user.id, auth.user.displayName);
     } catch (error) {
       const reason = error instanceof Error ? error.message : '登録に失敗しました。';
       setAuthNotice(`登録できませんでした。${reason}`);
@@ -2451,7 +2682,7 @@ function LoginScreen({
       const auth = await randishApi.login(apiBaseUrlCandidates, { email, password });
       randishApi.setAuthToken(auth.accessToken);
       onApiConnected();
-      onStart(auth.user.id);
+      onStart(auth.user.id, auth.user.displayName);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'ログインに失敗しました。';
       setAuthNotice(`ログインできませんでした。${reason}`);
@@ -2467,7 +2698,12 @@ function LoginScreen({
   return (
     <SafeAreaView style={styles.registerSafe}>
       <StatusBar barStyle="dark-content" />
-      <ScrollView contentContainerStyle={styles.registerContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.registerContainer}
+        showsVerticalScrollIndicator={false}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.registerHeader}>
           <Text style={styles.registerLogo}>RANDISH</Text>
           <Text style={styles.registerSub}>京都府 / 近畿地方 / 全域 周辺から探します</Text>
@@ -2487,6 +2723,9 @@ function LoginScreen({
             textContentType="emailAddress"
             value={email}
             onChangeText={setEmail}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={Keyboard.dismiss}
           />
 
           <RegisterLabel text="パスワード" />
@@ -2498,6 +2737,9 @@ function LoginScreen({
             textContentType="newPassword"
             value={password}
             onChangeText={setPassword}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={Keyboard.dismiss}
           />
 
           <RegisterLabel text="パスワード（確認）" />
@@ -2509,6 +2751,9 @@ function LoginScreen({
             textContentType="newPassword"
             value={passwordConfirm}
             onChangeText={setPasswordConfirm}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={Keyboard.dismiss}
           />
 
           <RegisterLabel text="ニックネーム" />
@@ -2518,6 +2763,9 @@ function LoginScreen({
             placeholderTextColor="#aaa"
             value={displayName}
             onChangeText={setDisplayName}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={Keyboard.dismiss}
           />
 
           <Pressable style={styles.registerCheckRow} onPress={() => setAcceptedTerms((value) => !value)}>
@@ -2684,8 +2932,16 @@ function HomeTab({
   history,
   message,
   locationStatus,
+  userLocation,
+  profileName,
+  profileImageUri,
+  appLanguage,
+  isRegisteredUser,
   isLoading,
   mealTicketState,
+  onProfileNameChange,
+  onProfileImageChange,
+  onLanguageChange,
   onAreaChange,
   onGenreChange,
   onBudgetMinChange,
@@ -2696,6 +2952,7 @@ function HomeTab({
   onOpenRandom,
   onRandomPress,
   onAllRandomPress,
+  onTravelPress,
   onLocationPress,
 }: {
   area: string;
@@ -2708,8 +2965,16 @@ function HomeTab({
   history: Restaurant[];
   message: string;
   locationStatus: string;
+  userLocation: UserLocation | null;
+  profileName: string;
+  profileImageUri: string | null;
+  appLanguage: AppLanguage;
+  isRegisteredUser: boolean;
   isLoading: boolean;
   mealTicketState: MealTicketState;
+  onProfileNameChange: (value: string) => void;
+  onProfileImageChange: (value: string | null) => void;
+  onLanguageChange: (value: AppLanguage) => void;
   onAreaChange: (value: string) => void;
   onGenreChange: (value: string) => void;
   onBudgetMinChange: (value: string) => void;
@@ -2720,6 +2985,7 @@ function HomeTab({
   onOpenRandom: () => void;
   onRandomPress: () => void;
   onAllRandomPress: () => void;
+  onTravelPress: () => void;
   onLocationPress: () => void;
 }) {
   return (
@@ -2732,14 +2998,31 @@ function HomeTab({
             presets={ALL_AREA_PRESETS}
             history={history}
             locationStatus={locationStatus}
+            userLocation={userLocation}
+            profileName={profileName}
+            profileImageUri={profileImageUri}
+            appLanguage={appLanguage}
+            isRegisteredUser={isRegisteredUser}
             mealTicketState={mealTicketState}
+            onProfileNameChange={onProfileNameChange}
+            onProfileImageChange={onProfileImageChange}
+            onLanguageChange={onLanguageChange}
             onAreaChange={onAreaChange}
             onOpenFilters={onOpenFilters}
             onLocationPress={onLocationPress}
             onAllRandomPress={onAllRandomPress}
+            onTravelPress={onTravelPress}
             onConditionRandomPress={onRandomPress}
             onSubmit={onLoadRestaurants}
           />
+    </View>
+  );
+}
+
+function HomeMapIllustration() {
+  return (
+    <View pointerEvents="none" style={styles.homeHeroMapIllustration}>
+      <Image source={HOME_HEADER_MAP} style={styles.homeHeroMapImage} resizeMode="cover" />
     </View>
   );
 }
@@ -2770,11 +3053,20 @@ function HomeLocationPanel({
   presets,
   history,
   locationStatus,
+  userLocation,
+  profileName,
+  profileImageUri,
+  appLanguage,
+  isRegisteredUser,
   mealTicketState,
+  onProfileNameChange,
+  onProfileImageChange,
+  onLanguageChange,
   onAreaChange,
   onOpenFilters,
   onLocationPress,
   onAllRandomPress,
+  onTravelPress,
   onConditionRandomPress,
   onSubmit,
 }: {
@@ -2785,16 +3077,31 @@ function HomeLocationPanel({
   presets: AreaPreset[];
   history: Restaurant[];
   locationStatus: string;
+  userLocation: UserLocation | null;
+  profileName: string;
+  profileImageUri: string | null;
+  appLanguage: AppLanguage;
+  isRegisteredUser: boolean;
   mealTicketState: MealTicketState;
+  onProfileNameChange: (value: string) => void;
+  onProfileImageChange: (value: string | null) => void;
+  onLanguageChange: (value: AppLanguage) => void;
   onAreaChange: (value: string) => void;
   onOpenFilters: () => void;
   onLocationPress: () => void;
   onAllRandomPress: () => void;
+  onTravelPress: () => void;
   onConditionRandomPress: () => void;
   onSubmit: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [showAllFavorites, setShowAllFavorites] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
+  const [profileNameDraft, setProfileNameDraft] = useState(profileName);
+  const t = UI_TEXT[appLanguage];
+  const currentLanguage = LANGUAGE_OPTIONS.find((item) => item.key === appLanguage) ?? LANGUAGE_OPTIONS[0];
   const selectedPreset = getAreaPreset(area);
   const areaPrefecture = getPrefectureFromText(area) ?? (selectedPreset ? getPresetPrefecture(selectedPreset) : undefined);
   const [selectedHomePrefecture, setSelectedHomePrefecture] = useState<string | null>(
@@ -2837,6 +3144,15 @@ function HomeLocationPanel({
         (item): item is PrefectureRegion & { image: ImageSourcePropType; firstArea: AreaPreset | undefined } => item != null,
       ),
   }));
+  const accountMenuItems: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }[] = [
+    { icon: 'notifications-outline', label: t.notifications, value: t.notificationsValue },
+    { icon: 'ticket-outline', label: t.dailyAccess, value: `${mealTicketState.usedFreeCount}/${mealTicketState.totalFreeCount} FREE` },
+    { icon: 'shield-checkmark-outline', label: t.creditTerms, value: t.creditTermsValue },
+  ];
+  const currentLocationTitle = userLocation ? userLocation.label : '現在地を取得';
+  const currentLocationMeta = userLocation
+    ? `${userLocation.latitude.toFixed(4)}, ${userLocation.longitude.toFixed(4)}`
+    : 'タップして現在地を同期';
 
   useEffect(() => {
     if (selectedRegion) {
@@ -2849,6 +3165,10 @@ function HomeLocationPanel({
       setSelectedHomePrefecture(areaPrefecture);
     }
   }, [area, areaPrefecture]);
+
+  useEffect(() => {
+    setProfileNameDraft(profileName);
+  }, [profileName]);
 
   const searchResults = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -2882,19 +3202,182 @@ function HomeLocationPanel({
     openConditionsForArea(selectedPrefecture);
   };
 
+  const saveProfileName = () => {
+    if (!isRegisteredUser) {
+      Alert.alert('会員限定です', 'プロフィール変更は会員登録またはログイン後に使えます。');
+      return;
+    }
+    Keyboard.dismiss();
+    const nextName = profileNameDraft.trim();
+    onProfileNameChange(nextName || 'RANDISH Guest');
+  };
+
+  const pickProfileImage = async () => {
+    if (!isRegisteredUser) {
+      Alert.alert('会員限定です', 'プロフィール画像の変更は会員登録またはログイン後に使えます。');
+      return;
+    }
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('写真へのアクセスが必要です', 'プロフィール画像を選ぶには写真ライブラリへのアクセスを許可してください。');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+
+    if (!result.canceled && result.assets[0]?.uri) {
+      onProfileImageChange(result.assets[0].uri);
+    }
+  };
+
   return (
     <View style={styles.homeLocationPanel}>
       <View style={styles.homeTopBar}>
         <View style={styles.homeLogoButton}>
           <Image source={RANDISH_LOGO} style={styles.homeLogoImage} resizeMode="contain" />
         </View>
-        <Pressable style={styles.homeAccountButton} onPress={() => {}}>
-          <Ionicons name="person-outline" size={24} color={INK} />
-        </Pressable>
+        <View style={styles.homeAccountWrap}>
+          <Pressable style={[styles.homeAccountButton, accountMenuOpen && styles.homeAccountButtonActive]} onPress={() => setAccountMenuOpen((current) => !current)}>
+            {isRegisteredUser && profileImageUri ? (
+              <Image source={{ uri: profileImageUri }} style={styles.homeAccountButtonImage} resizeMode="cover" />
+            ) : (
+              <Ionicons name="person-circle-outline" size={28} color={accountMenuOpen ? '#ffffff' : INK} />
+            )}
+          </Pressable>
+          {accountMenuOpen && (
+            <View style={styles.homeAccountMenu}>
+              <View style={styles.homeAccountMenuHeader}>
+                <Pressable style={[styles.homeAccountAvatar, !isRegisteredUser && styles.homeAccountAvatarLocked]} onPress={pickProfileImage}>
+                  {isRegisteredUser && profileImageUri ? (
+                    <Image source={{ uri: profileImageUri }} style={styles.homeAccountAvatarImage} resizeMode="cover" />
+                  ) : (
+                    <Ionicons name="person-outline" size={23} color={ORANGE} />
+                  )}
+                  {isRegisteredUser && (
+                    <View style={styles.homeAccountAvatarBadge}>
+                    <Ionicons name="camera" size={12} color="#ffffff" />
+                    </View>
+                  )}
+                </Pressable>
+                <View style={styles.homeAccountHeaderText}>
+                  <Text style={styles.homeAccountName}>{isRegisteredUser ? profileName : 'Guest'}</Text>
+                  <Text style={styles.homeAccountSub}>{t.accountSettings}</Text>
+                </View>
+              </View>
+              <Pressable
+                style={[styles.homeAccountMenuItem, !isRegisteredUser && styles.homeAccountMenuItemLocked]}
+                onPress={() => {
+                  if (!isRegisteredUser) {
+                    Alert.alert('会員限定です', 'プロフィール変更は会員登録またはログイン後に使えます。');
+                    return;
+                  }
+                  setProfileEditorOpen((current) => !current);
+                }}
+              >
+                <View style={styles.homeAccountMenuIcon}>
+                  <Ionicons name="person-circle-outline" size={18} color={isRegisteredUser ? ORANGE : '#9c948b'} />
+                </View>
+                <View style={styles.homeAccountMenuText}>
+                  <Text style={styles.homeAccountMenuLabel}>{t.profile}</Text>
+                  <Text style={styles.homeAccountMenuValue}>{isRegisteredUser ? t.profileValue : t.profileLocked}</Text>
+                </View>
+                <Ionicons name={isRegisteredUser && profileEditorOpen ? 'chevron-up' : 'lock-closed-outline'} size={16} color="#afa69b" />
+              </Pressable>
+              {isRegisteredUser && profileEditorOpen && (
+                <View style={styles.homeProfileEditor}>
+                  <Text style={styles.homeProfileEditorLabel}>{t.displayName}</Text>
+                  <TextInput
+                    value={profileNameDraft}
+                    onChangeText={setProfileNameDraft}
+                    style={styles.homeProfileNameInput}
+                    placeholder={t.profilePlaceholder}
+                    placeholderTextColor="#a49a90"
+                    maxLength={24}
+                    returnKeyType="done"
+                    blurOnSubmit
+                    onSubmitEditing={saveProfileName}
+                  />
+                  <View style={styles.homeProfileActionRow}>
+                    <Pressable style={styles.homeProfileImageButton} onPress={pickProfileImage}>
+                      <Ionicons name="image-outline" size={16} color={INK} />
+                      <Text style={styles.homeProfileImageButtonText}>{t.changeImage}</Text>
+                    </Pressable>
+                    <Pressable style={styles.homeProfileSaveButton} onPress={saveProfileName}>
+                      <Text style={styles.homeProfileSaveText}>{t.save}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+              <Pressable style={styles.homeAccountMenuItem} onPress={() => setLanguageMenuOpen((current) => !current)}>
+                <View style={styles.homeAccountMenuIcon}>
+                  <Ionicons name="language-outline" size={18} color={ORANGE} />
+                </View>
+                <View style={styles.homeAccountMenuText}>
+                  <Text style={styles.homeAccountMenuLabel}>{t.language}</Text>
+                  <Text style={styles.homeAccountMenuValue}>{currentLanguage.nativeLabel}</Text>
+                </View>
+                <Ionicons name={languageMenuOpen ? 'chevron-up' : 'chevron-forward'} size={16} color="#afa69b" />
+              </Pressable>
+              {languageMenuOpen && (
+                <View style={styles.homeLanguagePicker}>
+                  {LANGUAGE_OPTIONS.map((item) => {
+                    const selected = item.key === appLanguage;
+                    return (
+                      <Pressable
+                        key={item.key}
+                        style={[styles.homeLanguageOption, selected && styles.homeLanguageOptionActive]}
+                        onPress={() => onLanguageChange(item.key)}
+                      >
+                        <Text style={[styles.homeLanguageOptionText, selected && styles.homeLanguageOptionTextActive]}>{item.nativeLabel}</Text>
+                        <Text style={[styles.homeLanguageOptionSub, selected && styles.homeLanguageOptionSubActive]}>{item.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+              {accountMenuItems.map((item) => (
+                <Pressable key={item.label} style={styles.homeAccountMenuItem}>
+                  <View style={styles.homeAccountMenuIcon}>
+                    <Ionicons name={item.icon} size={18} color={ORANGE} />
+                  </View>
+                  <View style={styles.homeAccountMenuText}>
+                    <Text style={styles.homeAccountMenuLabel}>{item.label}</Text>
+                    <Text style={styles.homeAccountMenuValue}>{item.value}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#afa69b" />
+                </Pressable>
+              ))}
+              <View style={styles.homeAccountMenuFooter}>
+                <Pressable
+                  style={styles.homeAccountCloseButton}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setProfileEditorOpen(false);
+                    setLanguageMenuOpen(false);
+                    setAccountMenuOpen(false);
+                  }}
+                >
+                  <Text style={styles.homeAccountCloseText}>閉じる</Text>
+                  <Ionicons name="close" size={15} color="#ffffff" />
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </View>
       </View>
-      <Text style={styles.homeLocationEyebrow}>AREA SETUP</Text>
-      <Text style={styles.homeLocationTitle}>どの街から探す？</Text>
-      <Text style={styles.homeLocationLead}>現在地、駅名、市町村。今日の一店を決める起点を選びます。</Text>
+      <View style={styles.homeLocationHero}>
+        <View style={styles.homeLocationCopy}>
+          <Text style={styles.homeLocationEyebrow}>{t.areaSetup}</Text>
+          <Text style={styles.homeLocationTitle}>{t.homeTitle}</Text>
+          <Text style={styles.homeLocationLead}>{t.homeLead}</Text>
+        </View>
+        <HomeMapIllustration />
+      </View>
       <MealTicketPanel state={mealTicketState} />
 
       <View style={styles.homeSearchBox}>
@@ -2903,8 +3386,11 @@ function HomeLocationPanel({
           value={query}
           onChangeText={setQuery}
           style={styles.homeSearchInput}
-          placeholder="梅田・美郷町・駅名で検索"
+          placeholder={t.searchPlaceholder}
           placeholderTextColor="#a29b94"
+          returnKeyType="search"
+          blurOnSubmit
+          onSubmitEditing={Keyboard.dismiss}
         />
         <Pressable style={[styles.homeSearchFilterButton, !selectedPrefecture && styles.homeSearchFilterButtonMuted]} onPress={selectedPrefecture ? exploreSelectedPrefecture : undefined}>
           <Ionicons name="options-outline" size={26} color={INK} />
@@ -2933,32 +3419,57 @@ function HomeLocationPanel({
         <>
           <View style={styles.homeLocationCards}>
             <Pressable style={styles.homeCurrentCard} onPress={onLocationPress}>
+              <View style={[styles.homeCurrentMapBlock, styles.homeCurrentMapBlockOne]} />
+              <View style={[styles.homeCurrentMapBlock, styles.homeCurrentMapBlockTwo]} />
+              <View style={[styles.homeCurrentMapBlock, styles.homeCurrentMapBlockThree]} />
+              <View style={[styles.homeCurrentMapRoad, styles.homeCurrentMapRoadWide]} />
+              <View style={[styles.homeCurrentMapRoad, styles.homeCurrentMapRoadNarrow]} />
+              <View style={[styles.homeCurrentMapWater, styles.homeCurrentMapWaterOne]} />
               <View style={styles.homeCurrentBadge}>
-                <Ionicons name="navigate" size={13} color={ORANGE} />
-                <Text style={styles.homeCurrentBadgeText}>いまここ</Text>
+                <Ionicons name={userLocation ? 'locate' : 'navigate'} size={13} color={userLocation ? '#2378ff' : ORANGE} />
+                <Text style={[styles.homeCurrentBadgeText, userLocation && styles.homeCurrentBadgeTextActive]}>
+                  {userLocation ? '現在地' : 'いまここ'}
+                </Text>
               </View>
               <View style={styles.homeTargetMark}>
+                <View style={styles.homeTargetPulse} />
                 <View style={styles.homeTargetOuter}>
                   <View style={styles.homeTargetInner} />
                 </View>
               </View>
               <View style={styles.homeCurrentBottom}>
                 <View style={styles.homeCurrentTextWrap}>
-                  <Text style={styles.homeCurrentTitle}>近くのごはんを引く</Text>
+                  <Text style={styles.homeCurrentTitle}>{currentLocationTitle}</Text>
                   <Text style={styles.homeCurrentText}>{locationStatus}</Text>
+                  <Text style={styles.homeCurrentCoordinate}>{currentLocationMeta}</Text>
                 </View>
               </View>
             </Pressable>
-            <Pressable style={styles.homeMapPreview} onPress={selectedPrefecture ? exploreSelectedPrefecture : undefined}>
+            <Pressable style={styles.homeMapPreview} onPress={onTravelPress}>
+              <View style={styles.homeTravelCardTopLine} />
               <View style={[styles.homeMapRoad, styles.homeMapRoadOne]} />
               <View style={[styles.homeMapRoad, styles.homeMapRoadTwo]} />
               <View style={[styles.homeMapRoad, styles.homeMapRoadThree]} />
               <View style={styles.homeMapPark} />
+              <View style={styles.homeTravelCompass}>
+                <Ionicons name="train-outline" size={18} color={ORANGE} />
+              </View>
+              <View style={styles.homeTravelTransportRail}>
+                {(['train-outline', 'boat-outline', 'bus-outline', 'airplane-outline', 'car-outline'] as const).map((icon) => (
+                  <View key={icon} style={styles.homeTravelTransportIcon}>
+                    <Ionicons name={icon} size={13} color={INK} />
+                  </View>
+                ))}
+              </View>
               <View style={styles.homeMapPin} />
               <Ionicons name="location-sharp" size={38} color={INK} style={styles.homeMapMarkerIcon} />
               <View style={styles.homeMapBottom}>
-                <Text style={styles.homeMapTitle}>{selectedPrefecture ? `${selectedPrefecture}を探検` : 'まず県を選ぶ'}</Text>
-                <Text style={styles.homeMapLead}>{selectedPrefecture ? '市町村を決めずに県全体で探す' : '県を選ぶと市町村が出ます'}</Text>
+                <Text style={styles.homeMapTitle}>{t.travel}</Text>
+                <Text style={styles.homeMapLead}>{t.travelSub}</Text>
+              </View>
+              <View style={styles.homeTravelMiniCta}>
+                <Text style={styles.homeTravelMiniCtaText}>TRIP</Text>
+                <Ionicons name="arrow-forward" size={14} color="#ffffff" />
               </View>
             </Pressable>
           </View>
@@ -3508,6 +4019,8 @@ function RandomTab({
   userLocation,
   history,
   conditionRandom,
+  travelRevealStep,
+  travelDisplayArea,
   drawAnimationKey,
   drawMode,
   mealTicketState,
@@ -3529,6 +4042,8 @@ function RandomTab({
   userLocation: UserLocation | null;
   history: Restaurant[];
   conditionRandom: ConditionRandomState;
+  travelRevealStep: TravelRevealStep;
+  travelDisplayArea: string | null;
   drawAnimationKey: DrawAnimationKey;
   drawMode: DrawMode;
   mealTicketState: MealTicketState;
@@ -3539,11 +4054,15 @@ function RandomTab({
   onGoPress: () => void;
 }) {
   const isEverythingRandom = drawMode === 'everything';
+  const isTravelDraw = drawMode === 'travel';
   const drawAnimation = DRAW_ANIMATION_PROFILES[drawAnimationKey];
-  const displayArea = isEverythingRandom ? '？' : area;
-  const displayGenre = isEverythingRandom || conditionRandom.genre ? '？' : genre;
+  const canShowTravelGenre = !isTravelDraw || travelRevealStep === 'genre' || travelRevealStep === 'area' || travelRevealStep === 'restaurant';
+  const canShowTravelArea = !isTravelDraw || travelRevealStep === 'area' || travelRevealStep === 'restaurant';
+  const displayAreaBase = isTravelDraw && travelDisplayArea ? travelDisplayArea : area;
+  const displayArea = isEverythingRandom || (isTravelDraw && !canShowTravelArea) ? '？' : displayAreaBase;
+  const displayGenre = isEverythingRandom || conditionRandom.genre || (isTravelDraw && !canShowTravelGenre) ? '？' : genre;
   const displayBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax);
-  const displayDistance = isEverythingRandom || conditionRandom.distance ? '？' : distance;
+  const displayDistance = isEverythingRandom || conditionRandom.distance || (isTravelDraw && !canShowTravelArea) ? '？' : distance;
   const currentTicket = mealTicketState.current;
   const ticketAvailable = currentTicket.available;
   const statusText = !ticketAvailable
@@ -3552,6 +4071,8 @@ function RandomTab({
     ? drawAnimation.activeStatus
     : isEverythingRandom
       ? 'ALL RANDOM READY'
+      : isTravelDraw
+        ? 'TRAVEL READY'
       : 'READY TO DRAW';
   const startText = !ticketAvailable
     ? currentTicket.proOnly && !mealTicketState.isProUser
@@ -3559,6 +4080,8 @@ function RandomTab({
       : '次の食券を待つ'
     : isEverythingRandom
       ? '完全ランダム START'
+      : isTravelDraw
+        ? '旅ルーレット START'
       : 'PRESS START';
   const rotate = spinValue.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '1440deg'] });
   const dartDrop = spinValue.interpolate({ inputRange: [0, 0.72, 1], outputRange: [-18, -18, 0] });
@@ -3602,13 +4125,14 @@ function RandomTab({
     { text: isEverythingRandom ? '気分' : '近場', style: styles.rouletteLabelRight },
     { text: isEverythingRandom ? '直感' : '予算内', style: styles.rouletteLabelLeft },
   ];
+  const visibleSelectedRestaurant = isTravelDraw && travelRevealStep !== 'restaurant' ? null : selectedRestaurant;
 
   return (
     <View>
       <MealTicketPanel state={mealTicketState} compact />
       <View style={styles.drawConditionRow}>
-          <ConditionPill label={isEverythingRandom ? '完全ランダム' : displayArea} active />
-          <ConditionPill label={displayGenre} />
+          <ConditionPill label={displayGenre} active />
+          <ConditionPill label={isEverythingRandom ? '完全ランダム' : displayArea} />
           <ConditionPill label={displayBudget} />
           <ConditionPill label={displayDistance} />
       </View>
@@ -3711,10 +4235,10 @@ function RandomTab({
           <Text style={styles.rouletteMessage}>{message}</Text>
         </View>
       </Pressable>
-      {selectedRestaurant ? (
+      {visibleSelectedRestaurant ? (
         <Animated.View style={[styles.resultWrap, { opacity: resultRevealValue, transform: [{ translateY: resultTranslateY }, { scale: resultScale }] }]}>
           <Text style={styles.resultKicker}>TODAY'S PICK</Text>
-          <ResultCard restaurant={selectedRestaurant} selectedGenre={isEverythingRandom ? 'すべて' : genre} distanceOrigin={distanceOrigin} userLocation={userLocation} onMapPress={onGoPress} />
+          <ResultCard restaurant={visibleSelectedRestaurant} selectedGenre={isEverythingRandom ? 'すべて' : genre} distanceOrigin={distanceOrigin} userLocation={userLocation} onMapPress={onGoPress} />
           <View style={styles.resultActions}>
             <Pressable style={styles.secondaryAction} onPress={onRandomPress}>
               <Text style={styles.secondaryActionText}>もう一回引く</Text>
