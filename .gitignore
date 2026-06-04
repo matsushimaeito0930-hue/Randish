@@ -15,6 +15,9 @@ target/
 # Local databases and runtime data
 data/
 **/data/
+!mobile/data/
+!mobile/data/japanMunicipalities.ts
+mobile/_asset-audit/
 *.db
 *.mv.db
 *.trace.db

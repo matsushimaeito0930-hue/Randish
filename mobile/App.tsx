@@ -17,16 +17,60 @@ import {
   View,
 } from 'react-native';
 import { randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
+import type { RandomHistory as ApiRandomHistory } from './services/randishApi';
+import { JAPAN_MUNICIPALITY_PRESETS } from './data/japanMunicipalities';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 type AppStage = 'splash' | 'login' | 'main';
 type TabKey = 'home' | 'search' | 'random' | 'save' | 'analytics';
 type DrawAnimationKey = 'roulette' | 'lottery' | 'shuffle' | 'radar';
+type DrawMode = 'condition' | 'everything';
+type ConditionRandomField = 'budget' | 'distance' | 'genre';
+type MealSlotKey = 'morning' | 'lunch' | 'dinner' | 'midnight';
+
+type ConditionRandomState = Record<ConditionRandomField, boolean>;
+
+type MealTicketDefinition = {
+  key: MealSlotKey;
+  label: string;
+  timeLabel: string;
+  startMinute: number;
+  endMinute: number;
+  icon: keyof typeof Ionicons.glyphMap;
+  accent: string;
+  genreHints: string[];
+  proOnly?: boolean;
+};
+
+type MealTicketView = MealTicketDefinition & {
+  active: boolean;
+  used: boolean;
+  past: boolean;
+  available: boolean;
+  locked: boolean;
+  statusLabel: string;
+  countdownLabel: string;
+};
+
+type MealTicketState = {
+  tickets: MealTicketView[];
+  current: MealTicketView;
+  nextUnlockLabel: string;
+  usedFreeCount: number;
+  totalFreeCount: number;
+  isProUser: boolean;
+};
 
 type Restaurant = ApiRestaurant & {
   priceRange?: string;
   latitude?: number;
   longitude?: number;
+};
+
+type DrawHistoryEntry = {
+  id: string;
+  restaurant: Restaurant;
+  createdAt: string;
 };
 
 type GenreItem = {
@@ -52,9 +96,13 @@ type DistanceOrigin = {
   label: string;
 };
 
+type LocationRequestMode = 'sync-search' | 'background';
+
 type AreaPreset = {
   label: string;
   group: string;
+  value?: string;
+  searchValue?: string;
   latitude: number;
   longitude: number;
   useCoordinates?: boolean;
@@ -86,10 +134,12 @@ type DrawAnimationProfile = {
 
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
-const STATIC_FALLBACK_API_BASE_URL = 'http://10.230.36.34:8080';
+const DEV_LAN_API_BASE_URLS = ['http://10.230.36.45:8080', 'http://10.230.36.34:8080'];
 const LOCAL_API_BASE_URLS = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://10.0.2.2:8080'];
 const TETHER_HOST_PATTERN = /^http:\/\/10\.230\.36\.\d+(?::8080)?$/;
 const RANDISH_LOGO = require('./assets/randish-logo-square1.png');
+const HOTPEPPER_CREDIT_URL = 'https://webservice.recruit.co.jp/';
+const HOTPEPPER_CREDIT_IMAGE_URL = 'https://webservice.recruit.co.jp/banner/hotpepper-m.gif';
 
 const normalizeApiBaseUrl = (value: string) =>
   value.trim().replace(/\/+$/, '').replace(/\/api\/restaurants$/, '');
@@ -125,7 +175,7 @@ const getWebLocationUrl = () => {
 const getRuntimeApiBaseUrl = () =>
   toApiBaseUrlFromHost(getHostFromUrl(getMetroScriptUrl()))
   ?? toApiBaseUrlFromHost(getHostFromUrl(getWebLocationUrl()))
-  ?? STATIC_FALLBACK_API_BASE_URL;
+  ?? DEV_LAN_API_BASE_URLS[0];
 
 const uniqueApiBaseUrls = (baseUrls: string[]) => {
   const seen = new Set<string>();
@@ -142,12 +192,23 @@ const uniqueApiBaseUrls = (baseUrls: string[]) => {
 };
 
 const buildApiBaseUrlCandidates = (primaryBaseUrl: string, runtimeBaseUrl: string) =>
-  uniqueApiBaseUrls([primaryBaseUrl, runtimeBaseUrl, ...LOCAL_API_BASE_URLS, STATIC_FALLBACK_API_BASE_URL]);
+  uniqueApiBaseUrls([primaryBaseUrl, runtimeBaseUrl, ...DEV_LAN_API_BASE_URLS, ...LOCAL_API_BASE_URLS]);
+
+const toAbsoluteApiAssetUrl = (value?: string | null) => {
+  if (!value || !value.startsWith('/')) {
+    return value ?? null;
+  }
+  const baseUrl = normalizeApiBaseUrl(randishApi.getLastSuccessfulBaseUrl() ?? getRuntimeApiBaseUrl());
+  return `${baseUrl}${value}`;
+};
+
+const isDevFallbackApiBaseUrl = (baseUrl: string) =>
+  DEV_LAN_API_BASE_URLS.includes(baseUrl) || TETHER_HOST_PATTERN.test(baseUrl);
 
 const shouldReplaceWithRuntimeApiBaseUrl = (currentBaseUrl: string, runtimeBaseUrl: string) => {
   const current = normalizeApiBaseUrl(currentBaseUrl);
   const runtime = normalizeApiBaseUrl(runtimeBaseUrl);
-  return !current || (current !== runtime && (current === STATIC_FALLBACK_API_BASE_URL || TETHER_HOST_PATTERN.test(current)));
+  return !current || (current !== runtime && isDevFallbackApiBaseUrl(current));
 };
 
 const ORANGE = '#f05a28';
@@ -207,55 +268,102 @@ const pickNextDrawAnimation = (current: DrawAnimationKey) => {
 };
 
 const DISTANCE_OPTIONS = ['500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
+const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
+const FREE_MEAL_TICKET_COUNT = 3;
+const IS_PRO_USER = false;
+
+const MEAL_TICKET_DEFINITIONS: MealTicketDefinition[] = [
+  {
+    key: 'morning',
+    label: '朝',
+    timeLabel: '5:00-10:59',
+    startMinute: 5 * 60,
+    endMinute: 11 * 60,
+    icon: 'sunny-outline',
+    accent: '#f2a51a',
+    genreHints: ['カフェ', 'パン', '定食'],
+  },
+  {
+    key: 'lunch',
+    label: '昼',
+    timeLabel: '11:00-15:59',
+    startMinute: 11 * 60,
+    endMinute: 16 * 60,
+    icon: 'fast-food-outline',
+    accent: ORANGE,
+    genreHints: ['ラーメン', 'カレー', '定食'],
+  },
+  {
+    key: 'dinner',
+    label: '夜',
+    timeLabel: '16:00-23:59',
+    startMinute: 16 * 60,
+    endMinute: 24 * 60,
+    icon: 'restaurant-outline',
+    accent: '#4f7f58',
+    genreHints: ['焼肉', '居酒屋', '和食'],
+  },
+  {
+    key: 'midnight',
+    label: '深夜',
+    timeLabel: '0:00-4:59',
+    startMinute: 0,
+    endMinute: 5 * 60,
+    icon: 'wine-outline',
+    accent: '#5d5be8',
+    genreHints: ['バー', '締めラーメン', '深夜カフェ'],
+    proOnly: true,
+  },
+];
 
 const PREFECTURE_IMAGES: Record<string, ImageSourcePropType> = {
-  北海道: require('./assets/prefecture/hokkaido.png'),
-  青森県: require('./assets/prefecture/aomori.png'),
-  岩手県: require('./assets/prefecture/iwate.png'),
-  宮城県: require('./assets/prefecture/miyagi.png'),
-  秋田県: require('./assets/prefecture/akita.png'),
-  山形県: require('./assets/prefecture/yamagata.png'),
-  福島県: require('./assets/prefecture/fukushima.png'),
-  茨城県: require('./assets/prefecture/ibaraki.png'),
-  栃木県: require('./assets/prefecture/tochigi.png'),
-  群馬県: require('./assets/prefecture/gunma.png'),
-  埼玉県: require('./assets/prefecture/saitama.png'),
-  千葉県: require('./assets/prefecture/chiba.png'),
-  東京都: require('./assets/prefecture/tokyo.png'),
-  神奈川県: require('./assets/prefecture/kanagawa.png'),
-  新潟県: require('./assets/prefecture/niigata.png'),
-  富山県: require('./assets/prefecture/toyama.png'),
-  石川県: require('./assets/prefecture/ishikawa.png'),
-  福井県: require('./assets/prefecture/fukui.png'),
-  山梨県: require('./assets/prefecture/yamanashi.png'),
-  長野県: require('./assets/prefecture/nagano.png'),
-  岐阜県: require('./assets/prefecture/gifu.png'),
-  静岡県: require('./assets/prefecture/shizuoka.png'),
-  愛知県: require('./assets/prefecture/aichi.png'),
-  三重県: require('./assets/prefecture/mie.png'),
-  滋賀県: require('./assets/prefecture/shiga.png'),
-  京都府: require('./assets/prefecture/kyoto.png'),
-  大阪府: require('./assets/prefecture/osaka.png'),
-  兵庫県: require('./assets/prefecture/hyogo.png'),
-  奈良県: require('./assets/prefecture/nara.png'),
-  和歌山県: require('./assets/prefecture/wakayama.png'),
-  鳥取県: require('./assets/prefecture/tottori.png'),
-  島根県: require('./assets/prefecture/shimane.png'),
-  岡山県: require('./assets/prefecture/okayama.png'),
-  広島県: require('./assets/prefecture/hiroshima.png'),
-  山口県: require('./assets/prefecture/yamaguchi.png'),
-  徳島県: require('./assets/prefecture/tokushima.png'),
-  香川県: require('./assets/prefecture/kagawa.png'),
-  愛媛県: require('./assets/prefecture/ehime.png'),
-  高知県: require('./assets/prefecture/kochi.png'),
-  福岡県: require('./assets/prefecture/fukuoka.png'),
-  佐賀県: require('./assets/prefecture/saga.png'),
-  長崎県: require('./assets/prefecture/nagasaki.png'),
-  熊本県: require('./assets/prefecture/kumamoto.png'),
-  大分県: require('./assets/prefecture/oita.png'),
-  宮崎県: require('./assets/prefecture/miyazaki.png'),
-  鹿児島県: require('./assets/prefecture/kagoshima.png'),
-  沖縄県: require('./assets/prefecture/okinawa.png'),
+  北海道: require('./assets/prefecture-clean/hokkaido.png'),
+  青森県: require('./assets/prefecture-clean/aomori.png'),
+  岩手県: require('./assets/prefecture-clean/iwate.png'),
+  宮城県: require('./assets/prefecture-clean/miyagi.png'),
+  秋田県: require('./assets/prefecture-clean/akita.png'),
+  山形県: require('./assets/prefecture-clean/yamagata.png'),
+  福島県: require('./assets/prefecture-clean/fukushima.png'),
+  茨城県: require('./assets/prefecture-clean/ibaraki.png'),
+  栃木県: require('./assets/prefecture-clean/tochigi.png'),
+  群馬県: require('./assets/prefecture-clean/gunma.png'),
+  埼玉県: require('./assets/prefecture-clean/saitama.png'),
+  千葉県: require('./assets/prefecture-clean/chiba.png'),
+  東京都: require('./assets/prefecture-clean/tokyo.png'),
+  神奈川県: require('./assets/prefecture-clean/kanagawa.png'),
+  新潟県: require('./assets/prefecture-clean/niigata.png'),
+  富山県: require('./assets/prefecture-clean/toyama.png'),
+  石川県: require('./assets/prefecture-clean/ishikawa.png'),
+  福井県: require('./assets/prefecture-clean/fukui.png'),
+  山梨県: require('./assets/prefecture-clean/yamanashi.png'),
+  長野県: require('./assets/prefecture-clean/nagano.png'),
+  岐阜県: require('./assets/prefecture-clean/gifu.png'),
+  静岡県: require('./assets/prefecture-clean/shizuoka.png'),
+  愛知県: require('./assets/prefecture-clean/aichi.png'),
+  三重県: require('./assets/prefecture-clean/mie.png'),
+  滋賀県: require('./assets/prefecture-clean/shiga.png'),
+  京都府: require('./assets/prefecture-clean/kyoto.png'),
+  大阪府: require('./assets/prefecture-clean/osaka.png'),
+  兵庫県: require('./assets/prefecture-clean/hyogo.png'),
+  奈良県: require('./assets/prefecture-clean/nara.png'),
+  和歌山県: require('./assets/prefecture-clean/wakayama.png'),
+  鳥取県: require('./assets/prefecture-clean/tottori.png'),
+  島根県: require('./assets/prefecture-clean/shimane.png'),
+  岡山県: require('./assets/prefecture-clean/okayama.png'),
+  広島県: require('./assets/prefecture-clean/hiroshima.png'),
+  山口県: require('./assets/prefecture-clean/yamaguchi.png'),
+  徳島県: require('./assets/prefecture-clean/tokushima.png'),
+  香川県: require('./assets/prefecture-clean/kagawa.png'),
+  愛媛県: require('./assets/prefecture-clean/ehime.png'),
+  高知県: require('./assets/prefecture-clean/kochi.png'),
+  福岡県: require('./assets/prefecture-clean/fukuoka.png'),
+  佐賀県: require('./assets/prefecture-clean/saga.png'),
+  長崎県: require('./assets/prefecture-clean/nagasaki.png'),
+  熊本県: require('./assets/prefecture-clean/kumamoto.png'),
+  大分県: require('./assets/prefecture-clean/oita.png'),
+  宮崎県: require('./assets/prefecture-clean/miyazaki.png'),
+  鹿児島県: require('./assets/prefecture-clean/kagoshima.png'),
+  沖縄県: require('./assets/prefecture-clean/okinawa.png'),
 };
 
 const PREFECTURE_REGIONS: PrefectureRegion[] = [
@@ -759,6 +867,141 @@ const GENRES: GenreItem[] = [
   { label: '各国料理', color: '#a98652', image: require('./assets/category/world.png') },
 ];
 
+const getGenreVisual = (genre?: string | null) =>
+  GENRES.find((item) => item.label === genre) ?? GENRES[0];
+
+const pickRandomDifferent = <T,>(items: T[], current: T) => {
+  if (items.length <= 1) {
+    return items[0];
+  }
+  const nextItems = items.filter((item) => item !== current);
+  return nextItems[Math.floor(Math.random() * nextItems.length)];
+};
+
+const pickRandomBudgetValue = (currentMax: string) => pickRandomDifferent(BUDGET_MAX_OPTIONS, currentMax);
+
+const formatBudgetLimit = (budgetMax: string) => {
+  const value = Number(budgetMax || 0);
+  return value > 0 ? `${value.toLocaleString()}円以内` : '予算なし';
+};
+
+const padDatePart = (value: number) => String(value).padStart(2, '0');
+
+const getLocalDayKey = (date: Date) =>
+  `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+
+const getMinutesOfDay = (date: Date) => date.getHours() * 60 + date.getMinutes();
+
+const getDateAtMinute = (date: Date, minute: number) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate(), Math.floor(minute / 60), minute % 60, 0, 0);
+
+const addDays = (date: Date, days: number) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, date.getHours(), date.getMinutes(), date.getSeconds(), date.getMilliseconds());
+
+const getMealTicketDefinitionForDate = (date: Date) => {
+  const minutes = getMinutesOfDay(date);
+  return MEAL_TICKET_DEFINITIONS.find((ticket) => minutes >= ticket.startMinute && minutes < ticket.endMinute)
+    ?? MEAL_TICKET_DEFINITIONS[2];
+};
+
+const formatCountdown = (target: Date, now: Date) => {
+  const diff = Math.max(0, target.getTime() - now.getTime());
+  const totalMinutes = Math.max(1, Math.ceil(diff / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours <= 0) {
+    return `あと${minutes}分`;
+  }
+  if (minutes === 0) {
+    return `あと${hours}時間`;
+  }
+  return `あと${hours}時間${minutes}分`;
+};
+
+const getUpcomingStartDateForTicket = (now: Date, ticket: MealTicketDefinition) => {
+  let candidate = getDateAtMinute(now, ticket.startMinute);
+  if (candidate.getTime() <= now.getTime()) {
+    candidate = addDays(candidate, 1);
+  }
+  return candidate;
+};
+
+const getNextTicketStartDate = (now: Date, isProUser: boolean) => {
+  const candidates = MEAL_TICKET_DEFINITIONS
+    .filter((ticket) => isProUser || !ticket.proOnly)
+    .map((ticket) => getUpcomingStartDateForTicket(now, ticket))
+    .sort((a, b) => a.getTime() - b.getTime());
+  return candidates[0] ?? addDays(now, 1);
+};
+
+const buildMealTicketState = (now: Date, drawHistories: DrawHistoryEntry[], isProUser: boolean): MealTicketState => {
+  const dayKey = getLocalDayKey(now);
+  const minutes = getMinutesOfDay(now);
+  const currentDefinition = getMealTicketDefinitionForDate(now);
+  const nextUnlockDate = getNextTicketStartDate(now, isProUser);
+  const nextUnlockLabel = formatCountdown(nextUnlockDate, now);
+
+  const usedKeys = new Set<MealSlotKey>();
+  drawHistories.forEach((entry) => {
+    const createdAt = new Date(entry.createdAt);
+    if (Number.isNaN(createdAt.getTime()) || getLocalDayKey(createdAt) !== dayKey) {
+      return;
+    }
+    usedKeys.add(getMealTicketDefinitionForDate(createdAt).key);
+  });
+
+  const tickets = MEAL_TICKET_DEFINITIONS.map((ticket) => {
+    const active = currentDefinition.key === ticket.key;
+    const used = usedKeys.has(ticket.key);
+    const proLocked = Boolean(ticket.proOnly && !isProUser);
+    const upcomingStart = getUpcomingStartDateForTicket(now, ticket);
+    const past = !active && !ticket.proOnly && ticket.endMinute <= minutes;
+    const available = active && !used && !proLocked;
+    const locked = !available;
+    const statusLabel = available
+      ? 'いま使える'
+      : used
+        ? '使用済み'
+        : proLocked
+          ? 'Pro限定'
+          : past
+            ? '本日終了'
+            : `${ticket.timeLabel.split('-')[0]}から`;
+    const countdownLabel = available
+      ? 'この一枚で引けます'
+      : used && active
+        ? `${nextUnlockLabel}で次の一枚`
+        : proLocked && active
+          ? `${nextUnlockLabel}で朝の一枚`
+          : past
+            ? 'また明日'
+            : formatCountdown(upcomingStart, now);
+
+    return {
+      ...ticket,
+      active,
+      used,
+      past,
+      available,
+      locked,
+      statusLabel,
+      countdownLabel,
+    };
+  });
+
+  const current = tickets.find((ticket) => ticket.active) ?? tickets[0];
+  const usedFreeCount = tickets.filter((ticket) => !ticket.proOnly && ticket.used).length;
+
+  return {
+    tickets,
+    current,
+    nextUnlockLabel,
+    usedFreeCount,
+    totalFreeCount: FREE_MEAL_TICKET_COUNT,
+    isProUser,
+  };
+};
+
 const MOCK_RESTAURANTS: Restaurant[] = [
   {
     id: 'mock-ramen',
@@ -841,11 +1084,49 @@ const normalizeRestaurant = (restaurant: ApiRestaurant): Restaurant => {
 
   return {
     ...restaurant,
+    photoUrl: toAbsoluteApiAssetUrl(restaurant.photoUrl),
     latitude: toOptionalNumber(locationSource.latitude ?? locationSource.lat),
     longitude: toOptionalNumber(locationSource.longitude ?? locationSource.lng),
     rating,
     priceRange: formatPrice(restaurant),
   };
+};
+
+const getEstimatedBudget = (restaurant: Restaurant) => {
+  const min = toOptionalNumber(restaurant.budgetMin);
+  const max = toOptionalNumber(restaurant.budgetMax);
+  if (min == null && max == null) {
+    return null;
+  }
+  if ((max ?? 0) >= 100000) {
+    return null;
+  }
+  const safeMin = min ?? max ?? 0;
+  const safeMax = Math.max(max ?? safeMin, safeMin);
+  return Math.round((safeMin + safeMax) / 2);
+};
+
+const formatYen = (value: number) => `${Math.round(value).toLocaleString()}円`;
+
+const toDrawHistoryEntry = (history: ApiRandomHistory): DrawHistoryEntry => ({
+  id: history.id,
+  restaurant: normalizeRestaurant(history.restaurant),
+  createdAt: history.createdAt,
+});
+
+const isSameMonth = (dateText: string, monthDate: Date) => {
+  const date = new Date(dateText);
+  return !Number.isNaN(date.getTime())
+    && date.getFullYear() === monthDate.getFullYear()
+    && date.getMonth() === monthDate.getMonth();
+};
+
+const formatShortDate = (dateText: string) => {
+  const date = new Date(dateText);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 };
 
 const getRatingValue = (restaurant: Restaurant) => {
@@ -860,6 +1141,67 @@ const getRatingLabel = (restaurant: Restaurant) => {
 
 const getStoredMinutesLabel = (restaurant: Restaurant) =>
   restaurant.minutes && restaurant.minutes > 0 ? `${restaurant.minutes}分` : '地図で確認';
+
+const formatBusinessTime = (value?: string | null) => {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const now = new Date();
+  const dateKey = new Intl.DateTimeFormat('ja-JP', { dateStyle: 'short', timeZone: 'Asia/Tokyo' }).format(date);
+  const todayKey = new Intl.DateTimeFormat('ja-JP', { dateStyle: 'short', timeZone: 'Asia/Tokyo' }).format(now);
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const tomorrowKey = new Intl.DateTimeFormat('ja-JP', { dateStyle: 'short', timeZone: 'Asia/Tokyo' }).format(tomorrow);
+  const time = new Intl.DateTimeFormat('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Tokyo',
+  }).format(date);
+
+  if (dateKey === todayKey) {
+    return `今日 ${time}`;
+  }
+  if (dateKey === tomorrowKey) {
+    return `明日 ${time}`;
+  }
+  return new Intl.DateTimeFormat('ja-JP', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Tokyo',
+  }).format(date);
+};
+
+const getOpenStatus = (restaurant: Restaurant) => {
+  if (restaurant.openNow === true) {
+    const closeTime = formatBusinessTime(restaurant.nextCloseTime);
+    return {
+      active: true,
+      label: '営業中',
+      detail: closeTime ? `${closeTime}まで営業` : '現在営業しています',
+    };
+  }
+  if (restaurant.openNow === false) {
+    const openTime = formatBusinessTime(restaurant.nextOpenTime);
+    return {
+      active: false,
+      label: '営業時間外',
+      detail: openTime ? `次は${openTime}から` : '来店前に営業時間を確認してください',
+    };
+  }
+  return {
+    active: null,
+    label: '営業時間確認中',
+    detail: 'Google Mapで最新の営業時間を確認してください',
+  };
+};
 
 const getDistanceKm = (from: UserLocation | null, restaurant: Restaurant) => {
   if (!from || restaurant.latitude == null || restaurant.longitude == null) {
@@ -896,7 +1238,31 @@ const getWalkingMinutesLabel = (from: UserLocation | null, restaurant: Restauran
 
 const getPresetPrefecture = (preset: AreaPreset) => preset.group.split('/')[0].trim();
 
-const getAreaPresetKey = (preset: AreaPreset) => `${preset.group}-${preset.label}`;
+const getAreaPresetValue = (preset: AreaPreset) => preset.value ?? preset.label;
+
+const getAreaPresetSearchValue = (preset: AreaPreset) =>
+  preset.searchValue ?? `${preset.group.replace(/\s*\/\s*/g, ' ')} ${preset.label}`.trim();
+
+const getAreaPresetSearchText = (preset: AreaPreset) =>
+  `${preset.group} ${preset.label} ${preset.value ?? ''} ${preset.searchValue ?? ''}`.toLowerCase();
+
+const getAreaPresetKey = (preset: AreaPreset) => `${preset.group}-${getAreaPresetValue(preset)}`;
+
+const formatAreaPresetStatus = (preset: AreaPreset) => `${preset.group} 周辺から探します`;
+
+const NON_STATION_AREA_LABELS = new Set([
+  '現在地',
+  '歌舞伎町',
+  '国分町',
+  '片町',
+  '下通',
+  '国際通り',
+  '旧居留地',
+  '北野',
+  '新世界',
+  '堀江',
+  'みなとみらい',
+]);
 
 const uniqueAreaPresets = (items: AreaPreset[]) => {
   const seen = new Set<string>();
@@ -910,7 +1276,11 @@ const uniqueAreaPresets = (items: AreaPreset[]) => {
   });
 };
 
-const ALL_AREA_PRESETS = uniqueAreaPresets([...AREA_PRESETS, ...SUPPLEMENTAL_AREA_PRESETS]);
+const ALL_AREA_PRESETS = uniqueAreaPresets([
+  ...AREA_PRESETS,
+  ...JAPAN_MUNICIPALITY_PRESETS,
+  ...SUPPLEMENTAL_AREA_PRESETS,
+]);
 
 const getPrefectureFromText = (value?: string | null) => {
   if (!value) {
@@ -938,10 +1308,61 @@ const formatLocationStatus = (prefecture: string | undefined, areaLabel: string)
   return `${areaLabel} 周辺から探します`;
 };
 
-const getAreaPreset = (area: string) => ALL_AREA_PRESETS.find((preset) => preset.label === area);
-
 const hasUsablePresetCoordinates = (preset: AreaPreset) =>
   preset.label !== '現在地' && preset.useCoordinates !== false && preset.latitude !== 0 && preset.longitude !== 0;
+
+const getAreaPreset = (area: string) => {
+  const cleanArea = area.trim();
+  const exactValuePreset = ALL_AREA_PRESETS.find((preset) => getAreaPresetValue(preset) === cleanArea);
+  if (exactValuePreset) {
+    return exactValuePreset;
+  }
+
+  const labelMatches = ALL_AREA_PRESETS.filter((preset) => preset.label === cleanArea);
+  if (labelMatches.length <= 1) {
+    return labelMatches[0];
+  }
+
+  return labelMatches.find(hasUsablePresetCoordinates);
+};
+
+const isStationLikePreset = (preset: AreaPreset) => hasUsablePresetCoordinates(preset) && !NON_STATION_AREA_LABELS.has(preset.label);
+
+const formatStationOriginLabel = (label: string) => `${label}${label.endsWith('駅') ? '' : '駅'}から`;
+
+const getNearestStationOrigin = (restaurant: Restaurant): DistanceOrigin | null => {
+  if (restaurant.latitude == null || restaurant.longitude == null) {
+    return null;
+  }
+
+  const prefecture = getPrefectureFromText(`${restaurant.area} ${restaurant.address}`);
+  const candidates = AREA_PRESETS
+    .filter(isStationLikePreset)
+    .filter((preset) => !prefecture || getPresetPrefecture(preset) === prefecture);
+
+  const nearest = candidates
+    .map((preset) => ({
+      preset,
+      distance: getDistanceKm(
+        { latitude: preset.latitude, longitude: preset.longitude, label: preset.label },
+        restaurant,
+      ) ?? Number.POSITIVE_INFINITY,
+    }))
+    .sort((a, b) => a.distance - b.distance)[0];
+
+  if (!nearest || !Number.isFinite(nearest.distance)) {
+    return null;
+  }
+
+  return {
+    label: formatStationOriginLabel(nearest.preset.label),
+    location: {
+      latitude: nearest.preset.latitude,
+      longitude: nearest.preset.longitude,
+      label: nearest.preset.label,
+    },
+  };
+};
 
 const getCoordinatePresetForArea = (area: string) => {
   const cleanArea = area.trim();
@@ -949,7 +1370,11 @@ const getCoordinatePresetForArea = (area: string) => {
     return null;
   }
 
-  const exactPreset = ALL_AREA_PRESETS.find((preset) => preset.label === cleanArea && hasUsablePresetCoordinates(preset));
+  const exactPreset = ALL_AREA_PRESETS.find(
+    (preset) =>
+      hasUsablePresetCoordinates(preset)
+      && (getAreaPresetValue(preset) === cleanArea || preset.label === cleanArea || preset.searchValue === cleanArea),
+  );
   if (exactPreset) {
     return { preset: exactPreset, label: exactPreset.label };
   }
@@ -970,7 +1395,13 @@ const getCoordinatePresetForArea = (area: string) => {
     (preset) =>
       getPresetPrefecture(preset) === prefecture
       && hasUsablePresetCoordinates(preset)
-      && (preset.label === simplifiedArea || preset.label === cleanArea || preset.group.includes(cleanArea)),
+      && (
+        getAreaPresetValue(preset) === cleanArea
+        || preset.label === simplifiedArea
+        || preset.label === cleanArea
+        || preset.group.includes(cleanArea)
+        || (preset.searchValue?.includes(cleanArea) ?? false)
+      ),
   );
   const prefectureAnchor = ALL_AREA_PRESETS.find((preset) => getPresetPrefecture(preset) === prefecture && hasUsablePresetCoordinates(preset));
   const preset = sameAreaPreset ?? prefectureAnchor;
@@ -1004,18 +1435,13 @@ const buildAreaSearchKeyword = (value: string) => {
     return undefined;
   }
 
-  const preset = ALL_AREA_PRESETS.find((item) => item.label === cleanArea);
+  const preset = getAreaPreset(cleanArea);
   if (!preset) {
     return cleanArea;
   }
 
   // API検索では都道府県と市区町村も添えて、同名エリアの誤爆を減らす。
-  if (preset.useCoordinates === false) {
-    return `${getPresetPrefecture(preset)} ${preset.label}`;
-  }
-
-  const group = preset.group.replace(/\s*\/\s*/g, ' ');
-  return `${group} ${preset.label}`;
+  return getAreaPresetSearchValue(preset);
 };
 
 const toHotPepperRange = (value: string) => {
@@ -1028,11 +1454,12 @@ const toHotPepperRange = (value: string) => {
 
 const createAreaMockRestaurants = (area: string, genre: string): Restaurant[] => {
   const preset = getAreaPreset(area);
-  const safeArea = area?.trim() && area !== '現在地' ? area.trim() : '現在地周辺';
+  const areaLabel = preset?.label ?? area;
+  const safeArea = areaLabel?.trim() && areaLabel !== '現在地' ? areaLabel.trim() : '現在地周辺';
   const selectedGenre = genre && genre !== 'すべて' ? genre : '和食';
   const latitude = preset && preset.latitude !== 0 ? preset.latitude : 34.7025;
   const longitude = preset && preset.longitude !== 0 ? preset.longitude : 135.4959;
-  const addressPrefix = preset?.group ? `${preset.group.replace(' / ', '')}${safeArea}` : safeArea;
+  const addressPrefix = preset?.group ? preset.group.replace(/\s*\/\s*/g, '') : safeArea;
 
   return [
     {
@@ -1098,16 +1525,22 @@ const getOptionalLocationModule = () => {
 const filterMockRestaurants = (genre: string, area: string, budgetMin: string, budgetMax: string) => {
   const min = Number(budgetMin || 0);
   const max = Number(budgetMax || 999999);
+  const matchesBudget = (restaurant: Restaurant) => {
+    if (min <= 0) {
+      return restaurant.budgetMin <= max;
+    }
+    const averageBudget = (restaurant.budgetMin + restaurant.budgetMax) / 2;
+    return averageBudget >= min && averageBudget <= max;
+  };
   const filtered = MOCK_RESTAURANTS.filter((restaurant) => {
     const genreMatch = genre === 'すべて' || restaurant.genre === genre;
     const areaMatch = !area.trim() || area === '現在地' || restaurant.area.includes(area.trim());
-    const budgetMatch = restaurant.budgetMax >= min && restaurant.budgetMin <= max;
-    return genreMatch && areaMatch && budgetMatch;
+    return genreMatch && areaMatch && matchesBudget(restaurant);
   });
   if (filtered.length) {
     return filtered;
   }
-  return createAreaMockRestaurants(area, genre).filter((restaurant) => restaurant.budgetMax >= min && restaurant.budgetMin <= max);
+  return createAreaMockRestaurants(area, genre).filter(matchesBudget);
 };
 
 const includesAny = (source: string, keywords: string[]) => keywords.some((keyword) => source.includes(keyword));
@@ -1188,7 +1621,24 @@ const restaurantMatchesSelectedGenre = (restaurant: Restaurant, selectedGenre: s
     case 'パン':
       return includesAny(source, ['パン', 'ベーカリー']);
     case 'ファストフード':
-      return includesAny(source, ['ファストフード', 'ハンバーガー', 'バーガー', 'サンド', 'フライド']);
+      return includesAny(source, [
+        'ファストフード',
+        'ファーストフード',
+        'ハンバーガー',
+        'バーガー',
+        'サンド',
+        'フライド',
+        'マクドナルド',
+        'マック',
+        'モスバーガー',
+        'ロッテリア',
+        'ケンタッキー',
+        'KFC',
+        'バーガーキング',
+        'フレッシュネス',
+        'サブウェイ',
+        'ドムドム',
+      ]);
     case 'お酒・バー':
       return includesAny(source, ['バー', 'ダイニングバー', '居酒屋', 'ワイン', 'ビール', '酒']);
     case '各国料理':
@@ -1196,6 +1646,38 @@ const restaurantMatchesSelectedGenre = (restaurant: Restaurant, selectedGenre: s
     default:
       return true;
   }
+};
+
+const buildGenreSummaryItems = (restaurants: Restaurant[]) => {
+  const counts = new Map<string, number>();
+  restaurants.forEach((restaurant) => {
+    const label = restaurant.genre?.trim() || 'ジャンル未分類';
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  });
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([label, count]) => `${label} ${count}件`);
+};
+
+const buildGenreDiagnosticMessage = (requestedGenre: string, restaurants: Restaurant[], area: string) => {
+  const cleanGenre = requestedGenre.trim();
+  if (!cleanGenre || cleanGenre === 'すべて') {
+    return null;
+  }
+
+  const areaLabel = area.trim() && area !== '現在地' ? area.trim() : 'このエリア';
+  if (!restaurants.length) {
+    return `${areaLabel}では「${cleanGenre}」候補が見つかりませんでした。ジャンルなしでも候補が少ないエリアです。`;
+  }
+
+  const genreSummary = buildGenreSummaryItems(restaurants);
+  if (!genreSummary.length) {
+    return `${areaLabel}では「${cleanGenre}」候補が見つかりませんでした。APIのジャンル分類も取得できませんでした。`;
+  }
+
+  return `${areaLabel}では「${cleanGenre}」候補が見つかりません。API上は主に ${genreSummary.join(' / ')} として返っています。`;
 };
 
 export default function App() {
@@ -1206,28 +1688,58 @@ export default function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState(runtimeApiBaseUrl);
   const [area, setArea] = useState('現在地');
   const [genre, setGenre] = useState('ラーメン');
-  const [budgetMin, setBudgetMin] = useState('1000');
+  const [budgetMin, setBudgetMin] = useState('0');
   const [budgetMax, setBudgetMax] = useState('3000');
   const [distance, setDistance] = useState('1.5km');
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [randomHistory, setRandomHistory] = useState<Restaurant[]>([]);
+  const [drawHistories, setDrawHistories] = useState<DrawHistoryEntry[]>([]);
   const [savedRestaurants, setSavedRestaurants] = useState<Restaurant[]>([]);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const [locationStatus, setLocationStatus] = useState('現在地を確認できます');
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('条件を選んで、今日の一店を決めましょう。');
   const [drawAnimationKey, setDrawAnimationKey] = useState<DrawAnimationKey>('roulette');
+  const [drawMode, setDrawMode] = useState<DrawMode>('condition');
+  const [conditionRandom, setConditionRandom] = useState<ConditionRandomState>({
+    budget: false,
+    distance: false,
+    genre: false,
+  });
+  const [now, setNow] = useState(() => new Date());
 
   const logoScale = useRef(new Animated.Value(0.88)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const spinValue = useRef(new Animated.Value(0)).current;
   const resultRevealValue = useRef(new Animated.Value(0)).current;
+  const scrollViewRef = useRef<ScrollView | null>(null);
   const didAskLocation = useRef(false);
+  const areaRef = useRef(area);
+
+  const scrollToContentTop = useCallback((animated = true) => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated });
+    }, 0);
+  }, []);
+
+  useEffect(() => {
+    areaRef.current = area;
+  }, [area]);
 
   useEffect(() => {
     setApiBaseUrl((current) => shouldReplaceWithRuntimeApiBaseUrl(current, runtimeApiBaseUrl) ? runtimeApiBaseUrl : current);
   }, [runtimeApiBaseUrl]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const mealTicketState = useMemo(
+    () => buildMealTicketState(now, drawHistories, IS_PRO_USER),
+    [drawHistories, now],
+  );
 
   const apiBaseUrlCandidates = useMemo(
     () => buildApiBaseUrlCandidates(apiBaseUrl, runtimeApiBaseUrl),
@@ -1239,6 +1751,37 @@ export default function App() {
     if (workingBaseUrl) {
       setApiBaseUrl((current) => current === workingBaseUrl ? current : workingBaseUrl);
     }
+  }, []);
+
+  const loadDrawHistories = useCallback(async () => {
+    try {
+      const data = await randishApi.getRandomHistories(apiBaseUrlCandidates, userId);
+      syncWorkingApiBaseUrl();
+      const entries = data
+        .map(toDrawHistoryEntry)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const recentRestaurants: Restaurant[] = [];
+      const seenRestaurantIds = new Set<string>();
+      entries.forEach((entry) => {
+        if (seenRestaurantIds.has(entry.restaurant.id)) {
+          return;
+        }
+        seenRestaurantIds.add(entry.restaurant.id);
+        recentRestaurants.push(entry.restaurant);
+      });
+      setDrawHistories(entries);
+      setRandomHistory(recentRestaurants.slice(0, 8));
+    } catch {
+      // Keep the current in-app session history when the API is not reachable yet.
+    }
+  }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl, userId]);
+
+  const recordDrawForAnalytics = useCallback((restaurant: Restaurant) => {
+    const createdAt = new Date().toISOString();
+    setDrawHistories((current) => [
+      { id: `local-${createdAt}-${restaurant.id}`, restaurant, createdAt },
+      ...current,
+    ].slice(0, 100));
   }, []);
 
   useEffect(() => {
@@ -1313,6 +1856,22 @@ export default function App() {
 
   const visibleRestaurants = restaurants;
 
+  const loadGenreDiagnosticMessage = useCallback(async () => {
+    const cleanGenre = genre.trim();
+    if (!cleanGenre || cleanGenre === 'すべて') {
+      return null;
+    }
+
+    try {
+      const genrelessParams = { ...apiParams, genre: undefined };
+      const data = await randishApi.getRestaurants(apiBaseUrlCandidates, genrelessParams);
+      syncWorkingApiBaseUrl();
+      return buildGenreDiagnosticMessage(cleanGenre, data.map(normalizeRestaurant), area);
+    } catch {
+      return null;
+    }
+  }, [apiBaseUrlCandidates, apiParams, area, genre, syncWorkingApiBaseUrl]);
+
   const loadRestaurants = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -1321,32 +1880,45 @@ export default function App() {
       const normalized = data.map(normalizeRestaurant).filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
       setRestaurants(normalized);
       const genreLabel = genre === 'すべて' ? 'すべてのジャンル' : genre;
-      setMessage(normalized.length ? `${genreLabel}で${normalized.length}件から候補を整えました。` : `${genreLabel}に合うお店が見つかりませんでした。エリアやジャンルを変えてみてください。`);
+      if (normalized.length) {
+        const apiGenres = buildGenreSummaryItems(normalized).join(' / ');
+        setMessage(`${genreLabel}で${normalized.length}件から候補を整えました。APIジャンル: ${apiGenres}`);
+      } else {
+        const diagnosticMessage = await loadGenreDiagnosticMessage();
+        setMessage(diagnosticMessage ?? `${genreLabel}に合うお店が見つかりませんでした。エリアやジャンルを変えてみてください。`);
+      }
     } catch (error) {
       setRestaurants([]);
       const reason = error instanceof Error ? error.message : '通信エラー';
-      setMessage(`APIに接続できませんでした。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
+      const diagnosticMessage = await loadGenreDiagnosticMessage();
+      setMessage(diagnosticMessage ?? `APIに接続できませんでした。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, apiParams, area, budgetMax, budgetMin, genre, syncWorkingApiBaseUrl]);
+  }, [apiBaseUrlCandidates, apiParams, genre, loadGenreDiagnosticMessage, syncWorkingApiBaseUrl]);
 
   useEffect(() => {
     loadRestaurants();
   }, [loadRestaurants]);
 
-  const requestCurrentLocation = useCallback(async () => {
+  const requestCurrentLocation = useCallback(async (mode: LocationRequestMode = 'sync-search') => {
     const Location = getOptionalLocationModule();
     if (!Location) {
-      setLocationStatus('現在地取得には expo-location が必要です');
+      if (mode === 'sync-search' || areaRef.current === '現在地') {
+        setLocationStatus('現在地取得には expo-location が必要です');
+      }
       return;
     }
 
     try {
-      setLocationStatus('現在地を取得中...');
+      if (mode === 'sync-search' || areaRef.current === '現在地') {
+        setLocationStatus('現在地を取得中...');
+      }
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== 'granted') {
-        setLocationStatus('位置情報の許可がオフです');
+        if (mode === 'sync-search' || areaRef.current === '現在地') {
+          setLocationStatus('位置情報の許可がオフです');
+        }
         return;
       }
 
@@ -1355,7 +1927,7 @@ export default function App() {
         latitude: current.coords.latitude,
         longitude: current.coords.longitude,
       };
-      let label = area;
+      let label = areaRef.current;
       let prefecture: string | undefined;
 
       try {
@@ -1366,24 +1938,38 @@ export default function App() {
           getPrefectureFromText(place?.region) ||
           getPrefectureFromText(`${place?.city ?? ''} ${place?.district ?? ''} ${place?.subregion ?? ''} ${place?.name ?? ''}`);
       } catch {
-        label = area;
+        label = areaRef.current;
       }
 
       setUserLocation({ ...coords, label });
-      setArea(label);
-      setLocationStatus(formatLocationStatus(prefecture, label));
+      if (mode === 'sync-search') {
+        setArea(label);
+        setLocationStatus(formatLocationStatus(prefecture, label));
+      } else if (areaRef.current === '現在地') {
+        setArea(label);
+        setLocationStatus(formatLocationStatus(prefecture, label));
+      }
     } catch {
-      setLocationStatus('現在地を取得できませんでした');
+      if (mode === 'sync-search' || areaRef.current === '現在地') {
+        setLocationStatus('現在地を取得できませんでした');
+      }
     }
-  }, [area]);
+  }, []);
 
   useEffect(() => {
     if (stage !== 'main' || didAskLocation.current) {
       return;
     }
     didAskLocation.current = true;
-    requestCurrentLocation();
+    requestCurrentLocation('background');
   }, [requestCurrentLocation, stage]);
+
+  useEffect(() => {
+    if (stage !== 'main') {
+      return;
+    }
+    loadDrawHistories();
+  }, [loadDrawHistories, stage]);
 
   const runRandomAnimation = useCallback(() => {
     spinValue.setValue(0);
@@ -1415,8 +2001,29 @@ export default function App() {
     }).start();
   }, [resultRevealValue]);
 
+  const prepareDrawStage = useCallback((mode: DrawMode) => {
+    setDrawMode(mode);
+    setSelectedRestaurant(null);
+    spinValue.setValue(0);
+    resultRevealValue.setValue(0);
+    setActiveTab('random');
+    setMessage(mode === 'everything'
+      ? '完全ランダムをセットしました。大きなカードを押すとスタートします。'
+      : '条件抽選をセットしました。大きなカードを押すとスタートします。');
+    scrollToContentTop();
+  }, [resultRevealValue, scrollToContentTop, spinValue]);
+
+  const prepareConditionDraw = useCallback(() => {
+    prepareDrawStage('condition');
+  }, [prepareDrawStage]);
+
+  const prepareEverythingDraw = useCallback(() => {
+    prepareDrawStage('everything');
+  }, [prepareDrawStage]);
+
   const chooseRandomRestaurant = useCallback(async () => {
     setActiveTab('random');
+    scrollToContentTop();
     setIsLoading(true);
     const drawAnimation = startDrawAnimation();
     const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
@@ -1453,19 +2060,22 @@ export default function App() {
       }
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+      recordDrawForAnalytics(normalized);
       setMessage(recentIds.has(normalized.id) ? '候補が一巡しています。条件を広げると新しい店が出やすくなります。' : drawAnimation.doneMessage);
       setTimeout(revealSelectedRestaurant, 980);
     } catch (error) {
       setSelectedRestaurant(null);
       const reason = error instanceof Error ? error.message : '通信エラー';
-      setMessage(`APIから抽選できませんでした。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
+      const diagnosticMessage = await loadGenreDiagnosticMessage();
+      setMessage(diagnosticMessage ?? `APIから抽選できませんでした。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, apiParams, genre, randomHistory, revealSelectedRestaurant, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, apiParams, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToContentTop, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
+    scrollToContentTop();
     setIsLoading(true);
     const drawAnimation = startDrawAnimation(true);
     const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
@@ -1485,6 +2095,7 @@ export default function App() {
       }
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+      recordDrawForAnalytics(normalized);
       setMessage(recentIds.has(normalized.id) ? 'ぜんぶおまかせの候補が一巡しています。条件を少し変えると広がります。' : `ぜんぶおまかせ。${drawAnimation.doneMessage}`);
       setTimeout(revealSelectedRestaurant, 980);
     } catch (error) {
@@ -1494,7 +2105,30 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, randomHistory, revealSelectedRestaurant, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToContentTop, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
+
+  const startPreparedDraw = useCallback(() => {
+    if (isLoading) {
+      return;
+    }
+    const currentTicket = mealTicketState.current;
+    if (!currentTicket.available) {
+      if (currentTicket.proOnly && !mealTicketState.isProUser) {
+        setMessage(`深夜の食券はPro限定です。${mealTicketState.nextUnlockLabel}で朝の一枚が開きます。`);
+      } else if (currentTicket.used) {
+        setMessage(`${currentTicket.label}の食券は使用済みです。${mealTicketState.nextUnlockLabel}で次の一枚が開きます。`);
+      } else {
+        setMessage(`${currentTicket.label}の食券は${currentTicket.timeLabel}です。${currentTicket.countdownLabel}で使えます。`);
+      }
+      scrollToContentTop();
+      return;
+    }
+    if (drawMode === 'everything') {
+      chooseEverythingRandom();
+      return;
+    }
+    chooseRandomRestaurant();
+  }, [chooseEverythingRandom, chooseRandomRestaurant, drawMode, isLoading, mealTicketState, scrollToContentTop]);
 
   const saveSelectedRestaurant = useCallback(async () => {
     if (!selectedRestaurant) {
@@ -1530,37 +2164,70 @@ export default function App() {
 
   const updateGenre = (value: string) => {
     setGenre(value);
+    setDrawMode('condition');
+    setConditionRandom((current) => ({ ...current, genre: false }));
     setSelectedRestaurant(null);
   };
 
   const updateArea = (value: string) => {
-    const preset = ALL_AREA_PRESETS.find((item) => item.label === value && item.label !== '現在地');
+    const preset = getAreaPreset(value);
     if (value === '現在地') {
       setLocationStatus(userLocation ? `${userLocation.label} 周辺から探します` : '現在地を確認できます');
     } else if (preset?.useCoordinates === false) {
-      setLocationStatus(`${preset.group} / ${preset.label} 周辺から探します`);
+      setLocationStatus(formatAreaPresetStatus(preset));
     } else if (preset) {
-      setLocationStatus(`${preset.group} / ${preset.label} 周辺から探します`);
+      setLocationStatus(formatAreaPresetStatus(preset));
     } else if (isPrefectureName(value)) {
       setLocationStatus(formatLocationStatus(value, '全域'));
     }
     setArea(value);
+    setDrawMode('condition');
     setSelectedRestaurant(null);
   };
 
   const updateBudgetMin = (value: string) => {
     setBudgetMin(value);
+    setDrawMode('condition');
+    setConditionRandom((current) => ({ ...current, budget: false }));
     setSelectedRestaurant(null);
   };
 
   const updateBudgetMax = (value: string) => {
+    setBudgetMin('0');
     setBudgetMax(value);
+    setDrawMode('condition');
+    setConditionRandom((current) => ({ ...current, budget: false }));
     setSelectedRestaurant(null);
   };
 
-  const openRandomTab = () => {
-    setActiveTab('random');
+  const updateDistance = (value: string) => {
+    setDistance(value);
+    setDrawMode('condition');
+    setConditionRandom((current) => ({ ...current, distance: false }));
+    setSelectedRestaurant(null);
   };
+
+  const markConditionRandom = useCallback((field: ConditionRandomField) => {
+    setDrawMode('condition');
+    setConditionRandom((current) => ({ ...current, [field]: !current[field] }));
+    setSelectedRestaurant(null);
+  }, []);
+
+  const openRandomTab = useCallback(() => {
+    setDrawMode('condition');
+    setActiveTab('random');
+    setMessage('抽選カードを押すとスタートします。');
+    scrollToContentTop();
+  }, [scrollToContentTop]);
+
+  const handleFooterPress = useCallback((tab: TabKey) => {
+    if (tab === 'random') {
+      openRandomTab();
+      return;
+    }
+    setActiveTab(tab);
+    scrollToContentTop(false);
+  }, [openRandomTab, scrollToContentTop]);
 
   const enterMain = useCallback((nextUserId = APP_USER_ID) => {
     setUserId(nextUserId);
@@ -1595,7 +2262,7 @@ export default function App() {
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="dark-content" />
       {activeTab !== 'home' && <AppHeader area={area} locationStatus={locationStatus} onLocationPress={requestCurrentLocation} />}
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollViewRef} style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
         {activeTab === 'home' && (
           <HomeTab
             area={area}
@@ -1609,16 +2276,17 @@ export default function App() {
             message={message}
             locationStatus={locationStatus}
             isLoading={isLoading}
+            mealTicketState={mealTicketState}
             onAreaChange={updateArea}
             onGenreChange={updateGenre}
             onBudgetMinChange={updateBudgetMin}
             onBudgetMaxChange={updateBudgetMax}
-            onDistanceChange={setDistance}
+            onDistanceChange={updateDistance}
             onLoadRestaurants={loadRestaurants}
             onOpenFilters={() => setActiveTab('search')}
             onOpenRandom={openRandomTab}
-            onRandomPress={chooseRandomRestaurant}
-            onAllRandomPress={chooseEverythingRandom}
+            onRandomPress={prepareConditionDraw}
+            onAllRandomPress={prepareEverythingDraw}
             onLocationPress={requestCurrentLocation}
           />
         )}
@@ -1630,6 +2298,8 @@ export default function App() {
             budgetMin={budgetMin}
             budgetMax={budgetMax}
             distance={distance}
+            drawMode={drawMode}
+            conditionRandom={conditionRandom}
             restaurants={visibleRestaurants}
             isLoading={isLoading}
             onApiBaseUrlChange={setApiBaseUrl}
@@ -1637,9 +2307,11 @@ export default function App() {
             onGenreChange={updateGenre}
             onBudgetMinChange={updateBudgetMin}
             onBudgetMaxChange={updateBudgetMax}
-            onDistanceChange={setDistance}
+            onDistanceChange={updateDistance}
+            onConditionRandomize={markConditionRandom}
             onSearch={loadRestaurants}
-            onRandomPress={chooseRandomRestaurant}
+            onRandomPress={prepareConditionDraw}
+            onAllRandomPress={prepareEverythingDraw}
           />
         )}
         {activeTab === 'random' && (
@@ -1653,11 +2325,15 @@ export default function App() {
             isLoading={isLoading}
             selectedRestaurant={selectedRestaurant}
             distanceOrigin={distanceOrigin}
+            userLocation={userLocation}
             history={randomHistory}
+            conditionRandom={conditionRandom}
             drawAnimationKey={drawAnimationKey}
+            drawMode={drawMode}
+            mealTicketState={mealTicketState}
             spinValue={spinValue}
             resultRevealValue={resultRevealValue}
-            onRandomPress={chooseRandomRestaurant}
+            onRandomPress={startPreparedDraw}
             onSavePress={saveSelectedRestaurant}
             onGoPress={openMap}
           />
@@ -1669,12 +2345,13 @@ export default function App() {
             locationStatus={locationStatus}
             restaurants={visibleRestaurants}
             history={randomHistory}
+            drawHistories={drawHistories}
             savedRestaurants={savedRestaurants}
             onAreaPress={() => setActiveTab('home')}
           />
         )}
       </ScrollView>
-      <AppFooter activeTab={activeTab} onPress={setActiveTab} />
+      <AppFooter activeTab={activeTab} onPress={handleFooterPress} />
     </SafeAreaView>
   );
 }
@@ -1910,6 +2587,97 @@ function RegisterSocialButton({ text, onPress }: { text: string; onPress: () => 
   );
 }
 
+function MealTicketPanel({ state, compact = false }: { state: MealTicketState; compact?: boolean }) {
+  const midnightTicket = state.tickets.find((ticket) => ticket.key === 'midnight');
+  const current = state.current;
+  const ticketMeta = current.available
+    ? `${current.label}の一枚が使えます`
+    : current.used
+      ? current.countdownLabel
+      : current.statusLabel;
+
+  return (
+    <View style={[styles.mealTicketPanel, compact && styles.mealTicketPanelCompact]}>
+      <View style={styles.mealTicketHeader}>
+        <View>
+          <Text style={styles.mealTicketKicker}>MEAL TICKETS</Text>
+          <Text style={styles.mealTicketTitle}>今日の食券</Text>
+        </View>
+        <View style={[styles.mealTicketCountBadge, current.available && styles.mealTicketCountBadgeActive]}>
+          <Text style={[styles.mealTicketCountText, current.available && styles.mealTicketCountTextActive]}>
+            {state.usedFreeCount}/{state.totalFreeCount}
+          </Text>
+          <Text style={[styles.mealTicketCountSub, current.available && styles.mealTicketCountSubActive]}>FREE</Text>
+        </View>
+      </View>
+      <Text style={styles.mealTicketLead}>{ticketMeta}</Text>
+      <View style={styles.mealTicketGrid}>
+        {state.tickets.map((ticket) => {
+          const iconColor = ticket.available ? '#ffffff' : ticket.proOnly ? '#5d5be8' : ticket.accent;
+          return (
+            <View
+              key={ticket.key}
+              style={[
+                styles.mealTicketCard,
+                ticket.available && styles.mealTicketCardActive,
+                ticket.used && styles.mealTicketCardUsed,
+                ticket.proOnly && styles.mealTicketCardPro,
+              ]}
+            >
+              <View style={styles.mealTicketCardTop}>
+                <View
+                  style={[
+                    styles.mealTicketIcon,
+                    { borderColor: `${ticket.accent}33`, backgroundColor: `${ticket.accent}12` },
+                    ticket.available && { backgroundColor: ticket.accent, borderColor: ticket.accent },
+                  ]}
+                >
+                  <Ionicons name={ticket.icon} size={compact ? 15 : 18} color={iconColor} />
+                </View>
+                <View style={styles.mealTicketTextBlock}>
+                  <Text style={[styles.mealTicketName, ticket.available && styles.mealTicketNameActive]}>{ticket.label}</Text>
+                  <Text style={styles.mealTicketTime}>{ticket.timeLabel}</Text>
+                </View>
+              </View>
+              <View style={styles.mealTicketStatusRow}>
+                {(ticket.used || (ticket.proOnly && !state.isProUser)) && (
+                  <Ionicons name={ticket.used ? 'checkmark-circle' : 'lock-closed'} size={13} color={ticket.used ? '#8c8379' : '#5d5be8'} />
+                )}
+                <Text
+                  style={[
+                    styles.mealTicketStatus,
+                    ticket.available && styles.mealTicketStatusActive,
+                    ticket.proOnly && !state.isProUser && styles.mealTicketStatusPro,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {ticket.statusLabel}
+                </Text>
+              </View>
+              {!compact && <Text style={styles.mealTicketCountdown} numberOfLines={1}>{ticket.countdownLabel}</Text>}
+            </View>
+          );
+        })}
+      </View>
+      {!compact && midnightTicket && (
+        <View style={styles.mealTicketNightRail}>
+          <View style={styles.mealTicketNightTitleRow}>
+            <Ionicons name="sparkles-outline" size={16} color="#5d5be8" />
+            <Text style={styles.mealTicketNightTitle}>Pro深夜ジャンル</Text>
+          </View>
+          <View style={styles.mealTicketNightChips}>
+            {midnightTicket.genreHints.map((hint) => (
+              <View key={hint} style={styles.mealTicketNightChip}>
+                <Text style={styles.mealTicketNightChipText}>{hint}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
 function HomeTab({
   area,
   genre,
@@ -1922,6 +2690,7 @@ function HomeTab({
   message,
   locationStatus,
   isLoading,
+  mealTicketState,
   onAreaChange,
   onGenreChange,
   onBudgetMinChange,
@@ -1945,6 +2714,7 @@ function HomeTab({
   message: string;
   locationStatus: string;
   isLoading: boolean;
+  mealTicketState: MealTicketState;
   onAreaChange: (value: string) => void;
   onGenreChange: (value: string) => void;
   onBudgetMinChange: (value: string) => void;
@@ -1967,6 +2737,7 @@ function HomeTab({
             presets={ALL_AREA_PRESETS}
             history={history}
             locationStatus={locationStatus}
+            mealTicketState={mealTicketState}
             onAreaChange={onAreaChange}
             onOpenFilters={onOpenFilters}
             onLocationPress={onLocationPress}
@@ -2004,6 +2775,7 @@ function HomeLocationPanel({
   presets,
   history,
   locationStatus,
+  mealTicketState,
   onAreaChange,
   onOpenFilters,
   onLocationPress,
@@ -2018,6 +2790,7 @@ function HomeLocationPanel({
   presets: AreaPreset[];
   history: Restaurant[];
   locationStatus: string;
+  mealTicketState: MealTicketState;
   onAreaChange: (value: string) => void;
   onOpenFilters: () => void;
   onLocationPress: () => void;
@@ -2027,31 +2800,30 @@ function HomeLocationPanel({
 }) {
   const [query, setQuery] = useState('');
   const [showAllFavorites, setShowAllFavorites] = useState(false);
-  const selectedPreset = presets.find((preset) => preset.label === area);
+  const selectedPreset = getAreaPreset(area);
   const areaPrefecture = getPrefectureFromText(area) ?? (selectedPreset ? getPresetPrefecture(selectedPreset) : undefined);
   const [selectedHomePrefecture, setSelectedHomePrefecture] = useState<string | null>(
     areaPrefecture && area !== '現在地' ? areaPrefecture : null,
   );
   const selectedPrefecture = selectedHomePrefecture;
-  const selectedRegion = getRegionGroupForPrefecture(selectedPrefecture) ?? AREA_REGION_GROUPS[0].label;
+  const selectedRegion = selectedPrefecture ? (getRegionGroupForPrefecture(selectedPrefecture) ?? null) : null;
   const [expandedRegion, setExpandedRegion] = useState<string | null>(selectedRegion);
   const prefecturePresets = selectedPrefecture
     ? uniqueAreaPresets(presets.filter((preset) => getPresetPrefecture(preset) === selectedPrefecture && preset.label !== '現在地' && preset.label !== selectedPrefecture))
     : [];
-  const prefecturePool = prefecturePresets.map((preset) => preset.label);
-  const historyAreas = history
+  const historyAreaPresets = history
     .map(getRestaurantAreaLabel)
     .filter((label): label is string => Boolean(label))
+    .map((label) => presets.find((item) => item.label === label || getAreaPresetValue(item) === label))
+    .filter((preset): preset is AreaPreset => Boolean(preset))
     .filter((label) => {
-      const preset = presets.find((item) => item.label === label);
-      return preset ? getPresetPrefecture(preset) === selectedPrefecture : false;
+      return getPresetPrefecture(label) === selectedPrefecture;
     });
-  const currentAreaLabel = selectedPreset && selectedPrefecture && getPresetPrefecture(selectedPreset) === selectedPrefecture ? area : undefined;
-  const allFavoriteAreas = Array.from(new Set([...(currentAreaLabel ? [currentAreaLabel] : []), ...historyAreas, ...prefecturePool]))
-    .filter((label) => label !== '現在地')
-    .slice(0, 24);
-  const favoriteAreas = allFavoriteAreas.slice(0, showAllFavorites ? 24 : 8);
-  const favoriteAreaTitle = selectedPrefecture ? `${selectedPrefecture}の市町村` : '県を選ぶと市町村が出ます';
+  const currentAreaPreset = selectedPreset && selectedPrefecture && getPresetPrefecture(selectedPreset) === selectedPrefecture ? selectedPreset : undefined;
+  const allFavoriteAreas = uniqueAreaPresets([...(currentAreaPreset ? [currentAreaPreset] : []), ...historyAreaPresets, ...prefecturePresets])
+    .filter((preset) => preset.label !== '現在地');
+  const favoriteAreas = showAllFavorites ? allFavoriteAreas : allFavoriteAreas.slice(0, 8);
+  const favoriteAreaTitle = selectedPrefecture ? `${selectedPrefecture}の市町村・まち札` : '県を選ぶと市町村が出ます';
   const regionRows = AREA_REGION_GROUPS.map((group) => ({
     ...group,
     prefectures: group.prefectures
@@ -2072,7 +2844,9 @@ function HomeLocationPanel({
   }));
 
   useEffect(() => {
-    setExpandedRegion(selectedRegion);
+    if (selectedRegion) {
+      setExpandedRegion(selectedRegion);
+    }
   }, [selectedRegion]);
 
   useEffect(() => {
@@ -2086,7 +2860,7 @@ function HomeLocationPanel({
     if (!normalized) {
       return [];
     }
-    return uniqueAreaPresets(presets.filter((preset) => `${preset.group} ${preset.label}`.toLowerCase().includes(normalized))).slice(0, 6);
+    return uniqueAreaPresets(presets.filter((preset) => getAreaPresetSearchText(preset).includes(normalized))).slice(0, 6);
   }, [presets, query]);
 
   const pickArea = (value: string) => {
@@ -2125,6 +2899,7 @@ function HomeLocationPanel({
       </View>
       <Text style={styles.homeLocationTitle}>今日はどの街で{'\n'}食べる？</Text>
       <Text style={styles.homeLocationLead}>駅名でも地図でも、ピンときた場所から一店へ。</Text>
+      <MealTicketPanel state={mealTicketState} />
 
       <View style={styles.homeSearchBox}>
         <Ionicons name="search" size={28} color={INK} />
@@ -2132,7 +2907,7 @@ function HomeLocationPanel({
           value={query}
           onChangeText={setQuery}
           style={styles.homeSearchInput}
-          placeholder="梅田・渋谷・駅名でつまみ食い検索"
+          placeholder="梅田・美郷町・駅名で検索"
           placeholderTextColor="#a29b94"
         />
         <Pressable style={[styles.homeSearchFilterButton, !selectedPrefecture && styles.homeSearchFilterButtonMuted]} onPress={selectedPrefecture ? exploreSelectedPrefecture : undefined}>
@@ -2146,7 +2921,7 @@ function HomeLocationPanel({
             <Pressable
               key={`${getAreaPresetKey(item)}-${index}`}
               style={styles.homeAreaRow}
-              onPress={() => isPrefectureName(item.label) ? pickPrefecture(item.label) : openConditionsForArea(item.label)}
+              onPress={() => isPrefectureName(item.label) ? pickPrefecture(item.label) : openConditionsForArea(getAreaPresetValue(item))}
             >
               <View style={styles.homeAreaRowDot} />
               <View style={styles.homeAreaRowBody}>
@@ -2280,12 +3055,16 @@ function HomeLocationPanel({
                   <Ionicons name="arrow-forward" size={20} color="#ffffff" />
                 </Pressable>
                 <View style={styles.homeFavoriteWrap}>
-                  {favoriteAreas.map((item, index) => (
-                    <Pressable key={`${item}-${index}`} style={[styles.homeFavoriteChip, area === item && styles.homeFavoriteChipActive]} onPress={() => openConditionsForArea(item)}>
-                      <Ionicons name={area === item ? 'checkmark-circle' : 'sparkles-outline'} size={18} color={area === item ? ORANGE : '#9b9184'} />
-                      <Text style={[styles.homeFavoriteText, area === item && styles.homeFavoriteTextActive]}>{item}</Text>
-                    </Pressable>
-                  ))}
+                  {favoriteAreas.map((item, index) => {
+                    const itemValue = getAreaPresetValue(item);
+                    const selected = area === itemValue || area === item.label;
+                    return (
+                      <Pressable key={`${getAreaPresetKey(item)}-${index}`} style={[styles.homeFavoriteChip, selected && styles.homeFavoriteChipActive]} onPress={() => openConditionsForArea(itemValue)}>
+                        <Ionicons name={selected ? 'checkmark-circle' : 'sparkles-outline'} size={18} color={selected ? ORANGE : '#9b9184'} />
+                        <Text style={[styles.homeFavoriteText, selected && styles.homeFavoriteTextActive]}>{item.label}</Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </>
             ) : (
@@ -2309,6 +3088,7 @@ function FilterPanel({
   distance,
   genres,
   areaPresets,
+  conditionRandom,
   compact = false,
   showAreaPicker = true,
   onAreaChange,
@@ -2316,6 +3096,7 @@ function FilterPanel({
   onBudgetMinChange,
   onBudgetMaxChange,
   onDistanceChange,
+  onRandomized,
   onSubmit,
 }: {
   area: string;
@@ -2325,6 +3106,7 @@ function FilterPanel({
   distance: string;
   genres: GenreItem[];
   areaPresets: AreaPreset[];
+  conditionRandom?: ConditionRandomState;
   compact?: boolean;
   showAreaPicker?: boolean;
   onAreaChange: (value: string) => void;
@@ -2332,11 +3114,40 @@ function FilterPanel({
   onBudgetMinChange: (value: string) => void;
   onBudgetMaxChange: (value: string) => void;
   onDistanceChange: (value: string) => void;
+  onRandomized?: (field: ConditionRandomField) => void;
   onSubmit: () => void;
 }) {
-  const [showAllGenres, setShowAllGenres] = useState(!compact);
+  const [showAllGenres, setShowAllGenres] = useState(false);
+  const randomState = conditionRandom ?? { budget: false, distance: false, genre: false };
   const selectableGenres = compact ? genres.slice(1) : genres;
-  const visibleGenres = showAllGenres ? selectableGenres : selectableGenres.slice(0, 12);
+  const mainGenres = selectableGenres.slice(0, 12);
+  const selectedHiddenGenre = selectableGenres.find((item) => item.label === genre && !mainGenres.some((mainGenre) => mainGenre.label === item.label));
+  const visibleGenres = showAllGenres ? selectableGenres : selectedHiddenGenre ? [...mainGenres, selectedHiddenGenre] : mainGenres;
+  const randomizeBudget = useCallback(() => {
+    if (!randomState.budget) {
+      onBudgetMinChange('0');
+      onBudgetMaxChange(pickRandomBudgetValue(budgetMax));
+    }
+    onRandomized?.('budget');
+  }, [budgetMax, onBudgetMaxChange, onBudgetMinChange, onRandomized, randomState.budget]);
+  const randomizeDistance = useCallback(() => {
+    if (!randomState.distance) {
+      onDistanceChange(pickRandomDifferent(DISTANCE_OPTIONS, distance));
+    }
+    onRandomized?.('distance');
+  }, [distance, onDistanceChange, onRandomized, randomState.distance]);
+  const randomizeGenre = useCallback(() => {
+    if (randomState.genre) {
+      onRandomized?.('genre');
+      return;
+    }
+    const genreCandidates = selectableGenres.filter((item) => item.label !== 'すべて');
+    const nextGenre = pickRandomDifferent(genreCandidates.length ? genreCandidates : selectableGenres, selectableGenres.find((item) => item.label === genre) ?? selectableGenres[0]);
+    if (nextGenre) {
+      onGenreChange(nextGenre.label);
+      onRandomized?.('genre');
+    }
+  }, [genre, onGenreChange, onRandomized, randomState.genre, selectableGenres]);
 
   return (
     <View style={styles.filterPanel}>
@@ -2355,17 +3166,36 @@ function FilterPanel({
           <AreaPresetPicker selectedArea={area} presets={areaPresets} onSelect={onAreaChange} />
         </>
       )}
+      <View style={styles.filterGrid}>
+        <SmallField label="予算" value={budgetMax} suffix="円以内" onChangeText={onBudgetMaxChange} onRandom={randomizeBudget} randomActive={randomState.budget} />
+        <SegmentedValue label="距離" value={distance} values={DISTANCE_OPTIONS} onChange={onDistanceChange} onRandom={randomizeDistance} randomActive={randomState.distance} />
+      </View>
+      <View style={styles.genreSectionHeader}>
+        <Text style={styles.genreSectionTitle}>ジャンル</Text>
+        <Pressable style={[styles.randomMiniButton, randomState.genre && styles.randomMiniButtonActive]} onPress={randomizeGenre}>
+          <Ionicons name="shuffle-outline" size={14} color={randomState.genre ? '#ffffff' : ORANGE} />
+          <Text style={[styles.randomMiniButtonText, randomState.genre && styles.randomMiniButtonTextActive]}>ランダム</Text>
+        </Pressable>
+      </View>
       <View style={styles.genreGridTwo}>
         {visibleGenres.map((item) => {
-          const selected = genre === item.label;
+          const selected = !randomState.genre && genre === item.label;
           return (
             <Pressable
               key={item.label}
               style={[styles.genreChip, selected && { borderColor: item.color, backgroundColor: '#fff7ed' }]}
               onPress={() => onGenreChange(item.label)}
             >
-              <Image source={item.image} style={styles.genreChipImage} resizeMode="contain" />
-              <Text style={[styles.genreChipText, selected && { color: item.color }]}>{item.label}</Text>
+              <View
+                style={[
+                  styles.genreIconChip,
+                  { backgroundColor: `${item.color}12`, borderColor: `${item.color}30` },
+                  selected && { backgroundColor: '#ffffff', borderColor: item.color },
+                ]}
+              >
+                <Image source={item.image} style={[styles.genreChipImage, selected && styles.genreChipImageActive]} resizeMode="contain" />
+              </View>
+              <Text style={[styles.genreChipText, selected && { color: item.color }]} numberOfLines={1}>{item.label}</Text>
             </Pressable>
           );
         })}
@@ -2375,11 +3205,6 @@ function FilterPanel({
           <Text style={styles.showAllGenresText}>{showAllGenres ? 'ジャンルを少なく表示' : `すべてを表示（${selectableGenres.length}件）`}</Text>
         </Pressable>
       )}
-      <View style={styles.filterGrid}>
-        <SmallField label="最低予算" value={budgetMin} suffix="円" onChangeText={onBudgetMinChange} />
-        <SmallField label="最高予算" value={budgetMax} suffix="円" onChangeText={onBudgetMaxChange} />
-        <SegmentedValue label="距離" value={distance} values={DISTANCE_OPTIONS} onChange={onDistanceChange} />
-      </View>
     </View>
   );
 }
@@ -2394,7 +3219,7 @@ function AreaPresetPicker({
   onSelect: (value: string) => void;
 }) {
   const prefectures = useMemo(() => Array.from(new Set(presets.map(getPresetPrefecture))), [presets]);
-  const selectedPreset = presets.find((preset) => preset.label === selectedArea);
+  const selectedPreset = getAreaPreset(selectedArea);
   const [areaQuery, setAreaQuery] = useState('');
   const [selectedPrefecture, setSelectedPrefecture] = useState(
     selectedPreset ? getPresetPrefecture(selectedPreset) : isPrefectureName(selectedArea) ? selectedArea : prefectures[0] ?? '現在地',
@@ -2408,7 +3233,7 @@ function AreaPresetPicker({
     if (!query) {
       return [];
     }
-    return uniqueAreaPresets(presets.filter((preset) => `${preset.group} ${preset.label}`.toLowerCase().includes(query))).slice(0, 24);
+    return uniqueAreaPresets(presets.filter((preset) => getAreaPresetSearchText(preset).includes(query))).slice(0, 24);
   }, [areaQuery, presets]);
   const hasQuery = areaQuery.trim().length > 0;
 
@@ -2424,7 +3249,7 @@ function AreaPresetPicker({
           value={areaQuery}
           onChangeText={setAreaQuery}
           style={styles.areaSearchInput}
-          placeholder="例: 大阪 / 北区 / 梅田 / 渋谷"
+          placeholder="例: 大阪 / 美郷町 / 北区 / 梅田"
           placeholderTextColor="#9b9184"
         />
         {!!areaQuery && (
@@ -2438,13 +3263,14 @@ function AreaPresetPicker({
           <Text style={styles.areaGroupTitle}>検索結果</Text>
           <View style={styles.areaChipWrap}>
             {searchResults.map((item, index) => {
-              const selected = selectedArea === item.label;
+              const itemValue = getAreaPresetValue(item);
+              const selected = selectedArea === itemValue || selectedArea === item.label;
               return (
                 <Pressable
                   key={`${getAreaPresetKey(item)}-${index}`}
                   style={[styles.areaResultCard, selected && styles.areaChipActive]}
                   onPress={() => {
-                    onSelect(item.label);
+                    onSelect(itemValue);
                     setSelectedPrefecture(getPresetPrefecture(item));
                   }}
                 >
@@ -2472,9 +3298,10 @@ function AreaPresetPicker({
             <Text style={styles.areaGroupTitle}>{selectedPrefecture} の市区町村・主要エリア</Text>
             <View style={styles.areaChipWrap}>
               {selectedPrefectureAreas.map((item, index) => {
-                const selected = selectedArea === item.label;
+                const itemValue = getAreaPresetValue(item);
+                const selected = selectedArea === itemValue || selectedArea === item.label;
                 return (
-                  <Pressable key={`${getAreaPresetKey(item)}-${index}`} style={[styles.areaChip, selected && styles.areaChipActive]} onPress={() => onSelect(item.label)}>
+                  <Pressable key={`${getAreaPresetKey(item)}-${index}`} style={[styles.areaChip, selected && styles.areaChipActive]} onPress={() => onSelect(itemValue)}>
                     <Text style={[styles.areaChipText, selected && styles.areaChipTextActive]}>{item.label}</Text>
                   </Pressable>
                 );
@@ -2487,13 +3314,49 @@ function AreaPresetPicker({
   );
 }
 
-function SmallField({ label, value, suffix, onChangeText }: { label: string; value: string; suffix: string; onChangeText: (value: string) => void }) {
+function RandomFieldHeader({ label, onRandom, randomActive = false }: { label: string; onRandom?: () => void; randomActive?: boolean }) {
+  return (
+    <View style={styles.fieldHeaderRow}>
+      <Text style={styles.smallFieldLabel}>{label}</Text>
+      {!!onRandom && (
+        <Pressable style={[styles.randomMiniButton, randomActive && styles.randomMiniButtonActive]} onPress={onRandom}>
+          <Ionicons name="shuffle-outline" size={14} color={randomActive ? '#ffffff' : ORANGE} />
+          <Text style={[styles.randomMiniButtonText, randomActive && styles.randomMiniButtonTextActive]}>ランダム</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function SmallField({
+  label,
+  value,
+  suffix,
+  onChangeText,
+  onRandom,
+  randomActive = false,
+}: {
+  label: string;
+  value: string;
+  suffix: string;
+  onChangeText: (value: string) => void;
+  onRandom?: () => void;
+  randomActive?: boolean;
+}) {
   return (
     <View style={styles.smallField}>
-      <Text style={styles.smallFieldLabel}>{label}</Text>
+      <RandomFieldHeader label={label} onRandom={onRandom} randomActive={randomActive} />
       <View style={styles.smallFieldRow}>
-        <TextInput value={value} onChangeText={onChangeText} style={styles.smallInput} keyboardType="number-pad" />
-        <Text style={styles.smallSuffix}>{suffix}</Text>
+        {randomActive ? (
+          <Pressable style={styles.randomHiddenInput} onPress={() => onChangeText(value)}>
+            <Text style={styles.randomHiddenInputText}>？</Text>
+          </Pressable>
+        ) : (
+          <>
+            <TextInput value={value} onChangeText={onChangeText} style={styles.smallInput} keyboardType="number-pad" />
+            <Text style={styles.smallSuffix}>{suffix}</Text>
+          </>
+        )}
       </View>
     </View>
   );
@@ -2504,21 +3367,28 @@ function SegmentedValue({
   value,
   values,
   onChange,
+  onRandom,
+  randomActive = false,
 }: {
   label: string;
   value: string;
   values: string[];
   onChange: (value: string) => void;
+  onRandom?: () => void;
+  randomActive?: boolean;
 }) {
   return (
     <View style={styles.segmentWrap}>
-      <Text style={styles.smallFieldLabel}>{label}</Text>
+      <RandomFieldHeader label={label} onRandom={onRandom} randomActive={randomActive} />
       <View style={styles.segmentGroup}>
-        {values.map((item) => (
-          <Pressable key={item} style={[styles.segment, value === item && styles.segmentActive]} onPress={() => onChange(item)}>
-            <Text style={[styles.segmentText, value === item && styles.segmentTextActive]}>{item}</Text>
+        {values.map((item) => {
+          const selected = !randomActive && value === item;
+          return (
+          <Pressable key={item} style={[styles.segment, selected && styles.segmentActive]} onPress={() => onChange(item)}>
+            <Text style={[styles.segmentText, selected && styles.segmentTextActive]}>{item}</Text>
           </Pressable>
-        ))}
+          );
+        })}
       </View>
     </View>
   );
@@ -2531,6 +3401,8 @@ function SearchTab({
   budgetMin,
   budgetMax,
   distance,
+  drawMode,
+  conditionRandom,
   restaurants,
   isLoading,
   onApiBaseUrlChange,
@@ -2539,8 +3411,10 @@ function SearchTab({
   onBudgetMinChange,
   onBudgetMaxChange,
   onDistanceChange,
+  onConditionRandomize,
   onSearch,
   onRandomPress,
+  onAllRandomPress,
 }: {
   apiBaseUrl: string;
   area: string;
@@ -2548,6 +3422,8 @@ function SearchTab({
   budgetMin: string;
   budgetMax: string;
   distance: string;
+  drawMode: DrawMode;
+  conditionRandom: ConditionRandomState;
   restaurants: Restaurant[];
   isLoading: boolean;
   onApiBaseUrlChange: (value: string) => void;
@@ -2556,9 +3432,16 @@ function SearchTab({
   onBudgetMinChange: (value: string) => void;
   onBudgetMaxChange: (value: string) => void;
   onDistanceChange: (value: string) => void;
+  onConditionRandomize: (field: ConditionRandomField) => void;
   onSearch: () => void;
   onRandomPress: () => void;
+  onAllRandomPress: () => void;
 }) {
+  const isEverythingRandom = drawMode === 'everything';
+  const summaryBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax);
+  const summaryDistance = isEverythingRandom || conditionRandom.distance ? '？' : distance;
+  const summaryGenre = isEverythingRandom || conditionRandom.genre ? '？' : genre;
+
   return (
     <View>
       <PageIntro title="条件を整える" lead="探し込みすぎず、決めるために必要な条件だけを残しました。" />
@@ -2574,21 +3457,44 @@ function SearchTab({
         distance={distance}
         genres={GENRES}
         areaPresets={ALL_AREA_PRESETS}
+        conditionRandom={conditionRandom}
         onAreaChange={onAreaChange}
         onGenreChange={onGenreChange}
         onBudgetMinChange={onBudgetMinChange}
         onBudgetMaxChange={onBudgetMaxChange}
         onDistanceChange={onDistanceChange}
+        onRandomized={onConditionRandomize}
         onSubmit={onSearch}
       />
-      <Pressable style={styles.bigDecisionButton} onPress={onRandomPress}>
-        <Text style={styles.bigDecisionSmall}>{isLoading ? '候補を確認中...' : `${restaurants.length}件から抽選`}</Text>
-        <Text style={styles.bigDecisionText}>この条件で決める</Text>
-      </Pressable>
+      <View style={styles.decisionSummary}>
+        <View style={styles.decisionSummaryChip}>
+          <Text style={styles.decisionSummaryLabel}>予算</Text>
+          <Text style={styles.decisionSummaryValue}>{summaryBudget}</Text>
+        </View>
+        <View style={styles.decisionSummaryChip}>
+          <Text style={styles.decisionSummaryLabel}>距離</Text>
+          <Text style={styles.decisionSummaryValue}>{summaryDistance}</Text>
+        </View>
+        <View style={styles.decisionSummaryChip}>
+          <Text style={styles.decisionSummaryLabel}>GENRE</Text>
+          <Text style={styles.decisionSummaryValue} numberOfLines={1}>{summaryGenre}</Text>
+        </View>
+      </View>
+      <View style={styles.decisionActionRow}>
+        <Pressable style={[styles.bigDecisionButton, styles.bigDecisionButtonPrimary]} onPress={onRandomPress}>
+          <Text style={styles.bigDecisionSmall}>{isLoading ? '候補を確認中...' : `${restaurants.length}件から抽選`}</Text>
+          <Text style={styles.bigDecisionText}>この条件で決める</Text>
+        </Pressable>
+        <Pressable style={[styles.bigDecisionButton, styles.bigDecisionButtonRandom]} onPress={onAllRandomPress}>
+          <Ionicons name="shuffle-outline" size={21} color="#ffffff" />
+          <Text style={styles.allRandomDecisionText}>完全ランダム</Text>
+        </Pressable>
+      </View>
       <SectionHeader title="候補一覧" action={`${restaurants.length}件`} />
       {restaurants.map((restaurant) => (
         <RestaurantCard key={restaurant.id} restaurant={restaurant} />
       ))}
+      {restaurants.length > 0 && <HotPepperCredit />}
     </View>
   );
 }
@@ -2603,8 +3509,12 @@ function RandomTab({
   isLoading,
   selectedRestaurant,
   distanceOrigin,
+  userLocation,
   history,
+  conditionRandom,
   drawAnimationKey,
+  drawMode,
+  mealTicketState,
   spinValue,
   resultRevealValue,
   onRandomPress,
@@ -2620,15 +3530,40 @@ function RandomTab({
   isLoading: boolean;
   selectedRestaurant: Restaurant | null;
   distanceOrigin: DistanceOrigin;
+  userLocation: UserLocation | null;
   history: Restaurant[];
+  conditionRandom: ConditionRandomState;
   drawAnimationKey: DrawAnimationKey;
+  drawMode: DrawMode;
+  mealTicketState: MealTicketState;
   spinValue: Animated.Value;
   resultRevealValue: Animated.Value;
   onRandomPress: () => void;
   onSavePress: () => void;
   onGoPress: () => void;
 }) {
+  const isEverythingRandom = drawMode === 'everything';
   const drawAnimation = DRAW_ANIMATION_PROFILES[drawAnimationKey];
+  const displayArea = isEverythingRandom ? '？' : area;
+  const displayGenre = isEverythingRandom || conditionRandom.genre ? '？' : genre;
+  const displayBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax);
+  const displayDistance = isEverythingRandom || conditionRandom.distance ? '？' : distance;
+  const currentTicket = mealTicketState.current;
+  const ticketAvailable = currentTicket.available;
+  const statusText = !ticketAvailable
+    ? 'TICKET LOCKED'
+    : isLoading
+    ? drawAnimation.activeStatus
+    : isEverythingRandom
+      ? 'ALL RANDOM READY'
+      : 'READY TO DRAW';
+  const startText = !ticketAvailable
+    ? currentTicket.proOnly && !mealTicketState.isProUser
+      ? 'Pro深夜チケット'
+      : '次の食券を待つ'
+    : isEverythingRandom
+      ? '完全ランダム START'
+      : 'PRESS START';
   const rotate = spinValue.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '1440deg'] });
   const dartDrop = spinValue.interpolate({ inputRange: [0, 0.72, 1], outputRange: [-18, -18, 0] });
   const dartWiggle = spinValue.interpolate({ inputRange: [0, 0.74, 0.88, 1], outputRange: ['-8deg', '-8deg', '6deg', '0deg'] });
@@ -2666,23 +3601,24 @@ function RandomTab({
     { label: '8', top: 29, left: 46, color: '#f05a28' },
   ];
   const rouletteLabels = [
-    { text: genre, style: styles.rouletteLabelTop },
-    { text: area, style: styles.rouletteLabelBottom },
-    { text: '近場', style: styles.rouletteLabelRight },
-    { text: '予算内', style: styles.rouletteLabelLeft },
+    { text: displayGenre, style: styles.rouletteLabelTop },
+    { text: displayArea, style: styles.rouletteLabelBottom },
+    { text: isEverythingRandom ? '気分' : '近場', style: styles.rouletteLabelRight },
+    { text: isEverythingRandom ? '直感' : '予算内', style: styles.rouletteLabelLeft },
   ];
 
   return (
     <View>
+      <MealTicketPanel state={mealTicketState} compact />
       <View style={styles.drawConditionRow}>
-          <ConditionPill label={area} active />
-          <ConditionPill label={genre} />
-          <ConditionPill label={`${budgetMin}〜${budgetMax}円`} />
-          <ConditionPill label={distance} />
+          <ConditionPill label={isEverythingRandom ? '完全ランダム' : displayArea} active />
+          <ConditionPill label={displayGenre} />
+          <ConditionPill label={displayBudget} />
+          <ConditionPill label={displayDistance} />
       </View>
-      <Pressable style={styles.drawStage} onPress={onRandomPress}>
+      <Pressable style={[styles.drawStage, isLoading && styles.drawStageLoading]} onPress={onRandomPress} disabled={isLoading}>
         <View style={styles.rouletteStatusPill}>
-          <Text style={styles.rouletteStatusText}>{isLoading ? drawAnimation.activeStatus : drawAnimation.idleStatus}</Text>
+          <Text style={styles.rouletteStatusText}>{statusText}</Text>
         </View>
         <View style={styles.rouletteButton}>
           <Animated.View style={[styles.dart, { transform: [{ translateY: dartDrop }, { rotate: dartWiggle }] }]}>
@@ -2743,15 +3679,15 @@ function RandomTab({
             <View style={styles.shuffleMotionLayer}>
               <Animated.View style={[styles.shuffleCard, styles.shuffleCardOne, { transform: [{ translateX: shuffleOneX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '-8deg' }] }]}>
                 <Text style={styles.shuffleCardLabel}>AREA</Text>
-                <Text style={styles.shuffleCardValue} numberOfLines={1}>{area}</Text>
+                <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayArea}</Text>
               </Animated.View>
               <Animated.View style={[styles.shuffleCard, styles.shuffleCardTwo, { transform: [{ translateX: shuffleTwoX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '5deg' }] }]}>
                 <Text style={styles.shuffleCardLabel}>GENRE</Text>
-                <Text style={styles.shuffleCardValue} numberOfLines={1}>{genre}</Text>
+                <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayGenre}</Text>
               </Animated.View>
               <Animated.View style={[styles.shuffleCard, styles.shuffleCardThree, { transform: [{ translateX: shuffleThreeX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '10deg' }] }]}>
                 <Text style={styles.shuffleCardLabel}>PRICE</Text>
-                <Text style={styles.shuffleCardValue} numberOfLines={1}>{budgetMax}円</Text>
+                <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayBudget}</Text>
               </Animated.View>
             </View>
           )}
@@ -2761,18 +3697,18 @@ function RandomTab({
           </View>
           <View style={styles.mapChoiceCard}>
             <Text style={styles.mapChoiceLabel}>GENRE</Text>
-            <Text style={styles.mapChoiceValue}>{genre}</Text>
+            <Text style={styles.mapChoiceValue}>{displayGenre}</Text>
             <View style={styles.mapChoiceDivider} />
             <Text style={styles.mapChoiceLabel}>AREA</Text>
-            <Text style={styles.mapChoiceValue}>{area}</Text>
+            <Text style={styles.mapChoiceValue}>{displayArea}</Text>
           </View>
-          <View style={styles.rouletteCta}>
+          <View style={[styles.rouletteCta, !ticketAvailable && styles.rouletteCtaLocked]}>
             {isLoading ? (
               <ActivityIndicator color="#ffffff" />
             ) : (
               <>
                 <Ionicons name={drawAnimation.icon} size={25} color="#ffffff" />
-                <Text style={styles.rouletteCtaText}>タップして回す</Text>
+                <Text style={styles.rouletteCtaText}>{startText}</Text>
               </>
             )}
           </View>
@@ -2782,7 +3718,7 @@ function RandomTab({
       {selectedRestaurant ? (
         <Animated.View style={[styles.resultWrap, { opacity: resultRevealValue, transform: [{ translateY: resultTranslateY }, { scale: resultScale }] }]}>
           <Text style={styles.resultKicker}>TODAY'S PICK</Text>
-          <ResultCard restaurant={selectedRestaurant} distanceOrigin={distanceOrigin} onMapPress={onGoPress} />
+          <ResultCard restaurant={selectedRestaurant} selectedGenre={isEverythingRandom ? 'すべて' : genre} distanceOrigin={distanceOrigin} userLocation={userLocation} onMapPress={onGoPress} />
           <View style={styles.resultActions}>
             <Pressable style={styles.secondaryAction} onPress={onRandomPress}>
               <Text style={styles.secondaryActionText}>もう一回引く</Text>
@@ -2798,10 +3734,11 @@ function RandomTab({
       ) : (
         <View style={styles.emptyPanel}>
           <Text style={styles.emptyTitle}>まだ一店は決まっていません</Text>
-          <Text style={styles.emptyText}>大きなカードをタップして抽選してください。</Text>
+          <Text style={styles.emptyText}>大きなカードのSTARTを押すと抽選が始まります。</Text>
         </View>
       )}
       <HistorySection history={history} />
+      {!selectedRestaurant && history.length > 0 && <HotPepperCredit />}
     </View>
   );
 }
@@ -2819,6 +3756,7 @@ function SaveTab({ savedRestaurants, history }: { savedRestaurants: Restaurant[]
         savedRestaurants.map((restaurant) => <RestaurantCard key={`${restaurant.id}-saved`} restaurant={restaurant} />)
       )}
       <HistorySection history={history} />
+      {(savedRestaurants.length > 0 || history.length > 0) && <HotPepperCredit />}
     </View>
   );
 }
@@ -2828,6 +3766,7 @@ function AnalyticsTab({
   locationStatus,
   restaurants,
   history,
+  drawHistories,
   savedRestaurants,
   onAreaPress,
 }: {
@@ -2835,23 +3774,67 @@ function AnalyticsTab({
   locationStatus: string;
   restaurants: Restaurant[];
   history: Restaurant[];
+  drawHistories: DrawHistoryEntry[];
   savedRestaurants: Restaurant[];
   onAreaPress: () => void;
 }) {
+  const monthDate = useMemo(() => new Date(), []);
+  const monthLabel = `${monthDate.getMonth() + 1}月`;
+
+  const monthlyDraws = useMemo(() => {
+    const month = new Date();
+    const currentMonthEntries = drawHistories.filter((entry) => isSameMonth(entry.createdAt, month));
+    if (drawHistories.length || !history.length) {
+      return currentMonthEntries;
+    }
+    const createdAt = new Date().toISOString();
+    return history.map((restaurant, index) => ({
+      id: `session-${restaurant.id}-${index}`,
+      restaurant,
+      createdAt,
+    }));
+  }, [drawHistories, history]);
+
+  const budgetValues = useMemo(
+    () => monthlyDraws
+      .map((entry) => getEstimatedBudget(entry.restaurant))
+      .filter((value): value is number => value != null),
+    [monthlyDraws],
+  );
+
+  const monthlyEstimatedTotal = budgetValues.reduce((total, value) => total + value, 0);
+  const monthlyTotalLabel = budgetValues.length ? `約${formatYen(monthlyEstimatedTotal)}` : '0円';
+  const averageBudgetLabel = budgetValues.length ? `約${formatYen(monthlyEstimatedTotal / budgetValues.length)}` : '0円';
+
   const topGenre = useMemo(() => {
-    const counts = history.reduce<Record<string, number>>((current, restaurant) => {
+    const counts = monthlyDraws.reduce<Record<string, number>>((current, entry) => {
+      const restaurant = entry.restaurant;
       current[restaurant.genre] = (current[restaurant.genre] ?? 0) + 1;
       return current;
     }, {});
     return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'まだなし';
-  }, [history]);
+  }, [monthlyDraws]);
 
-  const averageBudget = useMemo(() => {
-    const source = history.length ? history : restaurants;
-    if (!source.length) return '未計測';
-    const average = source.reduce((total, restaurant) => total + (restaurant.budgetMin + restaurant.budgetMax) / 2, 0) / source.length;
-    return `${Math.round(average).toLocaleString()}円`;
-  }, [history, restaurants]);
+  const weekSpends = useMemo(() => {
+    const buckets = [0, 0, 0, 0, 0];
+    monthlyDraws.forEach((entry) => {
+      const date = new Date(entry.createdAt);
+      const budget = getEstimatedBudget(entry.restaurant);
+      if (Number.isNaN(date.getTime()) || budget == null) {
+        return;
+      }
+      const weekIndex = Math.min(4, Math.floor((date.getDate() - 1) / 7));
+      buckets[weekIndex] += budget;
+    });
+    const max = Math.max(...buckets, 1);
+    return buckets.map((amount, index) => ({
+      label: `${index + 1}週`,
+      amount,
+      percent: amount > 0 ? Math.max(18, Math.round((amount / max) * 100)) : 0,
+    }));
+  }, [monthlyDraws]);
+
+  const recentDraws = monthlyDraws.slice(0, 3);
 
   const stats: Array<{
     label: string;
@@ -2859,10 +3842,10 @@ function AnalyticsTab({
     sub: string;
     icon: keyof typeof MaterialCommunityIcons.glyphMap;
   }> = [
-    { label: '抽選回数', value: `${history.length}回`, sub: '過去30日間', icon: 'dice-5-outline' },
-    { label: '保存した店', value: `${savedRestaurants.length}件`, sub: '過去30日間', icon: 'bookmark-outline' },
-    { label: 'よく出るジャンル', value: topGenre, sub: '過去30日間', icon: 'silverware-fork-knife' },
-    { label: '平均予算', value: averageBudget, sub: '過去30日間', icon: 'currency-jpy' },
+    { label: '今月の抽選', value: `${monthlyDraws.length}回`, sub: `${monthLabel}だけ表示`, icon: 'dice-5-outline' },
+    { label: '保存した店', value: `${savedRestaurants.length}件`, sub: '無料で確認', icon: 'bookmark-outline' },
+    { label: 'よく出るジャンル', value: topGenre, sub: `${monthLabel}の傾向`, icon: 'silverware-fork-knife' },
+    { label: '平均単価', value: averageBudgetLabel, sub: '店の平均予算', icon: 'currency-jpy' },
   ];
 
   const trendGenres: Array<{ label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }> = [
@@ -2895,14 +3878,55 @@ function AnalyticsTab({
         <Text style={styles.analysisLead}>食の傾向を見える化するプレミアム機能です。</Text>
       </View>
 
+      <View style={styles.analysisFreeCard}>
+        <View style={styles.analysisFreeTopRow}>
+          <View>
+            <Text style={styles.analysisFreeLabel}>FREE PLAN</Text>
+            <Text style={styles.analysisFreeTitle}>今月の推定外食費</Text>
+          </View>
+          <View style={styles.analysisFreeBadge}>
+            <Text style={styles.analysisFreeBadgeText}>{monthLabel}</Text>
+          </View>
+        </View>
+        <Text style={styles.analysisFreeAmount} numberOfLines={1}>{monthlyTotalLabel}</Text>
+        <Text style={styles.analysisFreeText}>
+          抽選で出た店の平均予算を自動で合計しています。手入力なしで、ざっくり支出を見られます。
+        </Text>
+
+        <View style={styles.analysisSpendBars}>
+          {weekSpends.map((item) => (
+            <View key={item.label} style={styles.analysisSpendBarItem}>
+              <Text style={styles.analysisSpendBarAmount} numberOfLines={1}>
+                {item.amount ? formatYen(item.amount).replace('円', '') : '0'}
+              </Text>
+              <View style={styles.analysisSpendBarTrack}>
+                <View style={[styles.analysisSpendBarFill, { height: `${item.percent}%` }]} />
+              </View>
+              <Text style={styles.analysisSpendBarLabel}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.analysisFreeMetaRow}>
+          <View style={styles.analysisFreeMetaItem}>
+            <Text style={styles.analysisFreeMetaLabel}>計算方法</Text>
+            <Text style={styles.analysisFreeMetaValue}>平均予算</Text>
+          </View>
+          <View style={styles.analysisFreeMetaItem}>
+            <Text style={styles.analysisFreeMetaLabel}>対象</Text>
+            <Text style={styles.analysisFreeMetaValue}>{monthLabel}の抽選結果</Text>
+          </View>
+        </View>
+      </View>
+
       <View style={styles.analysisPremiumHero}>
-        <Text style={styles.analysisPremiumLabel}>RANDISH PREMIUM</Text>
-        <Text style={styles.analysisPremiumTitle}>迷い方まで、{'\n'}分析する。</Text>
+        <Text style={styles.analysisPremiumLabel}>RANDISH PRO</Text>
+        <Text style={styles.analysisPremiumTitle}>先月との差まで、{'\n'}残して見る。</Text>
         <Text style={styles.analysisPremiumLead}>
-          よく引くジャンル、保存率、予算傾向を可視化して、{'\n'}次の一店をもっと決めやすくします。
+          Freeは今月分だけ。Proなら過去月を保存して、{'\n'}先月より何円増えたか、節約できたかを見られます。
         </Text>
         <Pressable style={styles.analysisBillingButton}>
-          <Text style={styles.analysisBillingText}>課金予定</Text>
+          <Text style={styles.analysisBillingText}>Pro予定</Text>
         </Pressable>
         <View style={styles.analysisPremiumIcon}>
           <Ionicons name="bar-chart" size={86} color="#ffffff" />
@@ -2918,6 +3942,37 @@ function AnalyticsTab({
             <Text style={styles.analysisStatSub}>{item.sub}</Text>
           </View>
         ))}
+      </View>
+
+      <View style={styles.analysisHistoryCard}>
+        <View style={styles.analysisHistoryHeader}>
+          <Text style={styles.analysisHistoryTitle}>今月の抽選結果</Text>
+          <View style={styles.analysisPremiumMark}>
+            <Ionicons name="lock-closed-outline" size={15} color={INK} />
+            <Text style={styles.analysisPremiumMarkText}>先月はPro</Text>
+          </View>
+        </View>
+
+        {recentDraws.length === 0 ? (
+          <View style={styles.analysisHistoryEmpty}>
+            <Ionicons name="receipt-outline" size={28} color="#9a9187" />
+            <Text style={styles.analysisHistoryEmptyText}>今月の抽選結果が入ると、ここに推定予算が並びます。</Text>
+          </View>
+        ) : (
+          recentDraws.map((entry) => {
+            const budget = getEstimatedBudget(entry.restaurant);
+            return (
+              <View key={entry.id} style={styles.analysisHistoryRow}>
+                <Text style={styles.analysisHistoryDate}>{formatShortDate(entry.createdAt)}</Text>
+                <View style={styles.analysisHistoryBody}>
+                  <Text style={styles.analysisHistoryName} numberOfLines={1}>{entry.restaurant.name}</Text>
+                  <Text style={styles.analysisHistoryMeta} numberOfLines={1}>{entry.restaurant.genre} / {entry.restaurant.area}</Text>
+                </View>
+                <Text style={styles.analysisHistoryBudget}>{budget == null ? '未計測' : `約${formatYen(budget)}`}</Text>
+              </View>
+            );
+          })
+        )}
       </View>
 
       <View style={styles.analysisGenreCard}>
@@ -2973,15 +4028,23 @@ function AnalyticsMetric({ icon, label, value }: { icon: string; label: string; 
 
 function ResultCard({
   restaurant,
+  selectedGenre,
   distanceOrigin,
+  userLocation,
   onMapPress,
 }: {
   restaurant: Restaurant;
+  selectedGenre: string;
   distanceOrigin: DistanceOrigin;
+  userLocation: UserLocation | null;
   onMapPress: () => void;
 }) {
-  const distanceLabel = getDistanceLabel(distanceOrigin.location, restaurant);
-  const minutesLabel = getWalkingMinutesLabel(distanceOrigin.location, restaurant);
+  const stationOrigin = getNearestStationOrigin(restaurant);
+  const stationDistanceLabel = stationOrigin ? getDistanceLabel(stationOrigin.location, restaurant) : '地図で確認';
+  const currentDistanceLabel = userLocation ? getDistanceLabel(userLocation, restaurant) : '取得中';
+  const minutesLabel = getWalkingMinutesLabel(stationOrigin?.location ?? distanceOrigin.location, restaurant);
+  const miniMapDistanceLabel = stationOrigin ? `${stationOrigin.label} ${stationDistanceLabel}` : stationDistanceLabel;
+  const openStatus = getOpenStatus(restaurant);
 
   return (
     <View style={styles.resultCard}>
@@ -2989,30 +4052,39 @@ function ResultCard({
       <View style={styles.resultContent}>
         <Text style={styles.resultName}>{restaurant.name}</Text>
         <View style={styles.resultDistanceBand}>
-          <View>
-            <Text style={styles.resultDistanceLabel}>{distanceOrigin.label}</Text>
-            <Text style={styles.resultDistanceValue}>{distanceLabel}</Text>
+          <View style={styles.resultDistanceList}>
+            <View style={styles.resultDistanceItem}>
+              <Text style={styles.resultDistanceLabel}>{stationOrigin?.label ?? '最寄り駅から'}</Text>
+              <Text style={styles.resultDistanceValue}>{stationDistanceLabel}</Text>
+            </View>
+            <View style={styles.resultDistanceItem}>
+              <Text style={styles.resultDistanceLabel}>現在地から</Text>
+              <Text style={[styles.resultDistanceValue, !userLocation && styles.resultDistanceValueMuted]}>{currentDistanceLabel}</Text>
+            </View>
           </View>
           <Pressable style={styles.resultMapShortcut} onPress={onMapPress}>
             <Text style={styles.resultMapShortcutText}>Google Map</Text>
           </Pressable>
         </View>
         <View style={styles.metaRow}>
-          <MetaPill label={restaurant.genre} />
+          {selectedGenre !== 'すべて' && <MetaPill label={`選択 ${selectedGenre}`} />}
+          <MetaPill label={`API ${restaurant.genre}`} />
           <MetaPill label={restaurant.priceRange ?? formatPrice(restaurant)} />
           <MetaPill label={minutesLabel} />
         </View>
         <View style={styles.ratingRow}>
           <Text style={[styles.ratingText, getRatingValue(restaurant) == null && styles.ratingTextPending]}>{getRatingLabel(restaurant)}</Text>
-          {restaurant.openNow != null && (
-            <Text style={[styles.openNowText, restaurant.openNow ? styles.openNowActiveText : styles.openNowInactiveText]}>
-              {restaurant.openNow ? '営業中' : '営業時間外'}
+          <View style={styles.openStatusRow}>
+            <Text style={[styles.openNowText, openStatus.active === true && styles.openNowActiveText, openStatus.active === false && styles.openNowInactiveText, openStatus.active == null && styles.openNowUnknownText]}>
+              {openStatus.label}
             </Text>
-          )}
+            <Text style={styles.openStatusDetail}>{openStatus.detail}</Text>
+          </View>
           <Text style={styles.addressText} numberOfLines={1}>{restaurant.area} / {restaurant.address}</Text>
         </View>
-        <MiniGoogleMap restaurant={restaurant} distanceLabel={distanceLabel} onPress={onMapPress} />
+        <MiniGoogleMap restaurant={restaurant} distanceLabel={miniMapDistanceLabel} onPress={onMapPress} />
         {!!restaurant.note && <Text style={styles.restaurantNote}>{restaurant.note}</Text>}
+        {restaurant.externalProvider === 'HOTPEPPER' && <HotPepperCredit compact />}
       </View>
     </View>
   );
@@ -3093,14 +4165,50 @@ function CandidateCard({ restaurant }: { restaurant: Restaurant }) {
   );
 }
 
-function RestaurantVisual({ restaurant, large = false }: { restaurant: Restaurant; large?: boolean }) {
-  if (restaurant.photoUrl) {
-    return <Image source={{ uri: restaurant.photoUrl }} style={large ? styles.restaurantVisualLarge : styles.restaurantVisual} resizeMode="cover" />;
+function RestaurantVisual({
+  restaurant,
+  large = false,
+}: {
+  restaurant: Restaurant;
+  large?: boolean;
+}) {
+  const genreVisual = getGenreVisual(restaurant.genre);
+  const imageCredit = restaurant.externalProvider === 'GOOGLE_PLACES'
+    ? '画像提供：Google Places'
+    : '画像提供：ホットペッパー グルメ';
+
+  if (large && restaurant.photoUrl) {
+    return (
+      <View style={[styles.restaurantVisualLarge, styles.restaurantVisualFrame]}>
+        <Image source={{ uri: restaurant.photoUrl }} style={styles.restaurantVisualPhoto} resizeMode="cover" />
+        <Text style={styles.hotpepperImageCredit} numberOfLines={1}>
+          {imageCredit}
+        </Text>
+      </View>
+    );
   }
 
   return (
-    <View style={[large ? styles.restaurantVisualLarge : styles.restaurantVisual, styles.visualFallback]}>
-      <Text style={styles.visualInitial}>{restaurant.name.slice(0, 1)}</Text>
+    <View
+      style={[
+        large ? styles.restaurantVisualLarge : styles.restaurantVisual,
+        styles.restaurantVisualFrame,
+        { backgroundColor: `${genreVisual.color}16` },
+      ]}
+    >
+      <View style={[styles.genreVisualGlow, { backgroundColor: `${genreVisual.color}1f` }]} />
+      <Image
+        source={genreVisual.image}
+        style={[styles.genreVisualImage, large ? styles.genreVisualImageLarge : styles.genreVisualImageSmall]}
+        resizeMode="contain"
+      />
+      {large && (
+        <View style={styles.genreVisualLabel}>
+          <Text style={[styles.genreVisualLabelText, { color: genreVisual.color }]} numberOfLines={1}>
+            {restaurant.genre}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -3115,6 +4223,18 @@ function HistorySection({ history }: { history: Restaurant[] }) {
         history.slice(0, 5).map((restaurant) => <RestaurantCard key={`${restaurant.id}-history`} restaurant={restaurant} />)
       )}
     </View>
+  );
+}
+
+function HotPepperCredit({ compact = false }: { compact?: boolean }) {
+  return (
+    <Pressable
+      style={[styles.hotpepperCredit, compact && styles.hotpepperCreditCompact]}
+      onPress={() => Linking.openURL(HOTPEPPER_CREDIT_URL)}
+      accessibilityLabel="ホットペッパーグルメ Webサービス"
+    >
+      <Image source={{ uri: HOTPEPPER_CREDIT_IMAGE_URL }} style={styles.hotpepperCreditImage} resizeMode="contain" />
+    </Pressable>
   );
 }
 
@@ -3873,6 +4993,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   homeLocationPanel: {
+    paddingHorizontal: 2,
     paddingBottom: 20,
   },
   homeBackButton: {
@@ -3906,17 +5027,17 @@ const styles = StyleSheet.create({
     paddingTop: 18,
   },
   homeLogoButton: {
-    width: 54,
-    height: 54,
+    width: 56,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 18,
-    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    backgroundColor: '#fff8f2',
     borderWidth: 1,
-    borderColor: '#efe4d8',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
+    borderColor: '#ffd7c6',
+    shadowColor: ORANGE,
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
   },
   homeLogoImage: {
@@ -3929,7 +5050,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 24,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffaf5',
     borderWidth: 1,
     borderColor: '#efe4d8',
     shadowColor: '#000',
@@ -4011,8 +5132,8 @@ const styles = StyleSheet.create({
   },
   homeLocationTitle: {
     textAlign: 'center',
-    fontSize: 33,
-    lineHeight: 39,
+    fontSize: 34,
+    lineHeight: 40,
     fontWeight: '900',
     color: INK,
   },
@@ -4025,6 +5146,202 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#6f665c',
   },
+  mealTicketPanel: {
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 24,
+    backgroundColor: '#fffaf2',
+    borderWidth: 1,
+    borderColor: '#eadfca',
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  mealTicketPanelCompact: {
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 20,
+  },
+  mealTicketHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  mealTicketKicker: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: ORANGE,
+  },
+  mealTicketTitle: {
+    marginTop: 1,
+    fontSize: 24,
+    lineHeight: 29,
+    fontWeight: '900',
+    color: INK,
+  },
+  mealTicketCountBadge: {
+    minWidth: 64,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#eadfca',
+  },
+  mealTicketCountBadgeActive: {
+    backgroundColor: INK,
+    borderColor: INK,
+  },
+  mealTicketCountText: {
+    fontSize: 16,
+    lineHeight: 18,
+    fontWeight: '900',
+    color: INK,
+  },
+  mealTicketCountTextActive: {
+    color: '#ffffff',
+  },
+  mealTicketCountSub: {
+    marginTop: 1,
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#9b9184',
+  },
+  mealTicketCountSubActive: {
+    color: '#f7d6c6',
+  },
+  mealTicketLead: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+    color: '#756b61',
+  },
+  mealTicketGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  mealTicketCard: {
+    width: '48.5%',
+    minHeight: 94,
+    padding: 10,
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e8ddcf',
+  },
+  mealTicketCardActive: {
+    backgroundColor: '#fff3ea',
+    borderColor: ORANGE,
+  },
+  mealTicketCardUsed: {
+    backgroundColor: '#f7f1ea',
+  },
+  mealTicketCardPro: {
+    backgroundColor: '#f6f4ff',
+    borderColor: '#dad6ff',
+  },
+  mealTicketCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  mealTicketIcon: {
+    width: 31,
+    height: 31,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  mealTicketTextBlock: {
+    flex: 1,
+  },
+  mealTicketName: {
+    fontSize: 16,
+    lineHeight: 19,
+    fontWeight: '900',
+    color: INK,
+  },
+  mealTicketNameActive: {
+    color: ORANGE,
+  },
+  mealTicketTime: {
+    marginTop: 1,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '800',
+    color: '#8f8579',
+  },
+  mealTicketStatusRow: {
+    minHeight: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
+  },
+  mealTicketStatus: {
+    flexShrink: 1,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '900',
+    color: '#7d7368',
+  },
+  mealTicketStatusActive: {
+    color: ORANGE,
+  },
+  mealTicketStatusPro: {
+    color: '#5d5be8',
+  },
+  mealTicketCountdown: {
+    marginTop: 2,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '800',
+    color: '#9b9184',
+  },
+  mealTicketNightRail: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e0ff',
+  },
+  mealTicketNightTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  mealTicketNightTitle: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '900',
+    color: '#514fd0',
+  },
+  mealTicketNightChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  mealTicketNightChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#f4f2ff',
+  },
+  mealTicketNightChipText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '900',
+    color: '#514fd0',
+  },
   homeSearchBox: {
     height: 64,
     flexDirection: 'row',
@@ -4032,11 +5349,11 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 20,
     borderRadius: 32,
-    backgroundColor: '#fffdf9',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#eadfca',
     shadowColor: '#000',
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.07,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
   },
@@ -4057,6 +5374,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 19,
+    backgroundColor: '#fff2e8',
   },
   homeSearchFilterButtonMuted: {
     opacity: 0.35,
@@ -4418,12 +5736,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
     borderRadius: 22,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fff7ef',
     borderWidth: 1,
-    borderColor: '#efe4d8',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
+    borderColor: '#ffd7c6',
+    shadowColor: ORANGE,
+    shadowOpacity: 0.15,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
   },
   homeCurrentBadge: {
@@ -4455,9 +5773,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 24,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffdf9',
     shadowColor: ORANGE,
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.25,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
   },
@@ -4532,12 +5850,12 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     padding: 18,
     borderRadius: 22,
-    backgroundColor: '#f8f4ec',
+    backgroundColor: '#edf5e8',
     borderWidth: 1,
-    borderColor: LINE,
+    borderColor: '#d8ead1',
     position: 'relative',
     shadowColor: '#000',
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.07,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
   },
@@ -4546,7 +5864,9 @@ const styles = StyleSheet.create({
     height: 14,
     borderRadius: 7,
     backgroundColor: '#ffffff',
-    opacity: 0.88,
+    opacity: 0.96,
+    borderWidth: 1,
+    borderColor: '#e5eadf',
   },
   homeMapRoadOne: {
     width: 160,
@@ -4558,6 +5878,8 @@ const styles = StyleSheet.create({
     width: 150,
     top: 74,
     left: 8,
+    backgroundColor: '#ffe1a3',
+    borderColor: '#f2cf78',
     transform: [{ rotate: '-18deg' }],
   },
   homeMapRoadThree: {
@@ -4573,7 +5895,7 @@ const styles = StyleSheet.create({
     top: 12,
     right: 12,
     borderRadius: 15,
-    backgroundColor: '#cfe9c7',
+    backgroundColor: '#c9eabd',
   },
   homeMapPin: {
     position: 'absolute',
@@ -4583,9 +5905,13 @@ const styles = StyleSheet.create({
     height: 38,
     marginLeft: -19,
     borderRadius: 19,
-    backgroundColor: INK,
+    backgroundColor: ORANGE,
     borderWidth: 8,
-    borderColor: '#ffffff',
+    borderColor: '#fffdf9',
+    shadowColor: ORANGE,
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
   },
   homeMapMarkerIcon: {
     position: 'absolute',
@@ -4935,7 +6261,7 @@ const styles = StyleSheet.create({
   homeRegionList: {
     overflow: 'hidden',
     borderRadius: 22,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fffdf9',
     borderWidth: 1,
     borderColor: LINE,
   },
@@ -4956,9 +6282,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 9,
+    backgroundColor: '#ffffff',
   },
   homeRegionRowActive: {
-    backgroundColor: '#fff8f3',
+    backgroundColor: '#fff2ea',
   },
   homeRegionIconFrame: {
     width: 36,
@@ -4967,9 +6294,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
     borderRadius: 18,
-    backgroundColor: '#fbfaf8',
+    backgroundColor: '#fff8f1',
     borderWidth: 1,
-    borderColor: '#eee6dd',
+    borderColor: '#f2dfcf',
   },
   homeRegionIconFrameActive: {
     backgroundColor: '#fff0e9',
@@ -4999,11 +6326,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#fffdfb',
   },
   homePrefecturePill: {
-    minHeight: 42,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: 7,
-    paddingRight: 13,
+    paddingLeft: 12,
+    paddingRight: 14,
     borderRadius: 999,
     backgroundColor: '#ffffff',
     borderWidth: 1,
@@ -5043,24 +6370,24 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'visible',
+    overflow: 'hidden',
     borderRadius: 20,
     backgroundColor: '#fbfaf8',
     borderWidth: 1,
     borderColor: '#eee6dd',
-    marginRight: 12,
+    marginRight: 10,
   },
   homePrefectureIconFrameActive: {
     backgroundColor: '#fff0e9',
     borderColor: '#ffd3c2',
   },
   homePrefectureAssetIcon: {
-    width: 24,
-    height: 24,
+    width: 30,
+    height: 30,
   },
   homePrefectureIcon: {
-    width: 24,
-    height: 24,
+    width: 30,
+    height: 30,
     textAlign: 'center',
     textAlignVertical: 'center',
   },
@@ -5491,30 +6818,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    rowGap: 10,
-    paddingTop: 14,
-    paddingBottom: 16,
+    rowGap: 8,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
   genreChip: {
-    width: '48.5%',
-    minHeight: 86,
+    width: '31.8%',
+    minHeight: 38,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    gap: 10,
-    paddingHorizontal: 12,
-    borderRadius: 22,
+    overflow: 'hidden',
+    paddingLeft: 6,
+    paddingRight: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#eee5d8',
   },
+  genreIconChip: {
+    width: 26,
+    height: 26,
+    marginRight: 5,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderRadius: 999,
+    borderWidth: 1,
+  },
   genreChipImage: {
-    width: 54,
-    height: 54,
+    width: 18,
+    height: 18,
+    opacity: 0.76,
+  },
+  genreChipImageActive: {
+    opacity: 1,
   },
   genreChipText: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '900',
     color: INK,
   },
@@ -5535,20 +6880,77 @@ const styles = StyleSheet.create({
   filterGrid: {
     gap: 10,
   },
+  genreSectionHeader: {
+    marginTop: 16,
+    marginBottom: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  genreSectionTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#7b7064',
+  },
   smallField: {
     padding: 14,
     borderRadius: 20,
     backgroundColor: '#f8f3eb',
+  },
+  fieldHeaderRow: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
   },
   smallFieldLabel: {
     fontSize: 12,
     fontWeight: '900',
     color: '#7b7064',
   },
+  randomMiniButton: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    backgroundColor: '#fff8f1',
+    borderWidth: 1,
+    borderColor: '#f2decc',
+  },
+  randomMiniButtonActive: {
+    backgroundColor: ORANGE,
+    borderColor: ORANGE,
+    shadowColor: ORANGE,
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  randomMiniButtonText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '900',
+    color: ORANGE,
+  },
+  randomMiniButtonTextActive: {
+    color: '#ffffff',
+  },
   smallFieldRow: {
     marginTop: 4,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  randomHiddenInput: {
+    minHeight: 28,
+    justifyContent: 'center',
+  },
+  randomHiddenInputText: {
+    fontSize: 24,
+    lineHeight: 29,
+    fontWeight: '900',
+    color: INK,
   },
   smallInput: {
     flex: 1,
@@ -5594,17 +6996,25 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   bigDecisionButton: {
-    minHeight: 78,
-    marginTop: 18,
     paddingHorizontal: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 24,
+    borderRadius: 22,
+  },
+  bigDecisionButtonPrimary: {
+    flex: 1,
+    minHeight: 76,
     backgroundColor: ORANGE,
     shadowColor: ORANGE,
     shadowOpacity: 0.22,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
+  },
+  bigDecisionButtonRandom: {
+    width: 116,
+    minHeight: 76,
+    gap: 5,
+    backgroundColor: INK,
   },
   bigDecisionSmall: {
     fontSize: 12,
@@ -5616,6 +7026,51 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '900',
     color: '#ffffff',
+  },
+  allRandomDecisionText: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '900',
+    color: '#ffffff',
+    textAlign: 'center',
+  },
+  decisionSummary: {
+    marginTop: 16,
+    flexDirection: 'row',
+    gap: 7,
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#fbf6ef',
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+  decisionSummaryChip: {
+    flex: 1,
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#eee4d8',
+  },
+  decisionSummaryLabel: {
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '900',
+    color: '#9a9084',
+  },
+  decisionSummaryValue: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: '900',
+    color: INK,
+  },
+  decisionActionRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 10,
   },
   notice: {
     marginTop: 16,
@@ -5638,6 +7093,29 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: '800',
     color: '#645b4b',
+  },
+  hotpepperCredit: {
+    alignSelf: 'flex-end',
+    marginTop: 14,
+    marginBottom: 2,
+    width: 100,
+    height: 45,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+    borderRadius: 7,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+  hotpepperCreditCompact: {
+    marginTop: 14,
+    marginBottom: 0,
+    marginLeft: 'auto',
+  },
+  hotpepperCreditImage: {
+    width: 88,
+    height: 35,
   },
   currentLocationCard: {
     marginTop: 12,
@@ -5837,9 +7315,12 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 16 },
   },
+  drawStageLoading: {
+    borderColor: ORANGE,
+  },
   drawConditionRow: {
     flexDirection: 'row',
-    flexWrap: 'nowrap',
+    flexWrap: 'wrap',
     gap: 6,
     marginBottom: 12,
     padding: 8,
@@ -5853,11 +7334,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
   },
   conditionPill: {
-    minHeight: 36,
+    minHeight: 32,
     flexShrink: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     borderRadius: 999,
     backgroundColor: '#f4eee7',
   },
@@ -5865,7 +7346,8 @@ const styles = StyleSheet.create({
     backgroundColor: ORANGE,
   },
   conditionPillText: {
-    fontSize: 12,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '900',
     color: INK,
   },
@@ -6368,9 +7850,15 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
   },
+  rouletteCtaLocked: {
+    backgroundColor: '#5f5a54',
+    borderColor: '#d8cec3',
+    shadowOpacity: 0.08,
+  },
   rouletteCtaText: {
-    fontSize: 19,
+    fontSize: 18,
     lineHeight: 24,
+    letterSpacing: 0.4,
     fontWeight: '900',
     color: '#ffffff',
   },
@@ -6412,7 +7900,7 @@ const styles = StyleSheet.create({
     color: INK,
   },
   resultDistanceBand: {
-    minHeight: 66,
+    minHeight: 112,
     marginTop: 14,
     flexDirection: 'row',
     alignItems: 'center',
@@ -6425,6 +7913,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#efe4d8',
   },
+  resultDistanceList: {
+    flex: 1,
+    gap: 8,
+  },
+  resultDistanceItem: {
+    minHeight: 42,
+  },
   resultDistanceLabel: {
     fontSize: 12,
     fontWeight: '900',
@@ -6432,9 +7927,14 @@ const styles = StyleSheet.create({
   },
   resultDistanceValue: {
     marginTop: 2,
-    fontSize: 24,
+    fontSize: 21,
+    lineHeight: 26,
     fontWeight: '900',
     color: INK,
+  },
+  resultDistanceValueMuted: {
+    fontSize: 18,
+    color: '#8a8175',
   },
   resultMapShortcut: {
     minHeight: 40,
@@ -6488,6 +7988,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
   },
+  openStatusRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  openStatusDetail: {
+    flexShrink: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+    color: '#756b60',
+  },
   openNowActiveText: {
     backgroundColor: '#e8f6ee',
     color: '#1f8a4c',
@@ -6495,6 +8008,10 @@ const styles = StyleSheet.create({
   openNowInactiveText: {
     backgroundColor: '#f5eee8',
     color: '#8a6a55',
+  },
+  openNowUnknownText: {
+    backgroundColor: '#f4eee7',
+    color: '#756b60',
   },
   addressText: {
     fontSize: 13,
@@ -6729,6 +8246,123 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#666666',
   },
+  analysisFreeCard: {
+    marginTop: 24,
+    padding: 22,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: '#f0dfcf',
+    backgroundColor: '#fffaf4',
+  },
+  analysisFreeTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  analysisFreeLabel: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: ORANGE,
+  },
+  analysisFreeTitle: {
+    marginTop: 8,
+    fontSize: 21,
+    lineHeight: 27,
+    fontWeight: '900',
+    color: INK,
+  },
+  analysisFreeBadge: {
+    minWidth: 58,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 17,
+    backgroundColor: '#111111',
+  },
+  analysisFreeBadgeText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#ffffff',
+  },
+  analysisFreeAmount: {
+    marginTop: 18,
+    fontSize: 42,
+    lineHeight: 50,
+    fontWeight: '900',
+    color: INK,
+  },
+  analysisFreeText: {
+    marginTop: 10,
+    fontSize: 14,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: '#6d6258',
+  },
+  analysisSpendBars: {
+    height: 138,
+    marginTop: 18,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+  },
+  analysisSpendBarItem: {
+    flex: 1,
+    height: '100%',
+    alignItems: 'center',
+  },
+  analysisSpendBarAmount: {
+    height: 20,
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#6d6258',
+  },
+  analysisSpendBarTrack: {
+    width: '100%',
+    flex: 1,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+    borderRadius: 14,
+    backgroundColor: '#efe5db',
+  },
+  analysisSpendBarFill: {
+    width: '100%',
+    minHeight: 0,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    backgroundColor: ORANGE,
+  },
+  analysisSpendBarLabel: {
+    marginTop: 7,
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#6d6258',
+  },
+  analysisFreeMetaRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 18,
+  },
+  analysisFreeMetaItem: {
+    flex: 1,
+    minHeight: 62,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+  },
+  analysisFreeMetaLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#8f867d',
+  },
+  analysisFreeMetaValue: {
+    marginTop: 6,
+    fontSize: 14,
+    fontWeight: '900',
+    color: INK,
+  },
   analysisPremiumHero: {
     marginTop: 24,
     minHeight: 210,
@@ -6811,6 +8445,81 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#888888',
+  },
+  analysisHistoryCard: {
+    marginTop: 24,
+    padding: 20,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: LINE,
+    backgroundColor: '#ffffff',
+  },
+  analysisHistoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  analysisHistoryTitle: {
+    flex: 1,
+    fontSize: 23,
+    lineHeight: 29,
+    fontWeight: '900',
+    color: INK,
+  },
+  analysisHistoryEmpty: {
+    minHeight: 92,
+    marginTop: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderRadius: 18,
+    backgroundColor: '#f8f5f1',
+  },
+  analysisHistoryEmptyText: {
+    marginTop: 8,
+    textAlign: 'center',
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '800',
+    color: '#81776b',
+  },
+  analysisHistoryRow: {
+    minHeight: 72,
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0e8de',
+  },
+  analysisHistoryDate: {
+    width: 44,
+    fontSize: 13,
+    fontWeight: '900',
+    color: ORANGE,
+  },
+  analysisHistoryBody: {
+    flex: 1,
+  },
+  analysisHistoryName: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: INK,
+  },
+  analysisHistoryMeta: {
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#81776b',
+  },
+  analysisHistoryBudget: {
+    width: 88,
+    textAlign: 'right',
+    fontSize: 14,
+    fontWeight: '900',
+    color: INK,
   },
   analysisGenreCard: {
     marginTop: 24,
@@ -7350,15 +9059,67 @@ const styles = StyleSheet.create({
     height: 184,
     borderRadius: 0,
   },
-  visualFallback: {
+  restaurantVisualFrame: {
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff1e8',
+    backgroundColor: '#efe6d9',
   },
-  visualInitial: {
-    fontSize: 36,
+  restaurantVisualPhoto: {
+    width: '100%',
+    height: '100%',
+  },
+  genreVisualGlow: {
+    position: 'absolute',
+    top: -28,
+    left: -34,
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    opacity: 0.9,
+  },
+  genreVisualImage: {
+    zIndex: 1,
+  },
+  genreVisualImageLarge: {
+    width: 142,
+    height: 142,
+  },
+  genreVisualImageSmall: {
+    width: 52,
+    height: 52,
+  },
+  genreVisualLabel: {
+    position: 'absolute',
+    right: 14,
+    top: 14,
+    zIndex: 3,
+    maxWidth: '58%',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.68)',
+  },
+  genreVisualLabelText: {
+    fontSize: 13,
+    lineHeight: 16,
     fontWeight: '900',
-    color: ORANGE,
+  },
+  hotpepperImageCredit: {
+    position: 'absolute',
+    left: 10,
+    bottom: 8,
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(23,20,17,0.72)',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '800',
+    color: '#ffffff',
   },
   footer: {
     position: 'absolute',

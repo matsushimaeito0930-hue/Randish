@@ -17,6 +17,8 @@ export type Restaurant = {
   googleRating?: number | null;
   googleMapsUri?: string | null;
   openNow?: boolean | null;
+  nextOpenTime?: string | null;
+  nextCloseTime?: string | null;
   googlePlaceId?: string | null;
 };
 
