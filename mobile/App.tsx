@@ -280,28 +280,7 @@ const LANGUAGE_OPTIONS: { key: AppLanguage; label: string; nativeLabel: string }
   { key: 'ko', label: 'Korean', nativeLabel: '한국어' },
 ];
 
-const UI_TEXT: Record<AppLanguage, {
-  accountSettings: string;
-  profile: string;
-  profileValue: string;
-  profileLocked: string;
-  displayName: string;
-  profilePlaceholder: string;
-  changeImage: string;
-  save: string;
-  language: string;
-  notifications: string;
-  notificationsValue: string;
-  dailyAccess: string;
-  creditTerms: string;
-  creditTermsValue: string;
-  areaSetup: string;
-  homeTitle: string;
-  homeLead: string;
-  travel: string;
-  travelSub: string;
-  searchPlaceholder: string;
-}> = {
+const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
   ja: {
     accountSettings: 'アカウント設定',
     profile: 'プロフィール',
@@ -315,6 +294,8 @@ const UI_TEXT: Record<AppLanguage, {
     notifications: '通知',
     notificationsValue: '食券リマインド',
     dailyAccess: '利用枠',
+    todayAccessTitle: '今日の利用枠',
+    proLateNightGenres: 'Pro深夜ジャンル',
     creditTerms: 'クレジット・規約',
     creditTermsValue: 'サービス表記',
     areaSetup: 'AREA SETUP',
@@ -323,6 +304,95 @@ const UI_TEXT: Record<AppLanguage, {
     travel: '旅をする',
     travelSub: '県・街・距離・ジャンルをおまかせ',
     searchPlaceholder: '梅田・美郷町・駅名で検索',
+    close: '閉じる',
+    lockedTitle: '会員限定です',
+    profileLockedMessage: 'プロフィール変更は会員登録またはログイン後に使えます。',
+    profilePhotoLockedMessage: 'プロフィール画像の変更は会員登録またはログイン後に使えます。',
+    photoPermissionTitle: '写真へのアクセスが必要です',
+    photoPermissionMessage: 'プロフィール画像を選ぶには写真ライブラリへのアクセスを許可してください。',
+    currentLocation: '現在地',
+    currentLocationFallback: '現在地を取得',
+    currentLocationSync: 'タップして現在地を同期',
+    currentLocationActive: '取得済み',
+    currentLocationTap: 'タップで取得',
+    currentLocationMap: '現在地マップ',
+    currentLocationNoApi: 'ミニマップで表示',
+    travelKicker: 'FOOD TRIP',
+    travelCta: '旅を始める',
+    travelVehicleRail: '電車・船・バス・飛行機・車',
+    chooseFromRegion: '地方から選ぶ',
+    prefectureCount: '都道府県',
+    cityAreaDefault: '県を選ぶと市町村が出ます',
+    cityAreaSuffix: 'の市町村・主要エリア',
+    seeMoreCities: 'もっとまちを見る ＞',
+    hideCities: 'きゅっと戻す',
+    exploreAll: '全体で探す',
+    exploreAllLead: '市町村を絞らず、県全域を対象にします',
+    prefecturePrompt: '先に都道府県を選ぶと、市町村のまち札がここに並びます。',
+    hiddenTown: 'その街はまだ隠れています',
+    footerHome: 'ホーム',
+    footerSearch: '条件',
+    footerRandom: '抽選',
+    footerSave: '保存',
+    footerAnalytics: '分析',
+    pageConditionsTitle: '条件を整える',
+    pageConditionsLead: '探し込みすぎず、決めるために必要な条件だけを残しました。',
+    apiUrl: 'API URL',
+    todayConditions: '今日の条件',
+    refreshCandidates: '候補更新',
+    areaInputPlaceholder: '現在地エリア',
+    areaSearchTitle: 'エリアを検索',
+    areaSearchPlaceholder: '例: 大阪 / 美郷町 / 北区 / 梅田',
+    searchResults: '検索結果',
+    noAreaResult: '該当エリアがありません',
+    budget: '予算',
+    budgetWithin: '円以内',
+    distanceLabel: '距離',
+    genreLabel: 'ジャンル',
+    random: 'ランダム',
+    showAll: 'すべてを表示',
+    showLessGenres: 'ジャンルを少なく表示',
+    decisionButton: 'この条件で決める',
+    checkingCandidates: '候補を確認中...',
+    candidateDrawSuffix: '件から抽選',
+    allRandom: '完全ランダム',
+    candidateList: '候補一覧',
+    resultKicker: "TODAY'S PICK",
+    drawAgain: 'もう一回引く',
+    goThisShop: 'この店に行く',
+    saveRestaurant: '保存する',
+    nearestStationFrom: '最寄り駅から',
+    currentLocationFrom: '現在地から',
+    selectedPrefix: '選択',
+    mapCheck: '地図で確認',
+    loading: '取得中',
+    emptyResultTitle: 'まだ一店は決まっていません',
+    emptyResultText: '大きなカードのSTARTを押すと抽選が始まります。',
+    recentHistory: '最近引いた店',
+    noHistory: '履歴なし',
+    historyEmpty: '抽選すると、ここに履歴が残ります。',
+    savedTitle: '保存したお店',
+    savedLead: 'また行きたい候補をここに残しておけます。',
+    savedEmptyTitle: '保存はまだありません',
+    savedEmptyText: '結果カードの「保存する」から追加できます。',
+    analyticsTitle: '分析',
+    analyticsLead: '食の傾向を見える化するプレミアム機能です。',
+    registerTitle: '会員登録',
+    registerDesc: 'アカウントを作成して、RANDISHをもっと便利に使いましょう。',
+    emailLabel: 'メールアドレス',
+    passwordLabel: 'パスワード',
+    passwordConfirmLabel: 'パスワード（確認）',
+    nicknameLabel: 'ニックネーム',
+    required: '必須',
+    registerButton: '登録する',
+    guestStart: 'ゲストではじめる',
+    guestNote: '登録なしでRANDISHを試せます',
+    or: 'または',
+    googleRegister: 'Googleで登録',
+    appleRegister: 'Appleで登録',
+    lineRegister: 'LINEで登録',
+    loginQuestion: 'すでにアカウントをお持ちですか？',
+    login: 'ログイン',
   },
   en: {
     accountSettings: 'Account Settings',
@@ -337,6 +407,8 @@ const UI_TEXT: Record<AppLanguage, {
     notifications: 'Notifications',
     notificationsValue: 'Meal ticket reminders',
     dailyAccess: 'Daily Access',
+    todayAccessTitle: "Today's Access",
+    proLateNightGenres: 'Pro Late-Night Genres',
     creditTerms: 'Credits & Terms',
     creditTermsValue: 'Service info',
     areaSetup: 'AREA SETUP',
@@ -345,6 +417,95 @@ const UI_TEXT: Record<AppLanguage, {
     travel: 'Take a Food Trip',
     travelSub: 'Random area, distance, and genre',
     searchPlaceholder: 'Search Umeda, Misato, station...',
+    close: 'Close',
+    lockedTitle: 'Members Only',
+    profileLockedMessage: 'Profile editing is available after registration or login.',
+    profilePhotoLockedMessage: 'Profile photo changes are available after registration or login.',
+    photoPermissionTitle: 'Photo Access Required',
+    photoPermissionMessage: 'Allow photo library access to choose a profile image.',
+    currentLocation: 'Current Location',
+    currentLocationFallback: 'Get Current Location',
+    currentLocationSync: 'Tap to sync your location',
+    currentLocationActive: 'Synced',
+    currentLocationTap: 'Tap to locate',
+    currentLocationMap: 'Location Map',
+    currentLocationNoApi: 'Shown on mini map',
+    travelKicker: 'FOOD TRIP',
+    travelCta: 'Start Trip',
+    travelVehicleRail: 'Train, boat, bus, plane, car',
+    chooseFromRegion: 'Choose by Region',
+    prefectureCount: 'prefectures',
+    cityAreaDefault: 'Choose a prefecture to see cities',
+    cityAreaSuffix: ' cities and areas',
+    seeMoreCities: 'See more towns >',
+    hideCities: 'Show fewer',
+    exploreAll: 'Explore All',
+    exploreAllLead: 'Search the whole prefecture without choosing a city.',
+    prefecturePrompt: 'Choose a prefecture first and city cards will appear here.',
+    hiddenTown: 'That town is still hidden',
+    footerHome: 'Home',
+    footerSearch: 'Filters',
+    footerRandom: 'Draw',
+    footerSave: 'Saved',
+    footerAnalytics: 'Stats',
+    pageConditionsTitle: 'Set Filters',
+    pageConditionsLead: 'Keep only the filters that help you decide.',
+    apiUrl: 'API URL',
+    todayConditions: "Today's Filters",
+    refreshCandidates: 'Refresh',
+    areaInputPlaceholder: 'Current area',
+    areaSearchTitle: 'Search Area',
+    areaSearchPlaceholder: 'Osaka / Misato / Kita / Umeda',
+    searchResults: 'Search Results',
+    noAreaResult: 'No matching area',
+    budget: 'Budget',
+    budgetWithin: 'yen max',
+    distanceLabel: 'Distance',
+    genreLabel: 'Genre',
+    random: 'Random',
+    showAll: 'Show all',
+    showLessGenres: 'Show fewer genres',
+    decisionButton: 'Decide With These',
+    checkingCandidates: 'Checking spots...',
+    candidateDrawSuffix: ' spots to draw',
+    allRandom: 'Full Random',
+    candidateList: 'Candidates',
+    resultKicker: "TODAY'S PICK",
+    drawAgain: 'Draw Again',
+    goThisShop: 'Go Here',
+    saveRestaurant: 'Save',
+    nearestStationFrom: 'From nearest station',
+    currentLocationFrom: 'From current location',
+    selectedPrefix: 'Selected',
+    mapCheck: 'Check map',
+    loading: 'Loading',
+    emptyResultTitle: 'No place chosen yet',
+    emptyResultText: 'Press START on the big card to begin.',
+    recentHistory: 'Recent Draws',
+    noHistory: 'No history',
+    historyEmpty: 'Your draw history will appear here.',
+    savedTitle: 'Saved Places',
+    savedLead: 'Keep places you may want to visit again.',
+    savedEmptyTitle: 'No saved places yet',
+    savedEmptyText: 'Save a place from the result card.',
+    analyticsTitle: 'Stats',
+    analyticsLead: 'Premium insights that visualize your food habits.',
+    registerTitle: 'Create Account',
+    registerDesc: 'Create an account to make RANDISH more useful.',
+    emailLabel: 'Email',
+    passwordLabel: 'Password',
+    passwordConfirmLabel: 'Confirm Password',
+    nicknameLabel: 'Nickname',
+    required: 'Required',
+    registerButton: 'Sign Up',
+    guestStart: 'Continue as Guest',
+    guestNote: 'Try RANDISH without registering',
+    or: 'or',
+    googleRegister: 'Sign up with Google',
+    appleRegister: 'Sign up with Apple',
+    lineRegister: 'Sign up with LINE',
+    loginQuestion: 'Already have an account?',
+    login: 'Log In',
   },
   zh: {
     accountSettings: '账户设置',
@@ -359,6 +520,8 @@ const UI_TEXT: Record<AppLanguage, {
     notifications: '通知',
     notificationsValue: '餐券提醒',
     dailyAccess: '使用次数',
+    todayAccessTitle: '今天的使用次数',
+    proLateNightGenres: 'Pro深夜类型',
     creditTerms: '版权与条款',
     creditTermsValue: '服务说明',
     areaSetup: '区域设置',
@@ -367,6 +530,95 @@ const UI_TEXT: Record<AppLanguage, {
     travel: '为了吃去旅行',
     travelSub: '随机选择地区、距离和类型',
     searchPlaceholder: '搜索梅田、美乡町、车站...',
+    close: '关闭',
+    lockedTitle: '会员限定',
+    profileLockedMessage: '注册或登录后可以编辑个人资料。',
+    profilePhotoLockedMessage: '注册或登录后可以更改头像。',
+    photoPermissionTitle: '需要照片权限',
+    photoPermissionMessage: '请选择允许访问照片图库后再选择头像。',
+    currentLocation: '当前位置',
+    currentLocationFallback: '获取当前位置',
+    currentLocationSync: '点击同步当前位置',
+    currentLocationActive: '已获取',
+    currentLocationTap: '点击定位',
+    currentLocationMap: '当前位置地图',
+    currentLocationNoApi: '以迷你地图显示',
+    travelKicker: 'FOOD TRIP',
+    travelCta: '开始旅行',
+    travelVehicleRail: '电车、船、巴士、飞机、汽车',
+    chooseFromRegion: '按地区选择',
+    prefectureCount: '都道府县',
+    cityAreaDefault: '选择都道府县后显示市町村',
+    cityAreaSuffix: '的市町村・主要区域',
+    seeMoreCities: '查看更多城镇 >',
+    hideCities: '收起',
+    exploreAll: '全域探索',
+    exploreAllLead: '不限定市町村，搜索整个都道府县。',
+    prefecturePrompt: '请先选择都道府县，市町村卡片会显示在这里。',
+    hiddenTown: '这个城镇还没有出现',
+    footerHome: '首页',
+    footerSearch: '条件',
+    footerRandom: '抽选',
+    footerSave: '保存',
+    footerAnalytics: '分析',
+    pageConditionsTitle: '调整条件',
+    pageConditionsLead: '只保留帮助你决定的必要条件。',
+    apiUrl: 'API URL',
+    todayConditions: '今天的条件',
+    refreshCandidates: '更新候选',
+    areaInputPlaceholder: '当前位置区域',
+    areaSearchTitle: '搜索区域',
+    areaSearchPlaceholder: '大阪 / 美乡町 / 北区 / 梅田',
+    searchResults: '搜索结果',
+    noAreaResult: '没有符合的区域',
+    budget: '预算',
+    budgetWithin: '日元以内',
+    distanceLabel: '距离',
+    genreLabel: '类型',
+    random: '随机',
+    showAll: '显示全部',
+    showLessGenres: '减少显示类型',
+    decisionButton: '按此条件决定',
+    checkingCandidates: '正在确认候选...',
+    candidateDrawSuffix: '家中抽选',
+    allRandom: '完全随机',
+    candidateList: '候选列表',
+    resultKicker: "TODAY'S PICK",
+    drawAgain: '再抽一次',
+    goThisShop: '去这家店',
+    saveRestaurant: '保存',
+    nearestStationFrom: '从最近车站',
+    currentLocationFrom: '从当前位置',
+    selectedPrefix: '已选择',
+    mapCheck: '查看地图',
+    loading: '获取中',
+    emptyResultTitle: '还没有决定店铺',
+    emptyResultText: '点击大卡片的START开始抽选。',
+    recentHistory: '最近抽到的店',
+    noHistory: '没有历史',
+    historyEmpty: '抽选后历史会显示在这里。',
+    savedTitle: '保存的店铺',
+    savedLead: '想再去的候选可以保存在这里。',
+    savedEmptyTitle: '还没有保存',
+    savedEmptyText: '可从结果卡片的“保存”添加。',
+    analyticsTitle: '分析',
+    analyticsLead: '将饮食倾向可视化的高级功能。',
+    registerTitle: '会员注册',
+    registerDesc: '创建账号，让RANDISH更好用。',
+    emailLabel: '邮箱地址',
+    passwordLabel: '密码',
+    passwordConfirmLabel: '确认密码',
+    nicknameLabel: '昵称',
+    required: '必填',
+    registerButton: '注册',
+    guestStart: '以游客开始',
+    guestNote: '无需注册即可试用RANDISH',
+    or: '或者',
+    googleRegister: '使用 Google 注册',
+    appleRegister: '使用 Apple 注册',
+    lineRegister: '使用 LINE 注册',
+    loginQuestion: '已经有账号了吗？',
+    login: '登录',
   },
   ko: {
     accountSettings: '계정 설정',
@@ -381,6 +633,8 @@ const UI_TEXT: Record<AppLanguage, {
     notifications: '알림',
     notificationsValue: '식권 리마인드',
     dailyAccess: '이용 횟수',
+    todayAccessTitle: '오늘의 이용권',
+    proLateNightGenres: 'Pro 심야 장르',
     creditTerms: '크레딧 및 약관',
     creditTermsValue: '서비스 표기',
     areaSetup: '지역 설정',
@@ -389,6 +643,95 @@ const UI_TEXT: Record<AppLanguage, {
     travel: '먹으러 여행하기',
     travelSub: '지역, 거리, 장르를 랜덤 선택',
     searchPlaceholder: '우메다, 미사토, 역 이름 검색...',
+    close: '닫기',
+    lockedTitle: '회원 전용',
+    profileLockedMessage: '프로필 변경은 회원가입 또는 로그인 후 사용할 수 있습니다.',
+    profilePhotoLockedMessage: '프로필 사진 변경은 회원가입 또는 로그인 후 사용할 수 있습니다.',
+    photoPermissionTitle: '사진 접근 권한이 필요합니다',
+    photoPermissionMessage: '프로필 이미지를 선택하려면 사진 라이브러리 접근을 허용해주세요.',
+    currentLocation: '현재 위치',
+    currentLocationFallback: '현재 위치 가져오기',
+    currentLocationSync: '탭해서 현재 위치 동기화',
+    currentLocationActive: '동기화됨',
+    currentLocationTap: '탭해서 위치 확인',
+    currentLocationMap: '현재 위치 지도',
+    currentLocationNoApi: '미니 지도에 표시',
+    travelKicker: 'FOOD TRIP',
+    travelCta: '여행 시작',
+    travelVehicleRail: '전철, 배, 버스, 비행기, 자동차',
+    chooseFromRegion: '지역으로 선택',
+    prefectureCount: '도도부현',
+    cityAreaDefault: '도도부현을 선택하면 시구정촌이 나옵니다',
+    cityAreaSuffix: '의 시구정촌・주요 지역',
+    seeMoreCities: '동네 더 보기 >',
+    hideCities: '줄여 보기',
+    exploreAll: '전체 탐색',
+    exploreAllLead: '시구정촌을 좁히지 않고 현 전체를 대상으로 합니다.',
+    prefecturePrompt: '먼저 도도부현을 선택하면 시구정촌 카드가 여기에 표시됩니다.',
+    hiddenTown: '그 동네는 아직 숨어 있어요',
+    footerHome: '홈',
+    footerSearch: '조건',
+    footerRandom: '추첨',
+    footerSave: '저장',
+    footerAnalytics: '분석',
+    pageConditionsTitle: '조건 정리',
+    pageConditionsLead: '결정에 필요한 조건만 남겼습니다.',
+    apiUrl: 'API URL',
+    todayConditions: '오늘의 조건',
+    refreshCandidates: '후보 갱신',
+    areaInputPlaceholder: '현재 위치 지역',
+    areaSearchTitle: '지역 검색',
+    areaSearchPlaceholder: '오사카 / 미사토 / 기타구 / 우메다',
+    searchResults: '검색 결과',
+    noAreaResult: '해당 지역이 없습니다',
+    budget: '예산',
+    budgetWithin: '엔 이내',
+    distanceLabel: '거리',
+    genreLabel: '장르',
+    random: '랜덤',
+    showAll: '전체 보기',
+    showLessGenres: '장르 줄여 보기',
+    decisionButton: '이 조건으로 결정',
+    checkingCandidates: '후보 확인 중...',
+    candidateDrawSuffix: '곳에서 추첨',
+    allRandom: '완전 랜덤',
+    candidateList: '후보 목록',
+    resultKicker: "TODAY'S PICK",
+    drawAgain: '다시 뽑기',
+    goThisShop: '이 가게로 가기',
+    saveRestaurant: '저장',
+    nearestStationFrom: '가장 가까운 역에서',
+    currentLocationFrom: '현재 위치에서',
+    selectedPrefix: '선택',
+    mapCheck: '지도에서 확인',
+    loading: '불러오는 중',
+    emptyResultTitle: '아직 가게가 정해지지 않았습니다',
+    emptyResultText: '큰 카드의 START를 누르면 추첨이 시작됩니다.',
+    recentHistory: '최근 뽑은 가게',
+    noHistory: '기록 없음',
+    historyEmpty: '추첨하면 여기에 기록이 남습니다.',
+    savedTitle: '저장한 가게',
+    savedLead: '다시 가고 싶은 후보를 여기에 남겨둘 수 있습니다.',
+    savedEmptyTitle: '아직 저장한 곳이 없습니다',
+    savedEmptyText: '결과 카드의 “저장”에서 추가할 수 있습니다.',
+    analyticsTitle: '분석',
+    analyticsLead: '식사 취향을 시각화하는 프리미엄 기능입니다.',
+    registerTitle: '회원가입',
+    registerDesc: '계정을 만들고 RANDISH를 더 편리하게 사용하세요.',
+    emailLabel: '이메일',
+    passwordLabel: '비밀번호',
+    passwordConfirmLabel: '비밀번호 확인',
+    nicknameLabel: '닉네임',
+    required: '필수',
+    registerButton: '가입하기',
+    guestStart: '게스트로 시작',
+    guestNote: '가입 없이 RANDISH를 체험할 수 있습니다',
+    or: '또는',
+    googleRegister: 'Google로 가입',
+    appleRegister: 'Apple로 가입',
+    lineRegister: 'LINE으로 가입',
+    loginQuestion: '이미 계정이 있나요?',
+    login: '로그인',
   },
 };
 
@@ -2460,6 +2803,7 @@ export default function App() {
     return (
       <LoginScreen
         apiBaseUrlCandidates={apiBaseUrlCandidates}
+        uiText={UI_TEXT[appLanguage]}
         onApiConnected={syncWorkingApiBaseUrl}
         onStart={enterMain}
       />
@@ -2516,6 +2860,7 @@ export default function App() {
         )}
         {activeTab === 'search' && (
           <SearchTab
+            uiText={UI_TEXT[appLanguage]}
             apiBaseUrl={apiBaseUrl}
             area={area}
             genre={genre}
@@ -2540,6 +2885,7 @@ export default function App() {
         )}
         {activeTab === 'random' && (
           <RandomTab
+            uiText={UI_TEXT[appLanguage]}
             area={area}
             genre={genre}
             budgetMin={budgetMin}
@@ -2564,9 +2910,10 @@ export default function App() {
             onGoPress={openMap}
           />
         )}
-        {activeTab === 'save' && <SaveTab savedRestaurants={savedRestaurants} history={randomHistory} />}
+        {activeTab === 'save' && <SaveTab savedRestaurants={savedRestaurants} history={randomHistory} uiText={UI_TEXT[appLanguage]} />}
         {activeTab === 'analytics' && (
           <AnalyticsTab
+            uiText={UI_TEXT[appLanguage]}
             area={area}
             locationStatus={locationStatus}
             restaurants={visibleRestaurants}
@@ -2577,7 +2924,7 @@ export default function App() {
           />
         )}
       </ScrollView>
-      <AppFooter activeTab={activeTab} onPress={handleFooterPress} />
+      <AppFooter activeTab={activeTab} onPress={handleFooterPress} uiText={UI_TEXT[appLanguage]} />
     </SafeAreaView>
   );
 }
@@ -2608,10 +2955,12 @@ function AppHeader({
 
 function LoginScreen({
   apiBaseUrlCandidates,
+  uiText,
   onApiConnected,
   onStart,
 }: {
   apiBaseUrlCandidates: string[];
+  uiText: Record<string, string>;
   onApiConnected: () => void;
   onStart: (userId?: string, displayName?: string) => void;
 }) {
@@ -2709,11 +3058,11 @@ function LoginScreen({
           <Text style={styles.registerSub}>京都府 / 近畿地方 / 全域 周辺から探します</Text>
         </View>
 
-        <Text style={styles.registerTitle}>会員登録</Text>
-        <Text style={styles.registerDesc}>アカウントを作成して、RANDISHをもっと便利に使いましょう。</Text>
+        <Text style={styles.registerTitle}>{uiText.registerTitle}</Text>
+        <Text style={styles.registerDesc}>{uiText.registerDesc}</Text>
 
         <View style={styles.registerCard}>
-          <RegisterLabel text="メールアドレス" />
+          <RegisterLabel text={uiText.emailLabel} requiredText={uiText.required} />
           <TextInput
             style={styles.registerInput}
             placeholder="例）randish@example.com"
@@ -2728,7 +3077,7 @@ function LoginScreen({
             onSubmitEditing={Keyboard.dismiss}
           />
 
-          <RegisterLabel text="パスワード" />
+          <RegisterLabel text={uiText.passwordLabel} requiredText={uiText.required} />
           <TextInput
             style={styles.registerInput}
             placeholder="8文字以上の半角英数字"
@@ -2742,7 +3091,7 @@ function LoginScreen({
             onSubmitEditing={Keyboard.dismiss}
           />
 
-          <RegisterLabel text="パスワード（確認）" />
+          <RegisterLabel text={uiText.passwordConfirmLabel} requiredText={uiText.required} />
           <TextInput
             style={styles.registerInput}
             placeholder="もう一度入力してください"
@@ -2756,7 +3105,7 @@ function LoginScreen({
             onSubmitEditing={Keyboard.dismiss}
           />
 
-          <RegisterLabel text="ニックネーム" />
+          <RegisterLabel text={uiText.nicknameLabel} requiredText={uiText.required} />
           <TextInput
             style={styles.registerInput}
             placeholder="例）ランディッシュ太郎"
@@ -2787,37 +3136,37 @@ function LoginScreen({
             {isSubmitting ? (
               <ActivityIndicator color="#ffffff" />
             ) : (
-              <Text style={styles.registerMainButtonText}>登録する</Text>
+              <Text style={styles.registerMainButtonText}>{uiText.registerButton}</Text>
             )}
           </Pressable>
 
           <Pressable style={styles.registerGuestButton} onPress={() => onStart()}>
             <Ionicons name="person-outline" size={18} color="#ef552e" />
-            <Text style={styles.registerGuestButtonText}>ゲストではじめる</Text>
+            <Text style={styles.registerGuestButtonText}>{uiText.guestStart}</Text>
           </Pressable>
-          <Text style={styles.registerGuestNote}>登録なしでRANDISHを試せます</Text>
+          <Text style={styles.registerGuestNote}>{uiText.guestNote}</Text>
         </View>
 
-        <Text style={styles.registerOr}>または</Text>
+        <Text style={styles.registerOr}>{uiText.or}</Text>
 
-        <RegisterSocialButton text="Googleで登録" onPress={() => handleSocialPress('Google')} />
-        <RegisterSocialButton text="Appleで登録" onPress={() => handleSocialPress('Apple')} />
-        <RegisterSocialButton text="LINEで登録" onPress={() => handleSocialPress('LINE')} />
+        <RegisterSocialButton text={uiText.googleRegister} onPress={() => handleSocialPress('Google')} />
+        <RegisterSocialButton text={uiText.appleRegister} onPress={() => handleSocialPress('Apple')} />
+        <RegisterSocialButton text={uiText.lineRegister} onPress={() => handleSocialPress('LINE')} />
 
         <Pressable style={styles.registerLoginBox} onPress={handleLogin}>
-          <Text style={styles.registerLoginText}>すでにアカウントをお持ちですか？</Text>
-          <Text style={styles.registerLoginLink}>ログイン</Text>
+          <Text style={styles.registerLoginText}>{uiText.loginQuestion}</Text>
+          <Text style={styles.registerLoginLink}>{uiText.login}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function RegisterLabel({ text }: { text: string }) {
+function RegisterLabel({ text, requiredText = '必須' }: { text: string; requiredText?: string }) {
   return (
     <View style={styles.registerLabelRow}>
       <Text style={styles.registerLabel}>{text}</Text>
-      <Text style={styles.registerRequired}>必須</Text>
+      <Text style={styles.registerRequired}>{requiredText}</Text>
     </View>
   );
 }
@@ -2830,7 +3179,7 @@ function RegisterSocialButton({ text, onPress }: { text: string; onPress: () => 
   );
 }
 
-function MealTicketPanel({ state, compact = false }: { state: MealTicketState; compact?: boolean }) {
+function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { state: MealTicketState; compact?: boolean; uiText?: Record<string, string> }) {
   const midnightTicket = state.tickets.find((ticket) => ticket.key === 'midnight');
   const current = state.current;
   const ticketMeta = current.available
@@ -2844,7 +3193,7 @@ function MealTicketPanel({ state, compact = false }: { state: MealTicketState; c
       <View style={styles.mealTicketHeader}>
         <View>
           <Text style={styles.mealTicketKicker}>DAILY ACCESS</Text>
-          <Text style={styles.mealTicketTitle}>今日の利用枠</Text>
+          <Text style={styles.mealTicketTitle}>{uiText.todayAccessTitle}</Text>
         </View>
         <View style={[styles.mealTicketCountBadge, current.available && styles.mealTicketCountBadgeActive]}>
           <Text style={[styles.mealTicketCountText, current.available && styles.mealTicketCountTextActive]}>
@@ -2906,7 +3255,7 @@ function MealTicketPanel({ state, compact = false }: { state: MealTicketState; c
         <View style={styles.mealTicketNightRail}>
           <View style={styles.mealTicketNightTitleRow}>
             <Ionicons name="sparkles-outline" size={16} color="#5d5be8" />
-            <Text style={styles.mealTicketNightTitle}>Pro深夜ジャンル</Text>
+            <Text style={styles.mealTicketNightTitle}>{uiText.proLateNightGenres}</Text>
           </View>
           <View style={styles.mealTicketNightChips}>
             {midnightTicket.genreHints.map((hint) => (
@@ -3125,7 +3474,7 @@ function HomeLocationPanel({
   const allFavoriteAreas = uniqueAreaPresets([...(currentAreaPreset ? [currentAreaPreset] : []), ...historyAreaPresets, ...prefecturePresets])
     .filter((preset) => preset.label !== '現在地');
   const favoriteAreas = showAllFavorites ? allFavoriteAreas : allFavoriteAreas.slice(0, 8);
-  const favoriteAreaTitle = selectedPrefecture ? `${selectedPrefecture}の市町村・主要エリア` : '県を選ぶと市町村が出ます';
+  const favoriteAreaTitle = selectedPrefecture ? `${selectedPrefecture}${t.cityAreaSuffix}` : t.cityAreaDefault;
   const regionRows = AREA_REGION_GROUPS.map((group) => ({
     ...group,
     prefectures: group.prefectures
@@ -3149,10 +3498,10 @@ function HomeLocationPanel({
     { icon: 'ticket-outline', label: t.dailyAccess, value: `${mealTicketState.usedFreeCount}/${mealTicketState.totalFreeCount} FREE` },
     { icon: 'shield-checkmark-outline', label: t.creditTerms, value: t.creditTermsValue },
   ];
-  const currentLocationTitle = userLocation ? userLocation.label : '現在地を取得';
+  const currentLocationTitle = userLocation ? t.currentLocation : t.currentLocationFallback;
   const currentLocationMeta = userLocation
     ? `${userLocation.latitude.toFixed(4)}, ${userLocation.longitude.toFixed(4)}`
-    : 'タップして現在地を同期';
+    : t.currentLocationSync;
 
   useEffect(() => {
     if (selectedRegion) {
@@ -3204,7 +3553,7 @@ function HomeLocationPanel({
 
   const saveProfileName = () => {
     if (!isRegisteredUser) {
-      Alert.alert('会員限定です', 'プロフィール変更は会員登録またはログイン後に使えます。');
+      Alert.alert(t.lockedTitle, t.profileLockedMessage);
       return;
     }
     Keyboard.dismiss();
@@ -3214,12 +3563,12 @@ function HomeLocationPanel({
 
   const pickProfileImage = async () => {
     if (!isRegisteredUser) {
-      Alert.alert('会員限定です', 'プロフィール画像の変更は会員登録またはログイン後に使えます。');
+      Alert.alert(t.lockedTitle, t.profilePhotoLockedMessage);
       return;
     }
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('写真へのアクセスが必要です', 'プロフィール画像を選ぶには写真ライブラリへのアクセスを許可してください。');
+      Alert.alert(t.photoPermissionTitle, t.photoPermissionMessage);
       return;
     }
 
@@ -3273,7 +3622,7 @@ function HomeLocationPanel({
                 style={[styles.homeAccountMenuItem, !isRegisteredUser && styles.homeAccountMenuItemLocked]}
                 onPress={() => {
                   if (!isRegisteredUser) {
-                    Alert.alert('会員限定です', 'プロフィール変更は会員登録またはログイン後に使えます。');
+                    Alert.alert(t.lockedTitle, t.profileLockedMessage);
                     return;
                   }
                   setProfileEditorOpen((current) => !current);
@@ -3362,7 +3711,7 @@ function HomeLocationPanel({
                     setAccountMenuOpen(false);
                   }}
                 >
-                  <Text style={styles.homeAccountCloseText}>閉じる</Text>
+                  <Text style={styles.homeAccountCloseText}>{t.close}</Text>
                   <Ionicons name="close" size={15} color="#ffffff" />
                 </Pressable>
               </View>
@@ -3378,7 +3727,7 @@ function HomeLocationPanel({
         </View>
         <HomeMapIllustration />
       </View>
-      <MealTicketPanel state={mealTicketState} />
+      <MealTicketPanel state={mealTicketState} uiText={t} />
 
       <View style={styles.homeSearchBox}>
         <Ionicons name="search" size={28} color={INK} />
@@ -3413,7 +3762,7 @@ function HomeLocationPanel({
               <Text style={styles.homeAreaChevron}>›</Text>
             </Pressable>
           ))}
-          {searchResults.length === 0 && <Text style={styles.areaNoResult}>その街はまだ隠れています</Text>}
+          {searchResults.length === 0 && <Text style={styles.areaNoResult}>{t.hiddenTown}</Text>}
         </View>
       ) : (
         <>
@@ -3428,8 +3777,12 @@ function HomeLocationPanel({
               <View style={styles.homeCurrentBadge}>
                 <Ionicons name={userLocation ? 'locate' : 'navigate'} size={13} color={userLocation ? '#2378ff' : ORANGE} />
                 <Text style={[styles.homeCurrentBadgeText, userLocation && styles.homeCurrentBadgeTextActive]}>
-                  {userLocation ? '現在地' : 'いまここ'}
+                  {userLocation ? t.currentLocationActive : t.currentLocationTap}
                 </Text>
+              </View>
+              <View style={styles.homeCurrentMapPill}>
+                <Ionicons name="map-outline" size={13} color={INK} />
+                <Text style={styles.homeCurrentMapPillText}>{t.currentLocationMap}</Text>
               </View>
               <View style={styles.homeTargetMark}>
                 <View style={styles.homeTargetPulse} />
@@ -3440,20 +3793,13 @@ function HomeLocationPanel({
               <View style={styles.homeCurrentBottom}>
                 <View style={styles.homeCurrentTextWrap}>
                   <Text style={styles.homeCurrentTitle}>{currentLocationTitle}</Text>
-                  <Text style={styles.homeCurrentText}>{locationStatus}</Text>
+                  <Text style={styles.homeCurrentText}>{userLocation ? t.currentLocationNoApi : locationStatus}</Text>
                   <Text style={styles.homeCurrentCoordinate}>{currentLocationMeta}</Text>
                 </View>
               </View>
             </Pressable>
             <Pressable style={styles.homeMapPreview} onPress={onTravelPress}>
-              <View style={styles.homeTravelCardTopLine} />
-              <View style={[styles.homeMapRoad, styles.homeMapRoadOne]} />
-              <View style={[styles.homeMapRoad, styles.homeMapRoadTwo]} />
-              <View style={[styles.homeMapRoad, styles.homeMapRoadThree]} />
-              <View style={styles.homeMapPark} />
-              <View style={styles.homeTravelCompass}>
-                <Ionicons name="train-outline" size={18} color={ORANGE} />
-              </View>
+              <View style={styles.homeTravelGlow} />
               <View style={styles.homeTravelTransportRail}>
                 {(['train-outline', 'boat-outline', 'bus-outline', 'airplane-outline', 'car-outline'] as const).map((icon) => (
                   <View key={icon} style={styles.homeTravelTransportIcon}>
@@ -3461,15 +3807,14 @@ function HomeLocationPanel({
                   </View>
                 ))}
               </View>
-              <View style={styles.homeMapPin} />
-              <Ionicons name="location-sharp" size={38} color={INK} style={styles.homeMapMarkerIcon} />
               <View style={styles.homeMapBottom}>
+                <Text style={styles.homeTravelKicker}>{t.travelKicker}</Text>
                 <Text style={styles.homeMapTitle}>{t.travel}</Text>
                 <Text style={styles.homeMapLead}>{t.travelSub}</Text>
               </View>
-              <View style={styles.homeTravelMiniCta}>
-                <Text style={styles.homeTravelMiniCtaText}>TRIP</Text>
-                <Ionicons name="arrow-forward" size={14} color="#ffffff" />
+              <View style={styles.homeTravelPrimaryCta}>
+                <Text style={styles.homeTravelPrimaryCtaText}>{t.travelCta}</Text>
+                <Ionicons name="arrow-forward" size={17} color="#ffffff" />
               </View>
             </Pressable>
           </View>
@@ -3477,7 +3822,7 @@ function HomeLocationPanel({
           <View style={styles.homeSubsection}>
             <View style={styles.homeSubsectionHeader}>
               <Ionicons name="map-outline" size={28} color={INK} />
-              <Text style={styles.homeSubsectionTitle}>地方から選ぶ</Text>
+              <Text style={styles.homeSubsectionTitle}>{t.chooseFromRegion}</Text>
             </View>
             <View style={styles.homeRegionList}>
               {regionRows.map((group, groupIndex) => {
@@ -3501,7 +3846,7 @@ function HomeLocationPanel({
                       </View>
                       <View style={styles.homeAreaRowBody}>
                         <Text style={[styles.homeRegionName, isRegionSelected && styles.homeRegionNameActive]}>{group.label}</Text>
-                        <Text style={styles.homeRegionMeta}>{group.prefectures.length}都道府県</Text>
+                        <Text style={styles.homeRegionMeta}>{group.prefectures.length}{t.prefectureCount}</Text>
                       </View>
                       <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={isRegionSelected ? ORANGE : INK} />
                     </Pressable>
@@ -3545,7 +3890,7 @@ function HomeLocationPanel({
               <Text style={styles.homeSubsectionTitle}>{favoriteAreaTitle}</Text>
               {!!selectedPrefecture && allFavoriteAreas.length > 8 && (
                 <Pressable onPress={() => setShowAllFavorites((current) => !current)}>
-                  <Text style={styles.homeSectionSeeAll}>{showAllFavorites ? 'きゅっと戻す' : 'もっとまちを見る ＞'}</Text>
+                  <Text style={styles.homeSectionSeeAll}>{showAllFavorites ? t.hideCities : t.seeMoreCities}</Text>
                 </Pressable>
               )}
             </View>
@@ -3556,8 +3901,8 @@ function HomeLocationPanel({
                     <Ionicons name="compass-outline" size={21} color="#ffffff" />
                   </View>
                   <View style={styles.homeExploreBody}>
-                    <Text style={styles.homeExploreTitle}>{selectedPrefecture}全体で探す</Text>
-                    <Text style={styles.homeExploreText}>市町村を絞らず、県全域を対象にします</Text>
+                    <Text style={styles.homeExploreTitle}>{selectedPrefecture}{t.exploreAll}</Text>
+                    <Text style={styles.homeExploreText}>{t.exploreAllLead}</Text>
                   </View>
                   <Ionicons name="arrow-forward" size={20} color="#ffffff" />
                 </Pressable>
@@ -3577,7 +3922,7 @@ function HomeLocationPanel({
             ) : (
               <View style={styles.homePrefecturePrompt}>
                 <Ionicons name="map-outline" size={22} color={ORANGE} />
-                <Text style={styles.homePrefecturePromptText}>先に都道府県を選ぶと、市町村のまち札がここに並びます。</Text>
+                <Text style={styles.homePrefecturePromptText}>{t.prefecturePrompt}</Text>
               </View>
             )}
           </View>
@@ -3596,6 +3941,7 @@ function FilterPanel({
   genres,
   areaPresets,
   conditionRandom,
+  uiText = UI_TEXT.ja,
   compact = false,
   showAreaPicker = true,
   onAreaChange,
@@ -3614,6 +3960,7 @@ function FilterPanel({
   genres: GenreItem[];
   areaPresets: AreaPreset[];
   conditionRandom?: ConditionRandomState;
+  uiText?: Record<string, string>;
   compact?: boolean;
   showAreaPicker?: boolean;
   onAreaChange: (value: string) => void;
@@ -3659,29 +4006,29 @@ function FilterPanel({
   return (
     <View style={styles.filterPanel}>
       <View style={styles.filterHeader}>
-        <Text style={styles.panelTitle}>今日の条件</Text>
+        <Text style={styles.panelTitle}>{uiText.todayConditions}</Text>
         <Pressable style={styles.refreshButton} onPress={onSubmit}>
-          <Text style={styles.refreshButtonText}>候補更新</Text>
+          <Text style={styles.refreshButtonText}>{uiText.refreshCandidates}</Text>
         </Pressable>
       </View>
       {showAreaPicker && (
         <>
           <View style={styles.locationField}>
             <Text style={styles.fieldIcon}>⌖</Text>
-            <TextInput value={area} onChangeText={onAreaChange} style={styles.locationInput} placeholder="現在地エリア" placeholderTextColor="#9b9184" />
+            <TextInput value={area} onChangeText={onAreaChange} style={styles.locationInput} placeholder={uiText.areaInputPlaceholder} placeholderTextColor="#9b9184" />
           </View>
-          <AreaPresetPicker selectedArea={area} presets={areaPresets} onSelect={onAreaChange} />
+          <AreaPresetPicker selectedArea={area} presets={areaPresets} onSelect={onAreaChange} uiText={uiText} />
         </>
       )}
       <View style={styles.filterGrid}>
-        <SmallField label="予算" value={budgetMax} suffix="円以内" onChangeText={onBudgetMaxChange} onRandom={randomizeBudget} randomActive={randomState.budget} />
-        <SegmentedValue label="距離" value={distance} values={DISTANCE_OPTIONS} onChange={onDistanceChange} onRandom={randomizeDistance} randomActive={randomState.distance} />
+        <SmallField label={uiText.budget} value={budgetMax} suffix={uiText.budgetWithin} onChangeText={onBudgetMaxChange} onRandom={randomizeBudget} randomActive={randomState.budget} randomLabel={uiText.random} />
+        <SegmentedValue label={uiText.distanceLabel} value={distance} values={DISTANCE_OPTIONS} onChange={onDistanceChange} onRandom={randomizeDistance} randomActive={randomState.distance} randomLabel={uiText.random} />
       </View>
       <View style={styles.genreSectionHeader}>
-        <Text style={styles.genreSectionTitle}>ジャンル</Text>
+        <Text style={styles.genreSectionTitle}>{uiText.genreLabel}</Text>
         <Pressable style={[styles.randomMiniButton, randomState.genre && styles.randomMiniButtonActive]} onPress={randomizeGenre}>
           <Ionicons name="shuffle-outline" size={14} color={randomState.genre ? '#ffffff' : ORANGE} />
-          <Text style={[styles.randomMiniButtonText, randomState.genre && styles.randomMiniButtonTextActive]}>ランダム</Text>
+          <Text style={[styles.randomMiniButtonText, randomState.genre && styles.randomMiniButtonTextActive]}>{uiText.random}</Text>
         </Pressable>
       </View>
       <View style={styles.genreGridTwo}>
@@ -3709,7 +4056,7 @@ function FilterPanel({
       </View>
       {selectableGenres.length > 12 && (
         <Pressable style={styles.showAllGenresButton} onPress={() => setShowAllGenres((current) => !current)}>
-          <Text style={styles.showAllGenresText}>{showAllGenres ? 'ジャンルを少なく表示' : `すべてを表示（${selectableGenres.length}件）`}</Text>
+          <Text style={styles.showAllGenresText}>{showAllGenres ? uiText.showLessGenres : `${uiText.showAll}（${selectableGenres.length}件）`}</Text>
         </Pressable>
       )}
     </View>
@@ -3720,10 +4067,12 @@ function AreaPresetPicker({
   selectedArea,
   presets,
   onSelect,
+  uiText = UI_TEXT.ja,
 }: {
   selectedArea: string;
   presets: AreaPreset[];
   onSelect: (value: string) => void;
+  uiText?: Record<string, string>;
 }) {
   const prefectures = useMemo(() => Array.from(new Set(presets.map(getPresetPrefecture))), [presets]);
   const selectedPreset = getAreaPreset(selectedArea);
@@ -3747,8 +4096,8 @@ function AreaPresetPicker({
   return (
     <View style={styles.areaPicker}>
       <View style={styles.areaPickerHeader}>
-        <Text style={styles.areaPickerTitle}>エリアを検索</Text>
-        <Text style={styles.areaPickerMeta}>{prefectures.length}都道府県 / {presets.length}エリア</Text>
+        <Text style={styles.areaPickerTitle}>{uiText.areaSearchTitle}</Text>
+        <Text style={styles.areaPickerMeta}>{prefectures.length}{uiText.prefectureCount} / {presets.length}エリア</Text>
       </View>
       <View style={styles.areaSearchBox}>
         <Text style={styles.areaSearchIcon}>⌕</Text>
@@ -3756,7 +4105,7 @@ function AreaPresetPicker({
           value={areaQuery}
           onChangeText={setAreaQuery}
           style={styles.areaSearchInput}
-          placeholder="例: 大阪 / 美郷町 / 北区 / 梅田"
+          placeholder={uiText.areaSearchPlaceholder}
           placeholderTextColor="#9b9184"
         />
         {!!areaQuery && (
@@ -3767,7 +4116,7 @@ function AreaPresetPicker({
       </View>
       {hasQuery ? (
         <View style={styles.areaGroup}>
-          <Text style={styles.areaGroupTitle}>検索結果</Text>
+          <Text style={styles.areaGroupTitle}>{uiText.searchResults}</Text>
           <View style={styles.areaChipWrap}>
             {searchResults.map((item, index) => {
               const itemValue = getAreaPresetValue(item);
@@ -3786,7 +4135,7 @@ function AreaPresetPicker({
                 </Pressable>
               );
             })}
-            {searchResults.length === 0 && <Text style={styles.areaNoResult}>該当エリアがありません</Text>}
+            {searchResults.length === 0 && <Text style={styles.areaNoResult}>{uiText.noAreaResult}</Text>}
           </View>
         </View>
       ) : (
@@ -3821,14 +4170,14 @@ function AreaPresetPicker({
   );
 }
 
-function RandomFieldHeader({ label, onRandom, randomActive = false }: { label: string; onRandom?: () => void; randomActive?: boolean }) {
+function RandomFieldHeader({ label, onRandom, randomActive = false, randomLabel = 'ランダム' }: { label: string; onRandom?: () => void; randomActive?: boolean; randomLabel?: string }) {
   return (
     <View style={styles.fieldHeaderRow}>
       <Text style={styles.smallFieldLabel}>{label}</Text>
       {!!onRandom && (
         <Pressable style={[styles.randomMiniButton, randomActive && styles.randomMiniButtonActive]} onPress={onRandom}>
           <Ionicons name="shuffle-outline" size={14} color={randomActive ? '#ffffff' : ORANGE} />
-          <Text style={[styles.randomMiniButtonText, randomActive && styles.randomMiniButtonTextActive]}>ランダム</Text>
+          <Text style={[styles.randomMiniButtonText, randomActive && styles.randomMiniButtonTextActive]}>{randomLabel}</Text>
         </Pressable>
       )}
     </View>
@@ -3842,6 +4191,7 @@ function SmallField({
   onChangeText,
   onRandom,
   randomActive = false,
+  randomLabel = 'ランダム',
 }: {
   label: string;
   value: string;
@@ -3849,10 +4199,11 @@ function SmallField({
   onChangeText: (value: string) => void;
   onRandom?: () => void;
   randomActive?: boolean;
+  randomLabel?: string;
 }) {
   return (
     <View style={styles.smallField}>
-      <RandomFieldHeader label={label} onRandom={onRandom} randomActive={randomActive} />
+      <RandomFieldHeader label={label} onRandom={onRandom} randomActive={randomActive} randomLabel={randomLabel} />
       <View style={styles.smallFieldRow}>
         {randomActive ? (
           <Pressable style={styles.randomHiddenInput} onPress={() => onChangeText(value)}>
@@ -3876,6 +4227,7 @@ function SegmentedValue({
   onChange,
   onRandom,
   randomActive = false,
+  randomLabel = 'ランダム',
 }: {
   label: string;
   value: string;
@@ -3883,10 +4235,11 @@ function SegmentedValue({
   onChange: (value: string) => void;
   onRandom?: () => void;
   randomActive?: boolean;
+  randomLabel?: string;
 }) {
   return (
     <View style={styles.segmentWrap}>
-      <RandomFieldHeader label={label} onRandom={onRandom} randomActive={randomActive} />
+      <RandomFieldHeader label={label} onRandom={onRandom} randomActive={randomActive} randomLabel={randomLabel} />
       <View style={styles.segmentGroup}>
         {values.map((item) => {
           const selected = !randomActive && value === item;
@@ -3902,6 +4255,7 @@ function SegmentedValue({
 }
 
 function SearchTab({
+  uiText,
   apiBaseUrl,
   area,
   genre,
@@ -3923,6 +4277,7 @@ function SearchTab({
   onRandomPress,
   onAllRandomPress,
 }: {
+  uiText: Record<string, string>;
   apiBaseUrl: string;
   area: string;
   genre: string;
@@ -3951,9 +4306,9 @@ function SearchTab({
 
   return (
     <View>
-      <PageIntro title="条件を整える" lead="探し込みすぎず、決めるために必要な条件だけを残しました。" />
+      <PageIntro title={uiText.pageConditionsTitle} lead={uiText.pageConditionsLead} />
       <View style={styles.apiCard}>
-        <Text style={styles.apiLabel}>API URL</Text>
+        <Text style={styles.apiLabel}>{uiText.apiUrl}</Text>
         <TextInput value={apiBaseUrl} onChangeText={onApiBaseUrlChange} style={styles.apiInput} autoCapitalize="none" />
       </View>
       <FilterPanel
@@ -3965,6 +4320,7 @@ function SearchTab({
         genres={GENRES}
         areaPresets={ALL_AREA_PRESETS}
         conditionRandom={conditionRandom}
+        uiText={uiText}
         onAreaChange={onAreaChange}
         onGenreChange={onGenreChange}
         onBudgetMinChange={onBudgetMinChange}
@@ -3975,29 +4331,29 @@ function SearchTab({
       />
       <View style={styles.decisionSummary}>
         <View style={styles.decisionSummaryChip}>
-          <Text style={styles.decisionSummaryLabel}>予算</Text>
+          <Text style={styles.decisionSummaryLabel}>{uiText.budget}</Text>
           <Text style={styles.decisionSummaryValue}>{summaryBudget}</Text>
         </View>
         <View style={styles.decisionSummaryChip}>
-          <Text style={styles.decisionSummaryLabel}>距離</Text>
+          <Text style={styles.decisionSummaryLabel}>{uiText.distanceLabel}</Text>
           <Text style={styles.decisionSummaryValue}>{summaryDistance}</Text>
         </View>
         <View style={styles.decisionSummaryChip}>
-          <Text style={styles.decisionSummaryLabel}>GENRE</Text>
+          <Text style={styles.decisionSummaryLabel}>{uiText.genreLabel}</Text>
           <Text style={styles.decisionSummaryValue} numberOfLines={1}>{summaryGenre}</Text>
         </View>
       </View>
       <View style={styles.decisionActionRow}>
         <Pressable style={[styles.bigDecisionButton, styles.bigDecisionButtonPrimary]} onPress={onRandomPress}>
-          <Text style={styles.bigDecisionSmall}>{isLoading ? '候補を確認中...' : `${restaurants.length}件から抽選`}</Text>
-          <Text style={styles.bigDecisionText}>この条件で決める</Text>
+          <Text style={styles.bigDecisionSmall}>{isLoading ? uiText.checkingCandidates : `${restaurants.length}${uiText.candidateDrawSuffix}`}</Text>
+          <Text style={styles.bigDecisionText}>{uiText.decisionButton}</Text>
         </Pressable>
         <Pressable style={[styles.bigDecisionButton, styles.bigDecisionButtonRandom]} onPress={onAllRandomPress}>
           <Ionicons name="shuffle-outline" size={21} color="#ffffff" />
-          <Text style={styles.allRandomDecisionText}>完全ランダム</Text>
+          <Text style={styles.allRandomDecisionText}>{uiText.allRandom}</Text>
         </Pressable>
       </View>
-      <SectionHeader title="候補一覧" action={`${restaurants.length}件`} />
+      <SectionHeader title={uiText.candidateList} action={`${restaurants.length}件`} />
       {restaurants.map((restaurant) => (
         <RestaurantCard key={restaurant.id} restaurant={restaurant} />
       ))}
@@ -4007,6 +4363,7 @@ function SearchTab({
 }
 
 function RandomTab({
+  uiText,
   area,
   genre,
   budgetMin,
@@ -4030,6 +4387,7 @@ function RandomTab({
   onSavePress,
   onGoPress,
 }: {
+  uiText: Record<string, string>;
   area: string;
   genre: string;
   budgetMin: string;
@@ -4129,10 +4487,10 @@ function RandomTab({
 
   return (
     <View>
-      <MealTicketPanel state={mealTicketState} compact />
+      <MealTicketPanel state={mealTicketState} compact uiText={uiText} />
       <View style={styles.drawConditionRow}>
           <ConditionPill label={displayGenre} active />
-          <ConditionPill label={isEverythingRandom ? '完全ランダム' : displayArea} />
+          <ConditionPill label={isEverythingRandom ? uiText.allRandom : displayArea} />
           <ConditionPill label={displayBudget} />
           <ConditionPill label={displayDistance} />
       </View>
@@ -4237,51 +4595,52 @@ function RandomTab({
       </Pressable>
       {visibleSelectedRestaurant ? (
         <Animated.View style={[styles.resultWrap, { opacity: resultRevealValue, transform: [{ translateY: resultTranslateY }, { scale: resultScale }] }]}>
-          <Text style={styles.resultKicker}>TODAY'S PICK</Text>
-          <ResultCard restaurant={visibleSelectedRestaurant} selectedGenre={isEverythingRandom ? 'すべて' : genre} distanceOrigin={distanceOrigin} userLocation={userLocation} onMapPress={onGoPress} />
+          <Text style={styles.resultKicker}>{uiText.resultKicker}</Text>
+          <ResultCard restaurant={visibleSelectedRestaurant} selectedGenre={isEverythingRandom ? 'すべて' : genre} distanceOrigin={distanceOrigin} userLocation={userLocation} uiText={uiText} onMapPress={onGoPress} />
           <View style={styles.resultActions}>
             <Pressable style={styles.secondaryAction} onPress={onRandomPress}>
-              <Text style={styles.secondaryActionText}>もう一回引く</Text>
+              <Text style={styles.secondaryActionText}>{uiText.drawAgain}</Text>
             </Pressable>
             <Pressable style={styles.primaryAction} onPress={onGoPress}>
-              <Text style={styles.primaryActionText}>この店に行く</Text>
+              <Text style={styles.primaryActionText}>{uiText.goThisShop}</Text>
             </Pressable>
           </View>
           <Pressable style={styles.saveAction} onPress={onSavePress}>
-            <Text style={styles.saveActionText}>保存する</Text>
+            <Text style={styles.saveActionText}>{uiText.saveRestaurant}</Text>
           </Pressable>
         </Animated.View>
       ) : (
         <View style={styles.emptyPanel}>
-          <Text style={styles.emptyTitle}>まだ一店は決まっていません</Text>
-          <Text style={styles.emptyText}>大きなカードのSTARTを押すと抽選が始まります。</Text>
+          <Text style={styles.emptyTitle}>{uiText.emptyResultTitle}</Text>
+          <Text style={styles.emptyText}>{uiText.emptyResultText}</Text>
         </View>
       )}
-      <HistorySection history={history} />
+      <HistorySection history={history} uiText={uiText} />
       {!selectedRestaurant && history.length > 0 && <HotPepperCredit />}
     </View>
   );
 }
 
-function SaveTab({ savedRestaurants, history }: { savedRestaurants: Restaurant[]; history: Restaurant[] }) {
+function SaveTab({ savedRestaurants, history, uiText }: { savedRestaurants: Restaurant[]; history: Restaurant[]; uiText: Record<string, string> }) {
   return (
     <View>
-      <PageIntro title="保存したお店" lead="また行きたい候補をここに残しておけます。" />
+      <PageIntro title={uiText.savedTitle} lead={uiText.savedLead} />
       {savedRestaurants.length === 0 ? (
         <View style={styles.emptyPanel}>
-          <Text style={styles.emptyTitle}>保存はまだありません</Text>
-          <Text style={styles.emptyText}>結果カードの「保存する」から追加できます。</Text>
+          <Text style={styles.emptyTitle}>{uiText.savedEmptyTitle}</Text>
+          <Text style={styles.emptyText}>{uiText.savedEmptyText}</Text>
         </View>
       ) : (
         savedRestaurants.map((restaurant) => <RestaurantCard key={`${restaurant.id}-saved`} restaurant={restaurant} />)
       )}
-      <HistorySection history={history} />
+      <HistorySection history={history} uiText={uiText} />
       {(savedRestaurants.length > 0 || history.length > 0) && <HotPepperCredit />}
     </View>
   );
 }
 
 function AnalyticsTab({
+  uiText,
   area,
   locationStatus,
   restaurants,
@@ -4290,6 +4649,7 @@ function AnalyticsTab({
   savedRestaurants,
   onAreaPress,
 }: {
+  uiText: Record<string, string>;
   area: string;
   locationStatus: string;
   restaurants: Restaurant[];
@@ -4393,9 +4753,9 @@ function AnalyticsTab({
       <View style={styles.analysisTitleBlock}>
         <View style={styles.analysisTitleRow}>
           <View style={styles.analysisTitleBar} />
-          <Text style={styles.analysisTitle}>分析</Text>
+          <Text style={styles.analysisTitle}>{uiText.analyticsTitle}</Text>
         </View>
-        <Text style={styles.analysisLead}>食の傾向を見える化するプレミアム機能です。</Text>
+        <Text style={styles.analysisLead}>{uiText.analyticsLead}</Text>
       </View>
 
       <View style={styles.analysisFreeCard}>
@@ -4551,17 +4911,19 @@ function ResultCard({
   selectedGenre,
   distanceOrigin,
   userLocation,
+  uiText = UI_TEXT.ja,
   onMapPress,
 }: {
   restaurant: Restaurant;
   selectedGenre: string;
   distanceOrigin: DistanceOrigin;
   userLocation: UserLocation | null;
+  uiText?: Record<string, string>;
   onMapPress: () => void;
 }) {
   const stationOrigin = getNearestStationOrigin(restaurant);
-  const stationDistanceLabel = stationOrigin ? getDistanceLabel(stationOrigin.location, restaurant) : '地図で確認';
-  const currentDistanceLabel = userLocation ? getDistanceLabel(userLocation, restaurant) : '取得中';
+  const stationDistanceLabel = stationOrigin ? getDistanceLabel(stationOrigin.location, restaurant) : uiText.mapCheck;
+  const currentDistanceLabel = userLocation ? getDistanceLabel(userLocation, restaurant) : uiText.loading;
   const minutesLabel = getWalkingMinutesLabel(stationOrigin?.location ?? distanceOrigin.location, restaurant);
   const miniMapDistanceLabel = stationOrigin ? `${stationOrigin.label} ${stationDistanceLabel}` : stationDistanceLabel;
   const openStatus = getOpenStatus(restaurant);
@@ -4574,11 +4936,11 @@ function ResultCard({
         <View style={styles.resultDistanceBand}>
           <View style={styles.resultDistanceList}>
             <View style={styles.resultDistanceItem}>
-              <Text style={styles.resultDistanceLabel}>{stationOrigin?.label ?? '最寄り駅から'}</Text>
+              <Text style={styles.resultDistanceLabel}>{stationOrigin?.label ?? uiText.nearestStationFrom}</Text>
               <Text style={styles.resultDistanceValue}>{stationDistanceLabel}</Text>
             </View>
             <View style={styles.resultDistanceItem}>
-              <Text style={styles.resultDistanceLabel}>現在地から</Text>
+              <Text style={styles.resultDistanceLabel}>{uiText.currentLocationFrom}</Text>
               <Text style={[styles.resultDistanceValue, !userLocation && styles.resultDistanceValueMuted]}>{currentDistanceLabel}</Text>
             </View>
           </View>
@@ -4587,7 +4949,7 @@ function ResultCard({
           </Pressable>
         </View>
         <View style={styles.metaRow}>
-          {selectedGenre !== 'すべて' && <MetaPill label={`選択 ${selectedGenre}`} />}
+          {selectedGenre !== 'すべて' && <MetaPill label={`${uiText.selectedPrefix} ${selectedGenre}`} />}
           <MetaPill label={`API ${restaurant.genre}`} />
           <MetaPill label={restaurant.priceRange ?? formatPrice(restaurant)} />
           <MetaPill label={minutesLabel} />
@@ -4733,12 +5095,12 @@ function RestaurantVisual({
   );
 }
 
-function HistorySection({ history }: { history: Restaurant[] }) {
+function HistorySection({ history, uiText }: { history: Restaurant[]; uiText: Record<string, string> }) {
   return (
     <View>
-      <SectionHeader title="最近引いた店" action={history.length ? `${history.length}件` : '履歴なし'} />
+      <SectionHeader title={uiText.recentHistory} action={history.length ? `${history.length}件` : uiText.noHistory} />
       {history.length === 0 ? (
-        <Text style={styles.mutedText}>抽選すると、ここに履歴が残ります。</Text>
+        <Text style={styles.mutedText}>{uiText.historyEmpty}</Text>
       ) : (
         history.slice(0, 5).map((restaurant) => <RestaurantCard key={`${restaurant.id}-history`} restaurant={restaurant} />)
       )}
@@ -4801,7 +5163,14 @@ function MetaPill({ label }: { label: string }) {
   );
 }
 
-function AppFooter({ activeTab, onPress }: { activeTab: TabKey; onPress: (tab: TabKey) => void }) {
+function AppFooter({ activeTab, onPress, uiText }: { activeTab: TabKey; onPress: (tab: TabKey) => void; uiText: Record<string, string> }) {
+  const labels: Record<TabKey, string> = {
+    home: uiText.footerHome,
+    search: uiText.footerSearch,
+    random: uiText.footerRandom,
+    save: uiText.footerSave,
+    analytics: uiText.footerAnalytics,
+  };
   return (
     <View style={styles.footer}>
       {FOOTER_ITEMS.map((item) => {
@@ -4811,7 +5180,7 @@ function AppFooter({ activeTab, onPress }: { activeTab: TabKey; onPress: (tab: T
             <View style={[styles.footerIconWrap, active && styles.footerIconWrapActive]}>
               <Ionicons name={item.icon} size={26} color={active ? ORANGE : '#777777'} />
             </View>
-            <Text style={[styles.footerLabel, active && styles.footerLabelActive]}>{item.label}</Text>
+            <Text style={[styles.footerLabel, active && styles.footerLabelActive]}>{labels[item.key]}</Text>
           </Pressable>
         );
       })}
