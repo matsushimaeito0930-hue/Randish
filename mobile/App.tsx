@@ -8,6 +8,7 @@ import {
   ImageSourcePropType,
   Keyboard,
   Linking,
+  Modal,
   NativeModules,
   Pressable,
   SafeAreaView,
@@ -29,7 +30,7 @@ type AppStage = 'splash' | 'login' | 'main';
 type TabKey = 'home' | 'search' | 'random' | 'save' | 'analytics';
 type DrawAnimationKey = 'roulette' | 'lottery' | 'shuffle' | 'radar';
 type DrawMode = 'condition' | 'everything' | 'travel';
-type ConditionRandomField = 'budget' | 'distance' | 'genre';
+type ConditionRandomField = 'area' | 'budget' | 'distance' | 'genre';
 type MealSlotKey = 'morning' | 'lunch' | 'dinner' | 'midnight';
 type TravelRevealStep = 'hidden' | 'genre' | 'area' | 'restaurant';
 type AppLanguage = 'ja' | 'en' | 'zh' | 'ko';
@@ -56,12 +57,14 @@ type MealTicketView = MealTicketDefinition & {
   locked: boolean;
   statusLabel: string;
   countdownLabel: string;
+  upcomingStartAt: string;
 };
 
 type MealTicketState = {
   tickets: MealTicketView[];
   current: MealTicketView;
   nextUnlockLabel: string;
+  nextUnlockAt: string;
   usedFreeCount: number;
   totalFreeCount: number;
   isProUser: boolean;
@@ -77,6 +80,39 @@ type DrawHistoryEntry = {
   id: string;
   restaurant: Restaurant;
   createdAt: string;
+};
+
+type SubscriptionState = {
+  isPro: boolean;
+  source: 'dev-stub';
+  startProPurchase: () => void;
+};
+
+type AnalyticsTrendItem = {
+  label: string;
+  count: number;
+  estimatedSpend: number;
+};
+
+type MonthlyAnalytics = {
+  monthDate: Date;
+  monthLabel: string;
+  draws: DrawHistoryEntry[];
+  drawCount: number;
+  estimatedSpend: number;
+  budgetSampleCount: number;
+  averageBudget: number;
+  weekSpends: Array<{ label: string; amount: number; percent: number }>;
+  recentDraws: DrawHistoryEntry[];
+  genreAnalytics: AnalyticsTrendItem[];
+  priceRangeAnalytics: AnalyticsTrendItem[];
+  topGenre: string;
+};
+
+type SavedRestaurantAnalytics = {
+  totalSaved: number;
+  genreAnalytics: AnalyticsTrendItem[];
+  priceRangeAnalytics: AnalyticsTrendItem[];
 };
 
 type GenreItem = {
@@ -140,7 +176,11 @@ type DrawAnimationProfile = {
 
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
-const DEV_LAN_API_BASE_URLS = ['http://10.230.36.45:8080', 'http://10.230.36.34:8080'];
+const DEV_LAN_API_BASE_URLS = [
+  'http://10.230.36.4:8080',
+  'http://10.230.36.45:8080',
+  'http://10.230.36.34:8080',
+];
 const LOCAL_API_BASE_URLS = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://10.0.2.2:8080'];
 const TETHER_HOST_PATTERN = /^http:\/\/10\.230\.36\.\d+(?::8080)?$/;
 const RANDISH_LOGO = require('./assets/randish-logo-square1.png');
@@ -271,7 +311,26 @@ const pickNextDrawAnimation = (current: DrawAnimationKey) => {
 const DISTANCE_OPTIONS = ['500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
 const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
 const FREE_MEAL_TICKET_COUNT = 3;
-const IS_PRO_USER = false;
+const DEV_SUBSCRIPTION_IS_PRO = false;
+
+function useSubscription(userId: string): SubscriptionState {
+  const [devIsPro] = useState(DEV_SUBSCRIPTION_IS_PRO);
+
+  const startProPurchase = useCallback(() => {
+    // TODO: Replace this stub with RevenueCat, StoreKit, or Google Play Billing purchase flow.
+    console.log('[RANDISH PRO] purchase flow stub', { userId });
+    Alert.alert(
+      'RANDISH PRO',
+      '実決済はこれから接続します。RevenueCat / StoreKit / Google Play Billing の購入処理に差し替える予定です。',
+    );
+  }, [userId]);
+
+  return {
+    isPro: devIsPro,
+    source: 'dev-stub',
+    startProPurchase,
+  };
+}
 
 const LANGUAGE_OPTIONS: { key: AppLanguage; label: string; nativeLabel: string }[] = [
   { key: 'ja', label: 'Japanese', nativeLabel: '日本語' },
@@ -286,6 +345,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     profile: 'プロフィール',
     profileValue: '名前と画像を変更',
     profileLocked: '会員登録後に変更できます',
+    profileRegisterCta: '会員登録へ進む',
     displayName: '表示名',
     profilePlaceholder: '表示名',
     changeImage: '画像を変更',
@@ -296,6 +356,29 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     dailyAccess: '利用枠',
     todayAccessTitle: '今日の利用枠',
     proLateNightGenres: 'Pro深夜ジャンル',
+    ticketMorning: '朝',
+    ticketLunch: '昼',
+    ticketDinner: '夜',
+    ticketMidnight: '深夜',
+    ticketAvailable: 'いま使える',
+    ticketUsed: '使用済み',
+    ticketProOnly: 'Pro限定',
+    ticketDoneToday: '本日終了',
+    ticketUseThis: 'この一枚で引けます',
+    ticketTomorrow: 'また明日',
+    ticketNextTicketSuffix: 'で次の一枚',
+    ticketMorningTicketSuffix: 'で朝の一枚',
+    ticketCurrentReadySuffix: 'の一枚が使えます',
+    fromPrefix: '',
+    fromSuffix: 'から',
+    noBudget: '予算なし',
+    yenUnit: '円',
+    yenMaxSuffix: '以内',
+    aboutPrefix: '約',
+    meterUnit: 'm',
+    kilometerUnit: 'km',
+    walkAboutPrefix: '徒歩約',
+    minuteUnit: '分',
     creditTerms: 'クレジット・規約',
     creditTermsValue: 'サービス表記',
     areaSetup: 'AREA SETUP',
@@ -308,6 +391,10 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     lockedTitle: '会員限定です',
     profileLockedMessage: 'プロフィール変更は会員登録またはログイン後に使えます。',
     profilePhotoLockedMessage: 'プロフィール画像の変更は会員登録またはログイン後に使えます。',
+    registrationPromptTitle: '会員登録しますか？',
+    registrationPromptMessage: 'プロフィールを編集するには会員登録またはログインが必要です。',
+    registrationPromptCancel: 'あとで',
+    registrationPromptAction: 'はい',
     photoPermissionTitle: '写真へのアクセスが必要です',
     photoPermissionMessage: 'プロフィール画像を選ぶには写真ライブラリへのアクセスを許可してください。',
     currentLocation: '現在地',
@@ -343,6 +430,8 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     areaInputPlaceholder: '現在地エリア',
     areaSearchTitle: 'エリアを検索',
     areaSearchPlaceholder: '例: 大阪 / 美郷町 / 北区 / 梅田',
+    areaHiddenTitle: 'エリアは？',
+    areaHiddenLead: 'ランダムを解除すると選べます',
     searchResults: '検索結果',
     noAreaResult: '該当エリアがありません',
     budget: '予算',
@@ -376,7 +465,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     savedEmptyTitle: '保存はまだありません',
     savedEmptyText: '結果カードの「保存する」から追加できます。',
     analyticsTitle: '分析',
-    analyticsLead: '食の傾向を見える化するプレミアム機能です。',
+    analyticsLead: '今月の食の傾向を、あとから見返せます。Proなら過去月も残せます。',
     registerTitle: '会員登録',
     registerDesc: 'アカウントを作成して、RANDISHをもっと便利に使いましょう。',
     emailLabel: 'メールアドレス',
@@ -399,6 +488,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     profile: 'Profile',
     profileValue: 'Edit name and photo',
     profileLocked: 'Available after registration',
+    profileRegisterCta: 'Create account',
     displayName: 'Display Name',
     profilePlaceholder: 'Display name',
     changeImage: 'Change Photo',
@@ -409,6 +499,29 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     dailyAccess: 'Daily Access',
     todayAccessTitle: "Today's Access",
     proLateNightGenres: 'Pro Late-Night Genres',
+    ticketMorning: 'Morning',
+    ticketLunch: 'Lunch',
+    ticketDinner: 'Dinner',
+    ticketMidnight: 'Late Night',
+    ticketAvailable: 'Available now',
+    ticketUsed: 'Used',
+    ticketProOnly: 'Pro only',
+    ticketDoneToday: 'Done today',
+    ticketUseThis: 'Use this ticket to draw',
+    ticketTomorrow: 'Tomorrow',
+    ticketNextTicketSuffix: ' until next ticket',
+    ticketMorningTicketSuffix: ' until morning ticket',
+    ticketCurrentReadySuffix: ' ticket is available',
+    fromPrefix: 'From ',
+    fromSuffix: '',
+    noBudget: 'No budget',
+    yenUnit: 'yen',
+    yenMaxSuffix: ' max',
+    aboutPrefix: 'about ',
+    meterUnit: ' m',
+    kilometerUnit: ' km',
+    walkAboutPrefix: 'about ',
+    minuteUnit: ' min walk',
     creditTerms: 'Credits & Terms',
     creditTermsValue: 'Service info',
     areaSetup: 'AREA SETUP',
@@ -421,6 +534,10 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     lockedTitle: 'Members Only',
     profileLockedMessage: 'Profile editing is available after registration or login.',
     profilePhotoLockedMessage: 'Profile photo changes are available after registration or login.',
+    registrationPromptTitle: 'Create an account?',
+    registrationPromptMessage: 'Register or log in to edit your profile.',
+    registrationPromptCancel: 'Later',
+    registrationPromptAction: 'Yes',
     photoPermissionTitle: 'Photo Access Required',
     photoPermissionMessage: 'Allow photo library access to choose a profile image.',
     currentLocation: 'Current Location',
@@ -456,6 +573,8 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     areaInputPlaceholder: 'Current area',
     areaSearchTitle: 'Search Area',
     areaSearchPlaceholder: 'Osaka / Misato / Kita / Umeda',
+    areaHiddenTitle: 'Area is ?',
+    areaHiddenLead: 'Turn off random to choose an area',
     searchResults: 'Search Results',
     noAreaResult: 'No matching area',
     budget: 'Budget',
@@ -489,7 +608,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     savedEmptyTitle: 'No saved places yet',
     savedEmptyText: 'Save a place from the result card.',
     analyticsTitle: 'Stats',
-    analyticsLead: 'Premium insights that visualize your food habits.',
+    analyticsLead: 'View this month for free. Pro keeps past months and deeper trends.',
     registerTitle: 'Create Account',
     registerDesc: 'Create an account to make RANDISH more useful.',
     emailLabel: 'Email',
@@ -512,6 +631,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     profile: '个人资料',
     profileValue: '更改名称和头像',
     profileLocked: '注册后可使用',
+    profileRegisterCta: '前往注册',
     displayName: '显示名称',
     profilePlaceholder: '显示名称',
     changeImage: '更改头像',
@@ -522,6 +642,29 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     dailyAccess: '使用次数',
     todayAccessTitle: '今天的使用次数',
     proLateNightGenres: 'Pro深夜类型',
+    ticketMorning: '早晨',
+    ticketLunch: '午餐',
+    ticketDinner: '晚餐',
+    ticketMidnight: '深夜',
+    ticketAvailable: '现在可用',
+    ticketUsed: '已使用',
+    ticketProOnly: 'Pro限定',
+    ticketDoneToday: '今日结束',
+    ticketUseThis: '可用这一张抽选',
+    ticketTomorrow: '明天再来',
+    ticketNextTicketSuffix: '后可用下一张',
+    ticketMorningTicketSuffix: '后可用早晨券',
+    ticketCurrentReadySuffix: '餐券可使用',
+    fromPrefix: '从',
+    fromSuffix: '起',
+    noBudget: '无预算限制',
+    yenUnit: '日元',
+    yenMaxSuffix: '以内',
+    aboutPrefix: '约',
+    meterUnit: 'm',
+    kilometerUnit: 'km',
+    walkAboutPrefix: '步行约',
+    minuteUnit: '分钟',
     creditTerms: '版权与条款',
     creditTermsValue: '服务说明',
     areaSetup: '区域设置',
@@ -534,6 +677,10 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     lockedTitle: '会员限定',
     profileLockedMessage: '注册或登录后可以编辑个人资料。',
     profilePhotoLockedMessage: '注册或登录后可以更改头像。',
+    registrationPromptTitle: '要注册账号吗？',
+    registrationPromptMessage: '编辑个人资料需要注册或登录。',
+    registrationPromptCancel: '稍后',
+    registrationPromptAction: '是',
     photoPermissionTitle: '需要照片权限',
     photoPermissionMessage: '请选择允许访问照片图库后再选择头像。',
     currentLocation: '当前位置',
@@ -569,6 +716,8 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     areaInputPlaceholder: '当前位置区域',
     areaSearchTitle: '搜索区域',
     areaSearchPlaceholder: '大阪 / 美乡町 / 北区 / 梅田',
+    areaHiddenTitle: '区域是？',
+    areaHiddenLead: '关闭随机后可以选择区域',
     searchResults: '搜索结果',
     noAreaResult: '没有符合的区域',
     budget: '预算',
@@ -625,6 +774,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     profile: '프로필',
     profileValue: '이름과 사진 변경',
     profileLocked: '회원가입 후 이용 가능',
+    profileRegisterCta: '회원가입으로 이동',
     displayName: '표시 이름',
     profilePlaceholder: '표시 이름',
     changeImage: '사진 변경',
@@ -635,6 +785,29 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     dailyAccess: '이용 횟수',
     todayAccessTitle: '오늘의 이용권',
     proLateNightGenres: 'Pro 심야 장르',
+    ticketMorning: '아침',
+    ticketLunch: '점심',
+    ticketDinner: '저녁',
+    ticketMidnight: '심야',
+    ticketAvailable: '지금 사용 가능',
+    ticketUsed: '사용 완료',
+    ticketProOnly: 'Pro 전용',
+    ticketDoneToday: '오늘 종료',
+    ticketUseThis: '이 한 장으로 뽑을 수 있어요',
+    ticketTomorrow: '내일 다시',
+    ticketNextTicketSuffix: ' 후 다음 이용권',
+    ticketMorningTicketSuffix: ' 후 아침 이용권',
+    ticketCurrentReadySuffix: ' 이용권을 사용할 수 있어요',
+    fromPrefix: '',
+    fromSuffix: '에서',
+    noBudget: '예산 없음',
+    yenUnit: '엔',
+    yenMaxSuffix: ' 이내',
+    aboutPrefix: '약 ',
+    meterUnit: 'm',
+    kilometerUnit: 'km',
+    walkAboutPrefix: '도보 약 ',
+    minuteUnit: '분',
     creditTerms: '크레딧 및 약관',
     creditTermsValue: '서비스 표기',
     areaSetup: '지역 설정',
@@ -647,6 +820,10 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     lockedTitle: '회원 전용',
     profileLockedMessage: '프로필 변경은 회원가입 또는 로그인 후 사용할 수 있습니다.',
     profilePhotoLockedMessage: '프로필 사진 변경은 회원가입 또는 로그인 후 사용할 수 있습니다.',
+    registrationPromptTitle: '회원가입할까요?',
+    registrationPromptMessage: '프로필을 수정하려면 회원가입 또는 로그인이 필요합니다.',
+    registrationPromptCancel: '나중에',
+    registrationPromptAction: '예',
     photoPermissionTitle: '사진 접근 권한이 필요합니다',
     photoPermissionMessage: '프로필 이미지를 선택하려면 사진 라이브러리 접근을 허용해주세요.',
     currentLocation: '현재 위치',
@@ -682,6 +859,8 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     areaInputPlaceholder: '현재 위치 지역',
     areaSearchTitle: '지역 검색',
     areaSearchPlaceholder: '오사카 / 미사토 / 기타구 / 우메다',
+    areaHiddenTitle: '지역은 ?',
+    areaHiddenLead: '랜덤을 끄면 지역을 선택할 수 있어요',
     searchResults: '검색 결과',
     noAreaResult: '해당 지역이 없습니다',
     budget: '예산',
@@ -735,6 +914,117 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
   },
 };
 
+const getUiLanguage = (uiText: Record<string, string>): AppLanguage => {
+  if (uiText === UI_TEXT.en) {
+    return 'en';
+  }
+  if (uiText === UI_TEXT.zh) {
+    return 'zh';
+  }
+  if (uiText === UI_TEXT.ko) {
+    return 'ko';
+  }
+  return 'ja';
+};
+
+const formatLocalizedYen = (value: number, uiText: Record<string, string>) => {
+  const amount = Math.round(value).toLocaleString();
+  const language = getUiLanguage(uiText);
+  if (language === 'en') {
+    return `¥${amount}`;
+  }
+  return `${amount}${uiText.yenUnit}`;
+};
+
+const formatLocalizedBudgetLimit = (budgetMax: string, uiText: Record<string, string>) => {
+  const value = Number(budgetMax || 0);
+  return value > 0 ? `${formatLocalizedYen(value, uiText)}${uiText.yenMaxSuffix}` : uiText.noBudget;
+};
+
+const formatLocalizedPrice = (restaurant: ApiRestaurant, uiText: Record<string, string>) => {
+  const min = toOptionalNumber(restaurant.budgetMin);
+  const max = toOptionalNumber(restaurant.budgetMax);
+  if (min == null && max == null) {
+    return uiText.noBudget;
+  }
+  if (min == null || max == null || min === max) {
+    return formatLocalizedYen(min ?? max ?? 0, uiText);
+  }
+  return `${formatLocalizedYen(min, uiText)} - ${formatLocalizedYen(max, uiText)}`;
+};
+
+const formatLocalizedCountdownDate = (targetIso: string | undefined, uiText: Record<string, string>) => {
+  const target = targetIso ? new Date(targetIso) : new Date();
+  const diff = Math.max(0, target.getTime() - Date.now());
+  const totalMinutes = Math.max(1, Math.ceil(diff / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const language = getUiLanguage(uiText);
+
+  if (language === 'en') {
+    if (hours <= 0) {
+      return `in ${minutes}m`;
+    }
+    return minutes === 0 ? `in ${hours}h` : `in ${hours}h ${minutes}m`;
+  }
+  if (language === 'zh') {
+    if (hours <= 0) {
+      return `还有${minutes}分钟`;
+    }
+    return minutes === 0 ? `还有${hours}小时` : `还有${hours}小时${minutes}分钟`;
+  }
+  if (language === 'ko') {
+    if (hours <= 0) {
+      return `${minutes}분 후`;
+    }
+    return minutes === 0 ? `${hours}시간 후` : `${hours}시간 ${minutes}분 후`;
+  }
+  if (hours <= 0) {
+    return `あと${minutes}分`;
+  }
+  return minutes === 0 ? `あと${hours}時間` : `あと${hours}時間${minutes}分`;
+};
+
+const formatMealTicketName = (key: MealSlotKey, uiText: Record<string, string>) => {
+  const names: Record<MealSlotKey, string> = {
+    morning: uiText.ticketMorning,
+    lunch: uiText.ticketLunch,
+    dinner: uiText.ticketDinner,
+    midnight: uiText.ticketMidnight,
+  };
+  return names[key];
+};
+
+const formatTicketStartsAt = (timeLabel: string, uiText: Record<string, string>) =>
+  `${uiText.fromPrefix}${timeLabel.split('-')[0]}${uiText.fromSuffix}`;
+
+const getMealTicketDisplay = (ticket: MealTicketView, state: MealTicketState, uiText: Record<string, string>) => {
+  const proLocked = Boolean(ticket.proOnly && !state.isProUser);
+  const statusLabel = ticket.available
+    ? uiText.ticketAvailable
+    : ticket.used
+      ? uiText.ticketUsed
+      : proLocked
+        ? uiText.ticketProOnly
+        : ticket.past
+          ? uiText.ticketDoneToday
+          : formatTicketStartsAt(ticket.timeLabel, uiText);
+  const countdownLabel = ticket.available
+    ? uiText.ticketUseThis
+    : ticket.used && ticket.active
+      ? `${formatLocalizedCountdownDate(state.nextUnlockAt, uiText)}${uiText.ticketNextTicketSuffix}`
+      : proLocked && ticket.active
+        ? `${formatLocalizedCountdownDate(state.nextUnlockAt, uiText)}${uiText.ticketMorningTicketSuffix}`
+        : ticket.past
+          ? uiText.ticketTomorrow
+          : formatLocalizedCountdownDate(ticket.upcomingStartAt, uiText);
+  return {
+    label: formatMealTicketName(ticket.key, uiText),
+    statusLabel,
+    countdownLabel,
+  };
+};
+
 const MEAL_TICKET_DEFINITIONS: MealTicketDefinition[] = [
   {
     key: 'morning',
@@ -773,7 +1063,7 @@ const MEAL_TICKET_DEFINITIONS: MealTicketDefinition[] = [
     startMinute: 0,
     endMinute: 5 * 60,
     icon: 'wine-outline',
-    accent: '#5d5be8',
+    accent: INK,
     genreHints: ['バー', '締めラーメン', '深夜カフェ'],
     proOnly: true,
   },
@@ -1347,10 +1637,7 @@ const pickRandomDifferent = <T,>(items: T[], current: T) => {
 
 const pickRandomBudgetValue = (currentMax: string) => pickRandomDifferent(BUDGET_MAX_OPTIONS, currentMax);
 
-const formatBudgetLimit = (budgetMax: string) => {
-  const value = Number(budgetMax || 0);
-  return value > 0 ? `${value.toLocaleString()}円以内` : '予算なし';
-};
+const formatBudgetLimit = (budgetMax: string, uiText = UI_TEXT.ja) => formatLocalizedBudgetLimit(budgetMax, uiText);
 
 const padDatePart = (value: number) => String(value).padStart(2, '0');
 
@@ -1453,6 +1740,7 @@ const buildMealTicketState = (now: Date, drawHistories: DrawHistoryEntry[], isPr
       locked,
       statusLabel,
       countdownLabel,
+      upcomingStartAt: upcomingStart.toISOString(),
     };
   });
 
@@ -1463,6 +1751,7 @@ const buildMealTicketState = (now: Date, drawHistories: DrawHistoryEntry[], isPr
     tickets,
     current,
     nextUnlockLabel,
+    nextUnlockAt: nextUnlockDate.toISOString(),
     usedFreeCount,
     totalFreeCount: FREE_MEAL_TICKET_COUNT,
     isProUser,
@@ -1526,8 +1815,7 @@ const MOCK_RESTAURANTS: Restaurant[] = [
   },
 ];
 
-const formatPrice = (restaurant: ApiRestaurant) =>
-  `${restaurant.budgetMin?.toLocaleString() ?? '?'}円〜${restaurant.budgetMax?.toLocaleString() ?? '?'}円`;
+const formatPrice = (restaurant: ApiRestaurant, uiText = UI_TEXT.ja) => formatLocalizedPrice(restaurant, uiText);
 
 const toOptionalNumber = (value: unknown) => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -1596,6 +1884,137 @@ const formatShortDate = (dateText: string) => {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 };
 
+const getMonthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+
+const addMonthsToStart = (date: Date, monthOffset: number) =>
+  new Date(date.getFullYear(), date.getMonth() + monthOffset, 1);
+
+const getAnalyticsMonthLabel = (date: Date) => `${date.getMonth() + 1}月`;
+
+const getPriceRangeBucketLabel = (estimatedBudget: number | null) => {
+  if (estimatedBudget == null) {
+    return '推定不可';
+  }
+  if (estimatedBudget <= 1000) {
+    return '1,000円以下';
+  }
+  if (estimatedBudget <= 2000) {
+    return '1,001〜2,000円';
+  }
+  if (estimatedBudget <= 4000) {
+    return '2,001〜4,000円';
+  }
+  return '4,001円以上';
+};
+
+const getGenreAnalytics = (entries: DrawHistoryEntry[]): AnalyticsTrendItem[] => {
+  const counts = new Map<string, AnalyticsTrendItem>();
+  entries.forEach((entry) => {
+    const label = entry.restaurant.genre?.trim() || 'ジャンル未分類';
+    const estimatedBudget = getEstimatedBudget(entry.restaurant);
+    const current = counts.get(label) ?? { label, count: 0, estimatedSpend: 0 };
+    counts.set(label, {
+      ...current,
+      count: current.count + 1,
+      estimatedSpend: current.estimatedSpend + (estimatedBudget ?? 0),
+    });
+  });
+  return [...counts.values()].sort((a, b) => b.count - a.count || b.estimatedSpend - a.estimatedSpend);
+};
+
+const getPriceRangeAnalytics = (entries: DrawHistoryEntry[]): AnalyticsTrendItem[] => {
+  const counts = new Map<string, AnalyticsTrendItem>();
+  entries.forEach((entry) => {
+    const estimatedBudget = getEstimatedBudget(entry.restaurant);
+    const label = getPriceRangeBucketLabel(estimatedBudget);
+    const current = counts.get(label) ?? { label, count: 0, estimatedSpend: 0 };
+    counts.set(label, {
+      ...current,
+      count: current.count + 1,
+      estimatedSpend: current.estimatedSpend + (estimatedBudget ?? 0),
+    });
+  });
+  return [...counts.values()].sort((a, b) => b.count - a.count || b.estimatedSpend - a.estimatedSpend);
+};
+
+const getMonthlyAnalytics = (entries: DrawHistoryEntry[], monthDate: Date): MonthlyAnalytics => {
+  const monthStart = getMonthStart(monthDate);
+  const monthEntries = entries
+    .filter((entry) => isSameMonth(entry.createdAt, monthStart))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const budgetValues = monthEntries
+    .map((entry) => getEstimatedBudget(entry.restaurant))
+    .filter((value): value is number => value != null);
+  const estimatedSpend = budgetValues.reduce((total, value) => total + value, 0);
+  const buckets = [0, 0, 0, 0, 0];
+
+  monthEntries.forEach((entry) => {
+    const date = new Date(entry.createdAt);
+    const budget = getEstimatedBudget(entry.restaurant);
+    if (Number.isNaN(date.getTime()) || budget == null) {
+      return;
+    }
+    const weekIndex = Math.min(4, Math.floor((date.getDate() - 1) / 7));
+    buckets[weekIndex] += budget;
+  });
+
+  const max = Math.max(...buckets, 1);
+  const genreAnalytics = getGenreAnalytics(monthEntries);
+
+  return {
+    monthDate: monthStart,
+    monthLabel: getAnalyticsMonthLabel(monthStart),
+    draws: monthEntries,
+    drawCount: monthEntries.length,
+    estimatedSpend,
+    budgetSampleCount: budgetValues.length,
+    averageBudget: budgetValues.length ? Math.round(estimatedSpend / budgetValues.length) : 0,
+    weekSpends: buckets.map((amount, index) => ({
+      label: `${index + 1}週`,
+      amount,
+      percent: amount > 0 ? Math.max(18, Math.round((amount / max) * 100)) : 0,
+    })),
+    recentDraws: monthEntries.slice(0, 3),
+    genreAnalytics,
+    priceRangeAnalytics: getPriceRangeAnalytics(monthEntries),
+    topGenre: genreAnalytics[0]?.label ?? 'まだなし',
+  };
+};
+
+const getCurrentMonthAnalytics = (entries: DrawHistoryEntry[], now = new Date()) =>
+  getMonthlyAnalytics(entries, now);
+
+const getPreviousMonthComparison = (entries: DrawHistoryEntry[], now = new Date()) => {
+  const current = getCurrentMonthAnalytics(entries, now);
+  const previous = getMonthlyAnalytics(entries, addMonthsToStart(now, -1));
+  const diff = current.estimatedSpend - previous.estimatedSpend;
+  const label = diff > 0
+    ? `先月より約${formatYen(diff)}増えています`
+    : diff < 0
+      ? `先月より約${formatYen(Math.abs(diff))}節約`
+      : '先月と同じくらい';
+
+  return {
+    current,
+    previous,
+    diff,
+    label,
+  };
+};
+
+const getSavedRestaurantAnalytics = (savedRestaurants: Restaurant[]): SavedRestaurantAnalytics => {
+  const entries = savedRestaurants.map((restaurant, index) => ({
+    id: `saved-${restaurant.id}-${index}`,
+    restaurant,
+    createdAt: new Date().toISOString(),
+  }));
+  return {
+    totalSaved: savedRestaurants.length,
+    genreAnalytics: getGenreAnalytics(entries),
+    priceRangeAnalytics: getPriceRangeAnalytics(entries),
+  };
+};
+
 const getRatingValue = (restaurant: Restaurant) => {
   const rating = toOptionalNumber(restaurant.googleRating) ?? toOptionalNumber(restaurant.rating);
   return rating != null && rating > 0 ? rating : null;
@@ -1606,8 +2025,8 @@ const getRatingLabel = (restaurant: Restaurant) => {
   return rating == null ? '評価取得中' : `★ ${rating.toFixed(1)}`;
 };
 
-const getStoredMinutesLabel = (restaurant: Restaurant) =>
-  restaurant.minutes && restaurant.minutes > 0 ? `${restaurant.minutes}分` : '地図で確認';
+const getStoredMinutesLabel = (restaurant: Restaurant, uiText = UI_TEXT.ja) =>
+  restaurant.minutes && restaurant.minutes > 0 ? `${restaurant.minutes}${uiText.minuteUnit}` : uiText.mapCheck;
 
 const formatBusinessTime = (value?: string | null) => {
   if (!value) {
@@ -1687,20 +2106,24 @@ const getDistanceKm = (from: UserLocation | null, restaurant: Restaurant) => {
   return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-const getDistanceLabel = (from: UserLocation | null, restaurant: Restaurant) => {
+const getDistanceLabel = (from: UserLocation | null, restaurant: Restaurant, uiText = UI_TEXT.ja) => {
   const km = getDistanceKm(from, restaurant);
   if (km != null) {
-    return km < 1 ? `約${Math.round(km * 1000)}m` : `約${km.toFixed(1)}km`;
+    return km < 1
+      ? `${uiText.aboutPrefix}${Math.round(km * 1000)}${uiText.meterUnit}`
+      : `${uiText.aboutPrefix}${km.toFixed(1)}${uiText.kilometerUnit}`;
   }
-  return restaurant.minutes && restaurant.minutes > 0 ? `徒歩約${restaurant.minutes}分` : '地図で確認';
+  return restaurant.minutes && restaurant.minutes > 0
+    ? `${uiText.walkAboutPrefix}${restaurant.minutes}${uiText.minuteUnit}`
+    : uiText.mapCheck;
 };
 
-const getWalkingMinutesLabel = (from: UserLocation | null, restaurant: Restaurant) => {
+const getWalkingMinutesLabel = (from: UserLocation | null, restaurant: Restaurant, uiText = UI_TEXT.ja) => {
   const km = getDistanceKm(from, restaurant);
   if (km != null) {
-    return `${Math.max(1, Math.round(km * 12.5))}分`;
+    return `${Math.max(1, Math.round(km * 12.5))}${uiText.minuteUnit}`;
   }
-  return restaurant.minutes && restaurant.minutes > 0 ? `${restaurant.minutes}分` : '地図で確認';
+  return restaurant.minutes && restaurant.minutes > 0 ? `${restaurant.minutes}${uiText.minuteUnit}` : uiText.mapCheck;
 };
 
 const getPresetPrefecture = (preset: AreaPreset) => preset.group.split('/')[0].trim();
@@ -1804,6 +2227,20 @@ const getAreaPreset = (area: string) => {
 const isStationLikePreset = (preset: AreaPreset) => hasUsablePresetCoordinates(preset) && !NON_STATION_AREA_LABELS.has(preset.label);
 
 const formatStationOriginLabel = (label: string) => `${label}${label.endsWith('駅') ? '' : '駅'}から`;
+
+const formatStationOriginLabelForUi = (label: string, uiText: Record<string, string>) => {
+  const language = getUiLanguage(uiText);
+  if (language === 'en') {
+    return `From ${label}${label.endsWith('駅') ? '' : ' Station'}`;
+  }
+  if (language === 'zh') {
+    return `从${label}${label.endsWith('駅') ? '' : '站'}起`;
+  }
+  if (language === 'ko') {
+    return `${label}${label.endsWith('駅') ? '' : '역'}에서`;
+  }
+  return formatStationOriginLabel(label);
+};
 
 const getNearestStationOrigin = (restaurant: Restaurant): DistanceOrigin | null => {
   if (restaurant.latitude == null || restaurant.longitude == null) {
@@ -2158,6 +2595,7 @@ const buildGenreDiagnosticMessage = (requestedGenre: string, restaurants: Restau
 export default function App() {
   const [stage, setStage] = useState<AppStage>('splash');
   const [userId, setUserId] = useState(APP_USER_ID);
+  const subscription = useSubscription(userId);
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const runtimeApiBaseUrl = useMemo(getRuntimeApiBaseUrl, []);
   const [apiBaseUrl, setApiBaseUrl] = useState(runtimeApiBaseUrl);
@@ -2183,6 +2621,7 @@ export default function App() {
   const [travelRevealStep, setTravelRevealStep] = useState<TravelRevealStep>('hidden');
   const [travelDisplayArea, setTravelDisplayArea] = useState<string | null>(null);
   const [conditionRandom, setConditionRandom] = useState<ConditionRandomState>({
+    area: false,
     budget: false,
     distance: false,
     genre: false,
@@ -2217,8 +2656,8 @@ export default function App() {
   }, []);
 
   const mealTicketState = useMemo(
-    () => buildMealTicketState(now, drawHistories, IS_PRO_USER),
-    [drawHistories, now],
+    () => buildMealTicketState(now, drawHistories, subscription.isPro),
+    [drawHistories, now, subscription.isPro],
   );
   const isRegisteredUser = userId !== APP_USER_ID;
 
@@ -2309,6 +2748,27 @@ export default function App() {
     [area, budgetMax, budgetMin, distance, genre, userLocation],
   );
 
+  const previewApiParams = useMemo(
+    () => ({
+      ...apiParams,
+      genre: conditionRandom.genre ? undefined : apiParams.genre,
+      budgetMin: conditionRandom.budget ? 0 : apiParams.budgetMin,
+      budgetMax: conditionRandom.budget ? 999999 : apiParams.budgetMax,
+    }),
+    [apiParams, conditionRandom.budget, conditionRandom.genre],
+  );
+
+  const drawApiParams = useMemo(
+    () => ({
+      ...apiParams,
+      budgetMin: conditionRandom.budget ? 0 : apiParams.budgetMin,
+      budgetMax: conditionRandom.budget ? 999999 : apiParams.budgetMax,
+    }),
+    [apiParams, conditionRandom.budget],
+  );
+
+  const hasHiddenPreviewCondition = conditionRandom.area || conditionRandom.budget || conditionRandom.genre;
+
   const distanceOrigin = useMemo<DistanceOrigin>(() => {
     const coordinatePreset = getCoordinatePresetForArea(area);
     if (coordinatePreset) {
@@ -2339,28 +2799,35 @@ export default function App() {
 
   const loadGenreDiagnosticMessage = useCallback(async () => {
     const cleanGenre = genre.trim();
-    if (!cleanGenre || cleanGenre === 'すべて') {
+    if (!cleanGenre || cleanGenre === 'すべて' || conditionRandom.genre) {
       return null;
     }
 
     try {
-      const genrelessParams = { ...apiParams, genre: undefined };
+      const genrelessParams = { ...previewApiParams, genre: undefined };
       const data = await randishApi.getRestaurants(apiBaseUrlCandidates, genrelessParams);
       syncWorkingApiBaseUrl();
       return buildGenreDiagnosticMessage(cleanGenre, data.map(normalizeRestaurant), area);
     } catch {
       return null;
     }
-  }, [apiBaseUrlCandidates, apiParams, area, genre, syncWorkingApiBaseUrl]);
+  }, [apiBaseUrlCandidates, area, conditionRandom.genre, genre, previewApiParams, syncWorkingApiBaseUrl]);
 
   const loadRestaurants = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await randishApi.getRestaurants(apiBaseUrlCandidates, apiParams);
+      const data = await randishApi.getRestaurants(apiBaseUrlCandidates, previewApiParams);
       syncWorkingApiBaseUrl();
-      const normalized = data.map(normalizeRestaurant).filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
+      const normalized = data
+        .map(normalizeRestaurant)
+        .filter((restaurant) => conditionRandom.genre || restaurantMatchesSelectedGenre(restaurant, genre));
       setRestaurants(normalized);
       const genreLabel = genre === 'すべて' ? 'すべてのジャンル' : genre;
+      if (hasHiddenPreviewCondition) {
+        const areaLabel = conditionRandom.area ? 'ランダムエリア' : area;
+        setMessage(`${areaLabel}で${normalized.length}件を下準備中。STARTで伏せた条件を開きます。`);
+        return;
+      }
       if (normalized.length) {
         const apiGenres = buildGenreSummaryItems(normalized).join(' / ');
         setMessage(`${genreLabel}で${normalized.length}件から候補を整えました。APIジャンル: ${apiGenres}`);
@@ -2376,7 +2843,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, apiParams, genre, loadGenreDiagnosticMessage, syncWorkingApiBaseUrl]);
+  }, [apiBaseUrlCandidates, area, conditionRandom.area, conditionRandom.genre, genre, hasHiddenPreviewCondition, loadGenreDiagnosticMessage, previewApiParams, syncWorkingApiBaseUrl]);
 
   useEffect(() => {
     loadRestaurants();
@@ -2518,10 +2985,11 @@ export default function App() {
     setGenre(nextGenre);
     setDistance(nextDistance);
     setBudgetMin('0');
+    setBudgetMax('');
     setDrawMode('travel');
     setTravelRevealStep('hidden');
     setTravelDisplayArea(travelDisplay);
-    setConditionRandom({ budget: false, distance: false, genre: false });
+    setConditionRandom({ area: false, budget: true, distance: false, genre: false });
     setSelectedRestaurant(null);
     spinValue.setValue(0);
     resultRevealValue.setValue(0);
@@ -2530,6 +2998,22 @@ export default function App() {
     setMessage('旅の行き先を伏せました。STARTするとジャンル、エリア、お店の順に開きます。');
     scrollToContentTop();
   }, [distance, genre, resultRevealValue, scrollToContentTop, spinValue]);
+
+  const openAreaRandomConditions = useCallback(() => {
+    const randomPreset = pickRandomTravelAreaPreset();
+    const randomPrefecture = getPresetPrefecture(randomPreset);
+    const randomArea = randomPreset.label;
+    setArea(getAreaPresetSearchValue(randomPreset));
+    setDrawMode('condition');
+    setTravelRevealStep('hidden');
+    setTravelDisplayArea(null);
+    setConditionRandom((current) => ({ ...current, area: true }));
+    setSelectedRestaurant(null);
+    setLocationStatus(formatLocationStatus(randomPrefecture, randomArea));
+    setActiveTab('search');
+    setMessage('エリアをランダムにしました。条件画面では伏せて表示します。');
+    scrollToContentTop();
+  }, [scrollToContentTop]);
 
   const chooseRandomRestaurant = useCallback(async () => {
     const isTravelDraw = drawMode === 'travel';
@@ -2556,7 +3040,7 @@ export default function App() {
       if (alternativesCache) {
         return alternativesCache;
       }
-      alternativesCache = (await randishApi.getRestaurants(apiBaseUrlCandidates, apiParams))
+      alternativesCache = (await randishApi.getRestaurants(apiBaseUrlCandidates, drawApiParams))
         .map(normalizeRestaurant)
         .filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
       return alternativesCache;
@@ -2565,7 +3049,7 @@ export default function App() {
     try {
       const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
         userId,
-        ...apiParams,
+        ...drawApiParams,
       });
       syncWorkingApiBaseUrl();
       let normalized = normalizeRestaurant(data);
@@ -2602,7 +3086,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, apiParams, area, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToContentTop, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
+  }, [apiBaseUrlCandidates, area, drawApiParams, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToContentTop, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
@@ -2717,6 +3201,7 @@ export default function App() {
     setDrawMode('condition');
     setTravelRevealStep('hidden');
     setTravelDisplayArea(null);
+    setConditionRandom((current) => ({ ...current, area: false }));
     setSelectedRestaurant(null);
   };
 
@@ -2804,6 +3289,7 @@ export default function App() {
       <LoginScreen
         apiBaseUrlCandidates={apiBaseUrlCandidates}
         uiText={UI_TEXT[appLanguage]}
+        locationStatus={locationStatus}
         onApiConnected={syncWorkingApiBaseUrl}
         onStart={enterMain}
       />
@@ -2813,7 +3299,13 @@ export default function App() {
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="dark-content" />
-      {activeTab !== 'home' && <AppHeader area={area} locationStatus={locationStatus} onLocationPress={requestCurrentLocation} />}
+      {activeTab !== 'home' && activeTab !== 'analytics' && (
+        <AppHeader
+          area={conditionRandom.area ? '？' : area}
+          locationStatus={conditionRandom.area ? '？ 周辺から探します' : locationStatus}
+          onLocationPress={requestCurrentLocation}
+        />
+      )}
       <ScrollView
         ref={scrollViewRef}
         style={styles.content}
@@ -2855,7 +3347,9 @@ export default function App() {
             onRandomPress={prepareConditionDraw}
             onAllRandomPress={prepareEverythingDraw}
             onTravelPress={prepareTravelDraw}
+            onAreaRandomPress={openAreaRandomConditions}
             onLocationPress={requestCurrentLocation}
+            onRequireRegistration={() => setStage('login')}
           />
         )}
         {activeTab === 'search' && (
@@ -2920,6 +3414,8 @@ export default function App() {
             history={randomHistory}
             drawHistories={drawHistories}
             savedRestaurants={savedRestaurants}
+            isPro={subscription.isPro}
+            onStartPro={subscription.startProPurchase}
             onAreaPress={() => setActiveTab('home')}
           />
         )}
@@ -2956,11 +3452,13 @@ function AppHeader({
 function LoginScreen({
   apiBaseUrlCandidates,
   uiText,
+  locationStatus,
   onApiConnected,
   onStart,
 }: {
   apiBaseUrlCandidates: string[];
   uiText: Record<string, string>;
+  locationStatus: string;
   onApiConnected: () => void;
   onStart: (userId?: string, displayName?: string) => void;
 }) {
@@ -3054,8 +3552,11 @@ function LoginScreen({
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.registerHeader}>
-          <Text style={styles.registerLogo}>RANDISH</Text>
-          <Text style={styles.registerSub}>京都府 / 近畿地方 / 全域 周辺から探します</Text>
+          <View style={styles.registerHeaderText}>
+            <Text style={styles.registerLogo}>RANDISH</Text>
+            <Text style={styles.registerSub}>{locationStatus}</Text>
+          </View>
+          <Image source={RANDISH_LOGO} style={styles.registerHeaderLogo} resizeMode="contain" />
         </View>
 
         <Text style={styles.registerTitle}>{uiText.registerTitle}</Text>
@@ -3182,11 +3683,12 @@ function RegisterSocialButton({ text, onPress }: { text: string; onPress: () => 
 function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { state: MealTicketState; compact?: boolean; uiText?: Record<string, string> }) {
   const midnightTicket = state.tickets.find((ticket) => ticket.key === 'midnight');
   const current = state.current;
+  const currentDisplay = getMealTicketDisplay(current, state, uiText);
   const ticketMeta = current.available
-    ? `${current.label}の一枚が使えます`
+    ? `${currentDisplay.label}${uiText.ticketCurrentReadySuffix}`
     : current.used
-      ? current.countdownLabel
-      : current.statusLabel;
+      ? currentDisplay.countdownLabel
+      : currentDisplay.statusLabel;
 
   return (
     <View style={[styles.mealTicketPanel, compact && styles.mealTicketPanelCompact]}>
@@ -3205,7 +3707,8 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
       <Text style={styles.mealTicketLead}>{ticketMeta}</Text>
       <View style={styles.mealTicketGrid}>
         {state.tickets.map((ticket) => {
-          const iconColor = ticket.available ? '#ffffff' : ticket.proOnly ? '#5d5be8' : ticket.accent;
+          const iconColor = ticket.available ? '#ffffff' : ticket.proOnly ? ORANGE : ticket.accent;
+          const ticketDisplay = getMealTicketDisplay(ticket, state, uiText);
           return (
             <View
               key={ticket.key}
@@ -3227,13 +3730,13 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
                   <Ionicons name={ticket.icon} size={compact ? 15 : 18} color={iconColor} />
                 </View>
                 <View style={styles.mealTicketTextBlock}>
-                  <Text style={[styles.mealTicketName, ticket.available && styles.mealTicketNameActive]}>{ticket.label}</Text>
+                  <Text style={[styles.mealTicketName, ticket.available && styles.mealTicketNameActive]}>{ticketDisplay.label}</Text>
                   <Text style={styles.mealTicketTime}>{ticket.timeLabel}</Text>
                 </View>
               </View>
               <View style={styles.mealTicketStatusRow}>
                 {(ticket.used || (ticket.proOnly && !state.isProUser)) && (
-                  <Ionicons name={ticket.used ? 'checkmark-circle' : 'lock-closed'} size={13} color={ticket.used ? '#8c8379' : '#5d5be8'} />
+                  <Ionicons name={ticket.used ? 'checkmark-circle' : 'lock-closed'} size={13} color={ticket.used ? '#8c8379' : ORANGE} />
                 )}
                 <Text
                   style={[
@@ -3243,10 +3746,10 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
                   ]}
                   numberOfLines={1}
                 >
-                  {ticket.statusLabel}
+                  {ticketDisplay.statusLabel}
                 </Text>
               </View>
-              {!compact && <Text style={styles.mealTicketCountdown} numberOfLines={1}>{ticket.countdownLabel}</Text>}
+              {!compact && <Text style={styles.mealTicketCountdown} numberOfLines={1}>{ticketDisplay.countdownLabel}</Text>}
             </View>
           );
         })}
@@ -3254,7 +3757,7 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
       {!compact && midnightTicket && (
         <View style={styles.mealTicketNightRail}>
           <View style={styles.mealTicketNightTitleRow}>
-            <Ionicons name="sparkles-outline" size={16} color="#5d5be8" />
+            <Ionicons name="sparkles-outline" size={16} color={ORANGE} />
             <Text style={styles.mealTicketNightTitle}>{uiText.proLateNightGenres}</Text>
           </View>
           <View style={styles.mealTicketNightChips}>
@@ -3302,7 +3805,9 @@ function HomeTab({
   onRandomPress,
   onAllRandomPress,
   onTravelPress,
+  onAreaRandomPress,
   onLocationPress,
+  onRequireRegistration,
 }: {
   area: string;
   genre: string;
@@ -3335,7 +3840,9 @@ function HomeTab({
   onRandomPress: () => void;
   onAllRandomPress: () => void;
   onTravelPress: () => void;
+  onAreaRandomPress: () => void;
   onLocationPress: () => void;
+  onRequireRegistration: () => void;
 }) {
   return (
     <View>
@@ -3361,8 +3868,10 @@ function HomeTab({
             onLocationPress={onLocationPress}
             onAllRandomPress={onAllRandomPress}
             onTravelPress={onTravelPress}
+            onAreaRandomPress={onAreaRandomPress}
             onConditionRandomPress={onRandomPress}
             onSubmit={onLoadRestaurants}
+            onRequireRegistration={onRequireRegistration}
           />
     </View>
   );
@@ -3416,8 +3925,10 @@ function HomeLocationPanel({
   onLocationPress,
   onAllRandomPress,
   onTravelPress,
+  onAreaRandomPress,
   onConditionRandomPress,
   onSubmit,
+  onRequireRegistration,
 }: {
   area: string;
   genre: string;
@@ -3440,8 +3951,10 @@ function HomeLocationPanel({
   onLocationPress: () => void;
   onAllRandomPress: () => void;
   onTravelPress: () => void;
+  onAreaRandomPress: () => void;
   onConditionRandomPress: () => void;
   onSubmit: () => void;
+  onRequireRegistration: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [showAllFavorites, setShowAllFavorites] = useState(false);
@@ -3553,7 +4066,7 @@ function HomeLocationPanel({
 
   const saveProfileName = () => {
     if (!isRegisteredUser) {
-      Alert.alert(t.lockedTitle, t.profileLockedMessage);
+      promptRegistration();
       return;
     }
     Keyboard.dismiss();
@@ -3561,9 +4074,25 @@ function HomeLocationPanel({
     onProfileNameChange(nextName || 'RANDISH Guest');
   };
 
+  const promptRegistration = () => {
+    Keyboard.dismiss();
+    Alert.alert(t.registrationPromptTitle, t.registrationPromptMessage, [
+      { text: t.registrationPromptCancel, style: 'cancel' },
+      {
+        text: t.registrationPromptAction,
+        onPress: () => {
+          setProfileEditorOpen(false);
+          setLanguageMenuOpen(false);
+          setAccountMenuOpen(false);
+          onRequireRegistration();
+        },
+      },
+    ]);
+  };
+
   const pickProfileImage = async () => {
     if (!isRegisteredUser) {
-      Alert.alert(t.lockedTitle, t.profilePhotoLockedMessage);
+      promptRegistration();
       return;
     }
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -3576,6 +4105,7 @@ function HomeLocationPanel({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
+      shape: 'oval',
       quality: 0.85,
     });
 
@@ -3622,7 +4152,7 @@ function HomeLocationPanel({
                 style={[styles.homeAccountMenuItem, !isRegisteredUser && styles.homeAccountMenuItemLocked]}
                 onPress={() => {
                   if (!isRegisteredUser) {
-                    Alert.alert(t.lockedTitle, t.profileLockedMessage);
+                    promptRegistration();
                     return;
                   }
                   setProfileEditorOpen((current) => !current);
@@ -3633,7 +4163,7 @@ function HomeLocationPanel({
                 </View>
                 <View style={styles.homeAccountMenuText}>
                   <Text style={styles.homeAccountMenuLabel}>{t.profile}</Text>
-                  <Text style={styles.homeAccountMenuValue}>{isRegisteredUser ? t.profileValue : t.profileLocked}</Text>
+                  <Text style={styles.homeAccountMenuValue}>{isRegisteredUser ? t.profileValue : t.profileRegisterCta}</Text>
                 </View>
                 <Ionicons name={isRegisteredUser && profileEditorOpen ? 'chevron-up' : 'lock-closed-outline'} size={16} color="#afa69b" />
               </Pressable>
@@ -3775,14 +4305,14 @@ function HomeLocationPanel({
               <View style={[styles.homeCurrentMapRoad, styles.homeCurrentMapRoadNarrow]} />
               <View style={[styles.homeCurrentMapWater, styles.homeCurrentMapWaterOne]} />
               <View style={styles.homeCurrentBadge}>
-                <Ionicons name={userLocation ? 'locate' : 'navigate'} size={13} color={userLocation ? '#2378ff' : ORANGE} />
-                <Text style={[styles.homeCurrentBadgeText, userLocation && styles.homeCurrentBadgeTextActive]}>
+                <Ionicons name={userLocation ? 'locate' : 'navigate'} size={10} color={ORANGE} />
+                <Text style={[styles.homeCurrentBadgeText, userLocation && styles.homeCurrentBadgeTextActive]} numberOfLines={1}>
                   {userLocation ? t.currentLocationActive : t.currentLocationTap}
                 </Text>
               </View>
               <View style={styles.homeCurrentMapPill}>
-                <Ionicons name="map-outline" size={13} color={INK} />
-                <Text style={styles.homeCurrentMapPillText}>{t.currentLocationMap}</Text>
+                <Ionicons name="map-outline" size={10} color={INK} />
+                <Text style={styles.homeCurrentMapPillText} numberOfLines={1}>{t.currentLocationMap}</Text>
               </View>
               <View style={styles.homeTargetMark}>
                 <View style={styles.homeTargetPulse} />
@@ -3803,7 +4333,7 @@ function HomeLocationPanel({
               <View style={styles.homeTravelTransportRail}>
                 {(['train-outline', 'boat-outline', 'bus-outline', 'airplane-outline', 'car-outline'] as const).map((icon) => (
                   <View key={icon} style={styles.homeTravelTransportIcon}>
-                    <Ionicons name={icon} size={13} color={INK} />
+                    <Ionicons name={icon} size={12} color={INK} />
                   </View>
                 ))}
               </View>
@@ -3814,13 +4344,17 @@ function HomeLocationPanel({
               </View>
               <View style={styles.homeTravelPrimaryCta}>
                 <Text style={styles.homeTravelPrimaryCtaText}>{t.travelCta}</Text>
-                <Ionicons name="arrow-forward" size={17} color="#ffffff" />
+                <Ionicons name="arrow-forward" size={14} color="#ffffff" />
               </View>
             </Pressable>
           </View>
 
           <View style={styles.homeSubsection}>
             <View style={styles.homeSubsectionHeader}>
+              <Pressable style={styles.homeRegionRandomButton} onPress={onAreaRandomPress}>
+                <Ionicons name="shuffle-outline" size={14} color={ORANGE} />
+                <Text style={styles.homeRegionRandomText}>{t.random}</Text>
+              </Pressable>
               <Ionicons name="map-outline" size={28} color={INK} />
               <Text style={styles.homeSubsectionTitle}>{t.chooseFromRegion}</Text>
             </View>
@@ -3972,11 +4506,24 @@ function FilterPanel({
   onSubmit: () => void;
 }) {
   const [showAllGenres, setShowAllGenres] = useState(false);
-  const randomState = conditionRandom ?? { budget: false, distance: false, genre: false };
+  const randomState = conditionRandom ?? { area: false, budget: false, distance: false, genre: false };
   const selectableGenres = compact ? genres.slice(1) : genres;
   const mainGenres = selectableGenres.slice(0, 12);
   const selectedHiddenGenre = selectableGenres.find((item) => item.label === genre && !mainGenres.some((mainGenre) => mainGenre.label === item.label));
   const visibleGenres = showAllGenres ? selectableGenres : selectedHiddenGenre ? [...mainGenres, selectedHiddenGenre] : mainGenres;
+  const selectArea = useCallback((value: string) => {
+    if (randomState.area) {
+      onRandomized?.('area');
+    }
+    onAreaChange(value);
+  }, [onAreaChange, onRandomized, randomState.area]);
+  const randomizeArea = useCallback(() => {
+    if (!randomState.area) {
+      const randomPreset = pickRandomTravelAreaPreset();
+      onAreaChange(getAreaPresetSearchValue(randomPreset));
+    }
+    onRandomized?.('area');
+  }, [onAreaChange, onRandomized, randomState.area]);
   const randomizeBudget = useCallback(() => {
     if (!randomState.budget) {
       onBudgetMinChange('0');
@@ -4015,9 +4562,27 @@ function FilterPanel({
         <>
           <View style={styles.locationField}>
             <Text style={styles.fieldIcon}>⌖</Text>
-            <TextInput value={area} onChangeText={onAreaChange} style={styles.locationInput} placeholder={uiText.areaInputPlaceholder} placeholderTextColor="#9b9184" />
+            <TextInput
+              value={randomState.area ? '？' : area}
+              onChangeText={selectArea}
+              editable={!randomState.area}
+              style={[styles.locationInput, randomState.area && styles.locationInputRandom]}
+              placeholder={uiText.areaInputPlaceholder}
+              placeholderTextColor="#9b9184"
+            />
+            <Pressable style={[styles.locationRandomButton, randomState.area && styles.locationRandomButtonActive]} onPress={randomizeArea}>
+              <Ionicons name="shuffle-outline" size={14} color={randomState.area ? '#ffffff' : ORANGE} />
+              <Text style={[styles.locationRandomButtonText, randomState.area && styles.locationRandomButtonTextActive]}>{uiText.random}</Text>
+            </Pressable>
           </View>
-          <AreaPresetPicker selectedArea={area} presets={areaPresets} onSelect={onAreaChange} uiText={uiText} />
+          {randomState.area ? (
+            <View style={styles.areaRandomHiddenCard}>
+              <Text style={styles.areaRandomHiddenTitle}>{uiText.areaHiddenTitle}</Text>
+              <Text style={styles.areaRandomHiddenLead}>{uiText.areaHiddenLead}</Text>
+            </View>
+          ) : (
+            <AreaPresetPicker selectedArea={area} presets={areaPresets} onSelect={selectArea} uiText={uiText} />
+          )}
         </>
       )}
       <View style={styles.filterGrid}>
@@ -4300,7 +4865,7 @@ function SearchTab({
   onAllRandomPress: () => void;
 }) {
   const isEverythingRandom = drawMode === 'everything';
-  const summaryBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax);
+  const summaryBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax, uiText);
   const summaryDistance = isEverythingRandom || conditionRandom.distance ? '？' : distance;
   const summaryGenre = isEverythingRandom || conditionRandom.genre ? '？' : genre;
 
@@ -4355,7 +4920,7 @@ function SearchTab({
       </View>
       <SectionHeader title={uiText.candidateList} action={`${restaurants.length}件`} />
       {restaurants.map((restaurant) => (
-        <RestaurantCard key={restaurant.id} restaurant={restaurant} />
+        <RestaurantCard key={restaurant.id} restaurant={restaurant} uiText={uiText} />
       ))}
       {restaurants.length > 0 && <HotPepperCredit />}
     </View>
@@ -4417,9 +4982,9 @@ function RandomTab({
   const canShowTravelGenre = !isTravelDraw || travelRevealStep === 'genre' || travelRevealStep === 'area' || travelRevealStep === 'restaurant';
   const canShowTravelArea = !isTravelDraw || travelRevealStep === 'area' || travelRevealStep === 'restaurant';
   const displayAreaBase = isTravelDraw && travelDisplayArea ? travelDisplayArea : area;
-  const displayArea = isEverythingRandom || (isTravelDraw && !canShowTravelArea) ? '？' : displayAreaBase;
+  const displayArea = isEverythingRandom || conditionRandom.area || (isTravelDraw && !canShowTravelArea) ? '？' : displayAreaBase;
   const displayGenre = isEverythingRandom || conditionRandom.genre || (isTravelDraw && !canShowTravelGenre) ? '？' : genre;
-  const displayBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax);
+  const displayBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax, uiText);
   const displayDistance = isEverythingRandom || conditionRandom.distance || (isTravelDraw && !canShowTravelArea) ? '？' : distance;
   const currentTicket = mealTicketState.current;
   const ticketAvailable = currentTicket.available;
@@ -4460,21 +5025,21 @@ function RandomTab({
   const resultTranslateY = resultRevealValue.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
   const mapPins = [
     { top: 22, left: 91, color: '#ea4335' },
-    { top: 51, left: 153, color: '#fbbc04' },
-    { top: 122, left: 166, color: '#34a853' },
-    { top: 160, left: 72, color: '#4285f4' },
+    { top: 51, left: 153, color: '#f0b43c' },
+    { top: 122, left: 166, color: '#4f7f58' },
+    { top: 160, left: 72, color: '#9b6b43' },
     { top: 90, left: 27, color: '#f05a28' },
-    { top: 36, left: 50, color: '#7c5cff' },
-    { top: 153, left: 132, color: '#00a884' },
+    { top: 36, left: 50, color: '#171411' },
+    { top: 153, left: 132, color: '#b26a35' },
   ];
   const roulettePockets = [
     { label: '1', top: 8, left: 101, color: ORANGE },
-    { label: '2', top: 27, left: 155, color: '#4285f4' },
+    { label: '2', top: 27, left: 155, color: '#9b6b43' },
     { label: '3', top: 80, left: 181, color: '#34a853' },
     { label: '4', top: 136, left: 166, color: '#fbbc04' },
     { label: '5', top: 171, left: 105, color: '#ea4335' },
     { label: '6', top: 150, left: 43, color: '#00a884' },
-    { label: '7', top: 88, left: 16, color: '#7c5cff' },
+    { label: '7', top: 88, left: 16, color: '#171411' },
     { label: '8', top: 29, left: 46, color: '#f05a28' },
   ];
   const rouletteLabels = [
@@ -4526,8 +5091,8 @@ function RandomTab({
                 <Text style={styles.roulettePocketText}>{pocket.label}</Text>
               </View>
             ))}
-            {rouletteLabels.map((label) => (
-              <View key={label.text} style={[styles.rouletteLabelChip, label.style]}>
+            {rouletteLabels.map((label, index) => (
+              <View key={`${index}-${label.text}`} style={[styles.rouletteLabelChip, label.style]}>
                 <Text style={styles.rouletteLabelText} numberOfLines={1}>{label.text}</Text>
               </View>
             ))}
@@ -4631,10 +5196,259 @@ function SaveTab({ savedRestaurants, history, uiText }: { savedRestaurants: Rest
           <Text style={styles.emptyText}>{uiText.savedEmptyText}</Text>
         </View>
       ) : (
-        savedRestaurants.map((restaurant) => <RestaurantCard key={`${restaurant.id}-saved`} restaurant={restaurant} />)
+        savedRestaurants.map((restaurant) => <RestaurantCard key={`${restaurant.id}-saved`} restaurant={restaurant} uiText={uiText} />)
       )}
       <HistorySection history={history} uiText={uiText} />
       {(savedRestaurants.length > 0 || history.length > 0) && <HotPepperCredit />}
+    </View>
+  );
+}
+
+function ProBadge({ label = 'Pro', dark = false }: { label?: string; dark?: boolean }) {
+  return (
+    <View style={[styles.proBadge, dark && styles.proBadgeDark]}>
+      <Text style={[styles.proBadgeText, dark && styles.proBadgeTextDark]}>{label}</Text>
+    </View>
+  );
+}
+
+function ProTeaserCard({ isPro, onPress }: { isPro: boolean; onPress: () => void }) {
+  return (
+    <View style={styles.proTeaserCard}>
+      <View style={styles.proTeaserTopRow}>
+        <View style={styles.proTeaserBrandRow}>
+          <View style={styles.proTeaserLogoBadge}>
+            <Image source={RANDISH_LOGO} style={styles.proTeaserLogo} resizeMode="contain" />
+          </View>
+          <Text style={styles.proTeaserLabel}>RANDISH PRO</Text>
+        </View>
+        <View style={styles.proTeaserChip}>
+          <Ionicons name="receipt-outline" size={13} color={ORANGE} />
+          <Text style={styles.proTeaserChipText}>あとから見返す</Text>
+        </View>
+      </View>
+      <Text style={styles.proTeaserTitle}>{isPro ? '過去の傾向を、残して見る。' : '今月だけで終わらせない。'}</Text>
+      <Text style={styles.proTeaserLead}>
+        {isPro
+          ? '過去の抽選・外食費・ジャンル傾向を保存して見返せます。'
+          : 'Proなら、過去の抽選・外食費・ジャンル傾向を残して見返せます。'}
+      </Text>
+      <Pressable style={[styles.proTeaserButton, isPro && styles.proTeaserButtonActive]} onPress={onPress}>
+        <Text style={[styles.proTeaserButtonText, isPro && styles.proTeaserButtonTextActive]}>
+          {isPro ? 'Pro有効' : 'Pro機能をみる'}
+        </Text>
+        {!isPro && <Ionicons name="arrow-forward" size={15} color={ORANGE} />}
+      </Pressable>
+      <View pointerEvents="none" style={styles.proTeaserArt}>
+        <View style={[styles.proTeaserRoad, styles.proTeaserRoadOne]} />
+        <View style={[styles.proTeaserRoad, styles.proTeaserRoadTwo]} />
+        <View style={styles.proTeaserPin}>
+          <View style={styles.proTeaserPinCore} />
+        </View>
+        <View style={styles.proTeaserChart}>
+          <View style={[styles.proTeaserChartBar, styles.proTeaserChartBarOne]} />
+          <View style={[styles.proTeaserChartBar, styles.proTeaserChartBarTwo]} />
+          <View style={[styles.proTeaserChartBar, styles.proTeaserChartBarThree]} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function ProFeatureCard({
+  icon,
+  title,
+  description,
+  value,
+  detailLines = [],
+  isPro,
+  onPress,
+  children,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  description: string;
+  value?: string;
+  detailLines?: string[];
+  isPro: boolean;
+  onPress: () => void;
+  children?: any;
+}) {
+  return (
+    <Pressable style={[styles.proFeatureCard, isPro && styles.proFeatureCardUnlocked]} onPress={isPro ? undefined : onPress}>
+      <View style={styles.proFeatureHeader}>
+        <View style={styles.proFeatureIcon}>
+          <Ionicons name={icon} size={21} color={isPro ? ORANGE : INK} />
+        </View>
+        {isPro ? <ProBadge /> : (
+          <View style={styles.proFeatureLock}>
+            <Ionicons name="lock-closed-outline" size={14} color={ORANGE} />
+            <Text style={styles.proFeatureLockText}>Proで表示</Text>
+          </View>
+        )}
+      </View>
+      <Text style={styles.proFeatureTitle}>{title}</Text>
+      <Text style={styles.proFeatureValue} numberOfLines={2}>{isPro ? (value ?? '分析中') : 'Proで表示'}</Text>
+      <Text style={styles.proFeatureDescription}>{description}</Text>
+      {isPro && detailLines.map((line) => (
+        <Text key={line} style={styles.proFeatureDetail} numberOfLines={1}>{line}</Text>
+      ))}
+      {isPro && children}
+    </Pressable>
+  );
+}
+
+function ProMonthBars({ items }: { items: MonthlyAnalytics[] }) {
+  const max = Math.max(...items.map((item) => item.estimatedSpend), 1);
+  return (
+    <View style={styles.proMonthBars}>
+      {items.map((item) => {
+        const percent = item.estimatedSpend > 0 ? Math.max(16, Math.round((item.estimatedSpend / max) * 100)) : 0;
+        return (
+          <View key={`${item.monthDate.getFullYear()}-${item.monthDate.getMonth()}`} style={styles.proMonthBarItem}>
+            <View style={styles.proMonthBarTrack}>
+              <View style={[styles.proMonthBarFill, { height: `${percent}%` }]} />
+            </View>
+            <Text style={styles.proMonthBarLabel}>{item.monthLabel}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function ProPaywall({
+  visible,
+  title,
+  message,
+  onStartPro,
+  onClose,
+}: {
+  visible: boolean;
+  title?: string;
+  message?: string;
+  onStartPro: () => void;
+  onClose: () => void;
+}) {
+  const features = ['先月との差がわかる', '過去月の分析を保存', 'ジャンル別の傾向を確認', '価格帯ごとの傾向を確認', '保存した店を分析'];
+
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+      <View style={styles.proPaywallBackdrop}>
+        <View style={styles.proPaywallCard}>
+          <View style={styles.proPaywallHeader}>
+            <View>
+              <Text style={styles.proPaywallKicker}>RANDISH PRO</Text>
+              <Text style={styles.proPaywallTitle}>今月だけで終わらせない。</Text>
+            </View>
+            <Pressable style={styles.proPaywallClose} onPress={onClose}>
+              <Ionicons name="close" size={21} color={INK} />
+            </Pressable>
+          </View>
+          <Text style={styles.proPaywallContextTitle}>{title ?? 'RANDISH PRO'}</Text>
+          <Text style={styles.proPaywallLead}>
+            {message ?? '過去の抽選・外食費・ジャンル傾向を残して見返せます。'}
+          </Text>
+          <View style={styles.proPaywallFeatureList}>
+            {features.map((feature) => (
+              <View key={feature} style={styles.proPaywallFeatureRow}>
+                <Ionicons name="checkmark-circle" size={18} color={ORANGE} />
+                <Text style={styles.proPaywallFeatureText}>{feature}</Text>
+              </View>
+            ))}
+          </View>
+          <Pressable
+            style={styles.proPaywallPrimaryButton}
+            onPress={() => {
+              onStartPro();
+              onClose();
+            }}
+          >
+            <Text style={styles.proPaywallPrimaryText}>RANDISH PROを始める</Text>
+          </Pressable>
+          <Pressable style={styles.proPaywallSecondaryButton} onPress={onClose}>
+            <Text style={styles.proPaywallSecondaryText}>あとで</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const ANALYSIS_DONUT_COLORS = ['#f05a28', '#f2a51a', '#9b6b43', '#4f7f58', '#d89a68'];
+
+function GenreSpendDonut({
+  items,
+  totalLabel,
+}: {
+  items: AnalyticsTrendItem[];
+  totalLabel: string;
+}) {
+  const spendItems = items
+    .filter((item) => item.estimatedSpend > 0)
+    .sort((a, b) => b.estimatedSpend - a.estimatedSpend);
+  const topItems = spendItems.slice(0, 4);
+  const restSpend = spendItems.slice(4).reduce((total, item) => total + item.estimatedSpend, 0);
+  const chartItems = restSpend > 0
+    ? [...topItems, { label: 'その他', count: 0, estimatedSpend: restSpend }]
+    : topItems;
+  const totalSpend = chartItems.reduce((total, item) => total + item.estimatedSpend, 0);
+
+  if (!totalSpend) {
+    return (
+      <View style={styles.analysisDonutEmpty}>
+        <Ionicons name="pie-chart-outline" size={28} color={ORANGE} />
+        <Text style={styles.analysisDonutEmptyText}>推定できる予算データがまだありません。</Text>
+      </View>
+    );
+  }
+
+  const primaryColor = ANALYSIS_DONUT_COLORS[0];
+  const primaryPercent = Math.round((chartItems[0].estimatedSpend / totalSpend) * 100);
+
+  return (
+    <View style={styles.analysisDonutPanel}>
+      <View style={styles.analysisDonutChart}>
+        <View style={[styles.analysisDonutRing, { borderColor: primaryColor }]}>
+          {chartItems.slice(1, 4).map((item, index) => (
+            <View
+              key={item.label}
+              style={[
+                styles.analysisDonutAccent,
+                index === 0 && styles.analysisDonutAccentOne,
+                index === 1 && styles.analysisDonutAccentTwo,
+                index === 2 && styles.analysisDonutAccentThree,
+                { backgroundColor: ANALYSIS_DONUT_COLORS[(index + 1) % ANALYSIS_DONUT_COLORS.length] },
+              ]}
+            />
+          ))}
+        </View>
+        <View style={styles.analysisDonutCenter}>
+          <Text style={styles.analysisDonutCenterLabel}>今月</Text>
+          <Text style={styles.analysisDonutCenterValue} numberOfLines={1}>{totalLabel}</Text>
+        </View>
+        <View style={styles.analysisDonutShareBadge}>
+          <Text style={styles.analysisDonutShareText}>{primaryPercent}%</Text>
+        </View>
+      </View>
+      <View style={styles.analysisDonutLegend}>
+        {chartItems.map((item, index) => {
+          const color = ANALYSIS_DONUT_COLORS[index % ANALYSIS_DONUT_COLORS.length];
+          const percent = Math.round((item.estimatedSpend / totalSpend) * 100);
+          return (
+            <View key={`${item.label}-${index}`} style={styles.analysisDonutLegendRow}>
+              <View style={[styles.analysisDonutLegendDot, { backgroundColor: color }]} />
+              <View style={styles.analysisDonutLegendBody}>
+                <Text style={styles.analysisDonutLegendLabel} numberOfLines={1}>{item.label}</Text>
+                <Text style={styles.analysisDonutLegendMeta}>{percent}% / 約{formatYen(item.estimatedSpend)}</Text>
+                <View style={styles.analysisDonutLegendTrack}>
+                  <View style={[styles.analysisDonutLegendFill, { width: `${percent}%`, backgroundColor: color }]} />
+                </View>
+              </View>
+            </View>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -4647,6 +5461,8 @@ function AnalyticsTab({
   history,
   drawHistories,
   savedRestaurants,
+  isPro,
+  onStartPro,
   onAreaPress,
 }: {
   uiText: Record<string, string>;
@@ -4656,16 +5472,17 @@ function AnalyticsTab({
   history: Restaurant[];
   drawHistories: DrawHistoryEntry[];
   savedRestaurants: Restaurant[];
+  isPro: boolean;
+  onStartPro: () => void;
   onAreaPress: () => void;
 }) {
-  const monthDate = useMemo(() => new Date(), []);
-  const monthLabel = `${monthDate.getMonth() + 1}月`;
+  const [paywallContext, setPaywallContext] = useState<{ title: string; message: string } | null>(null);
+  const [spendOpen, setSpendOpen] = useState(false);
+  const now = useMemo(() => new Date(), []);
 
-  const monthlyDraws = useMemo(() => {
-    const month = new Date();
-    const currentMonthEntries = drawHistories.filter((entry) => isSameMonth(entry.createdAt, month));
+  const analyticsEntries = useMemo(() => {
     if (drawHistories.length || !history.length) {
-      return currentMonthEntries;
+      return drawHistories;
     }
     const createdAt = new Date().toISOString();
     return history.map((restaurant, index) => ({
@@ -4675,46 +5492,30 @@ function AnalyticsTab({
     }));
   }, [drawHistories, history]);
 
-  const budgetValues = useMemo(
-    () => monthlyDraws
-      .map((entry) => getEstimatedBudget(entry.restaurant))
-      .filter((value): value is number => value != null),
-    [monthlyDraws],
+  const currentAnalytics = useMemo(() => getCurrentMonthAnalytics(analyticsEntries, now), [analyticsEntries, now]);
+  const comparison = useMemo(() => getPreviousMonthComparison(analyticsEntries, now), [analyticsEntries, now]);
+  const savedAnalytics = useMemo(() => getSavedRestaurantAnalytics(savedRestaurants), [savedRestaurants]);
+  const monthSeries = useMemo(
+    () => [5, 4, 3, 2, 1, 0].map((offset) => getMonthlyAnalytics(analyticsEntries, addMonthsToStart(now, -offset))),
+    [analyticsEntries, now],
   );
 
-  const monthlyEstimatedTotal = budgetValues.reduce((total, value) => total + value, 0);
-  const monthlyTotalLabel = budgetValues.length ? `約${formatYen(monthlyEstimatedTotal)}` : '0円';
-  const averageBudgetLabel = budgetValues.length ? `約${formatYen(monthlyEstimatedTotal / budgetValues.length)}` : '0円';
+  const monthlyTotalLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.estimatedSpend)}` : '0円';
+  const averageBudgetLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.averageBudget)}` : '0円';
+  const topPriceRange = currentAnalytics.priceRangeAnalytics[0]?.label ?? 'まだなし';
+  const topSavedGenre = savedAnalytics.genreAnalytics[0]?.label ?? 'まだなし';
+  const topSavedPrice = savedAnalytics.priceRangeAnalytics[0]?.label ?? 'まだなし';
 
-  const topGenre = useMemo(() => {
-    const counts = monthlyDraws.reduce<Record<string, number>>((current, entry) => {
-      const restaurant = entry.restaurant;
-      current[restaurant.genre] = (current[restaurant.genre] ?? 0) + 1;
-      return current;
-    }, {});
-    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'まだなし';
-  }, [monthlyDraws]);
+  const openPaywall = useCallback((title = 'RANDISH PRO', message = '過去の抽選・外食費・ジャンル傾向を残して見返せます。') => {
+    setPaywallContext({ title, message });
+  }, []);
 
-  const weekSpends = useMemo(() => {
-    const buckets = [0, 0, 0, 0, 0];
-    monthlyDraws.forEach((entry) => {
-      const date = new Date(entry.createdAt);
-      const budget = getEstimatedBudget(entry.restaurant);
-      if (Number.isNaN(date.getTime()) || budget == null) {
-        return;
-      }
-      const weekIndex = Math.min(4, Math.floor((date.getDate() - 1) / 7));
-      buckets[weekIndex] += budget;
-    });
-    const max = Math.max(...buckets, 1);
-    return buckets.map((amount, index) => ({
-      label: `${index + 1}週`,
-      amount,
-      percent: amount > 0 ? Math.max(18, Math.round((amount / max) * 100)) : 0,
-    }));
-  }, [monthlyDraws]);
-
-  const recentDraws = monthlyDraws.slice(0, 3);
+  const openGenrePaywall = useCallback(() => {
+    openPaywall(
+      'ジャンル別の傾向はPro機能です。',
+      '過去の抽選から、よく出るジャンル・価格帯・保存傾向を確認できます。',
+    );
+  }, [openPaywall]);
 
   const stats: Array<{
     label: string;
@@ -4722,9 +5523,9 @@ function AnalyticsTab({
     sub: string;
     icon: keyof typeof MaterialCommunityIcons.glyphMap;
   }> = [
-    { label: '今月の抽選', value: `${monthlyDraws.length}回`, sub: `${monthLabel}だけ表示`, icon: 'dice-5-outline' },
+    { label: '今月の抽選', value: `${currentAnalytics.drawCount}回`, sub: `${currentAnalytics.monthLabel}だけ表示`, icon: 'dice-5-outline' },
     { label: '保存した店', value: `${savedRestaurants.length}件`, sub: '無料で確認', icon: 'bookmark-outline' },
-    { label: 'よく出るジャンル', value: topGenre, sub: `${monthLabel}の傾向`, icon: 'silverware-fork-knife' },
+    { label: 'よく出るジャンル', value: currentAnalytics.topGenre, sub: `${currentAnalytics.monthLabel}の傾向`, icon: 'silverware-fork-knife' },
     { label: '平均単価', value: averageBudgetLabel, sub: '店の平均予算', icon: 'currency-jpy' },
   ];
 
@@ -4739,17 +5540,6 @@ function AnalyticsTab({
 
   return (
     <View style={styles.analysisScreen}>
-      <View style={styles.analysisHeader}>
-        <View style={styles.analysisHeaderText}>
-          <Text style={styles.analysisBrand}>RANDISH</Text>
-          <Text style={styles.analysisAreaCopy}>{locationStatus}</Text>
-        </View>
-        <Pressable style={styles.analysisAreaPill} onPress={onAreaPress}>
-          <Ionicons name="locate-outline" size={18} color={ORANGE} />
-          <Text style={styles.analysisAreaText} numberOfLines={1}>{area}</Text>
-        </Pressable>
-      </View>
-
       <View style={styles.analysisTitleBlock}>
         <View style={styles.analysisTitleRow}>
           <View style={styles.analysisTitleBar} />
@@ -4758,6 +5548,8 @@ function AnalyticsTab({
         <Text style={styles.analysisLead}>{uiText.analyticsLead}</Text>
       </View>
 
+      <ProTeaserCard isPro={isPro} onPress={isPro ? () => undefined : () => openPaywall()} />
+
       <View style={styles.analysisFreeCard}>
         <View style={styles.analysisFreeTopRow}>
           <View>
@@ -4765,52 +5557,35 @@ function AnalyticsTab({
             <Text style={styles.analysisFreeTitle}>今月の推定外食費</Text>
           </View>
           <View style={styles.analysisFreeBadge}>
-            <Text style={styles.analysisFreeBadgeText}>{monthLabel}</Text>
+            <Text style={styles.analysisFreeBadgeText}>{currentAnalytics.monthLabel}</Text>
           </View>
         </View>
         <Text style={styles.analysisFreeAmount} numberOfLines={1}>{monthlyTotalLabel}</Text>
-        <Text style={styles.analysisFreeText}>
-          抽選で出た店の平均予算を自動で合計しています。手入力なしで、ざっくり支出を見られます。
-        </Text>
-
-        <View style={styles.analysisSpendBars}>
-          {weekSpends.map((item) => (
-            <View key={item.label} style={styles.analysisSpendBarItem}>
-              <Text style={styles.analysisSpendBarAmount} numberOfLines={1}>
-                {item.amount ? formatYen(item.amount).replace('円', '') : '0'}
-              </Text>
-              <View style={styles.analysisSpendBarTrack}>
-                <View style={[styles.analysisSpendBarFill, { height: `${item.percent}%` }]} />
-              </View>
-              <Text style={styles.analysisSpendBarLabel}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.analysisFreeMetaRow}>
-          <View style={styles.analysisFreeMetaItem}>
-            <Text style={styles.analysisFreeMetaLabel}>計算方法</Text>
-            <Text style={styles.analysisFreeMetaValue}>平均予算</Text>
-          </View>
-          <View style={styles.analysisFreeMetaItem}>
-            <Text style={styles.analysisFreeMetaLabel}>対象</Text>
-            <Text style={styles.analysisFreeMetaValue}>{monthLabel}の抽選結果</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.analysisPremiumHero}>
-        <Text style={styles.analysisPremiumLabel}>RANDISH PRO</Text>
-        <Text style={styles.analysisPremiumTitle}>先月との差まで、{'\n'}残して見る。</Text>
-        <Text style={styles.analysisPremiumLead}>
-          Freeは今月分だけ。Proなら過去月を保存して、{'\n'}先月より何円増えたか、節約できたかを見られます。
-        </Text>
-        <Pressable style={styles.analysisBillingButton}>
-          <Text style={styles.analysisBillingText}>Pro予定</Text>
+        <Pressable style={styles.analysisFreeToggle} onPress={() => setSpendOpen((current) => !current)}>
+          <Text style={styles.analysisFreeToggleText}>{spendOpen ? '閉じる' : '内訳を見る'}</Text>
+          <Ionicons name={spendOpen ? 'chevron-up' : 'chevron-down'} size={16} color={ORANGE} />
         </Pressable>
-        <View style={styles.analysisPremiumIcon}>
-          <Ionicons name="bar-chart" size={86} color="#ffffff" />
-        </View>
+
+        {spendOpen && (
+          <>
+            <Text style={styles.analysisFreeText}>
+              抽選で出た店の平均予算を自動で合計しています。手入力なしで、ざっくり支出を見られます。
+            </Text>
+
+            <GenreSpendDonut items={currentAnalytics.genreAnalytics} totalLabel={monthlyTotalLabel} />
+
+            <View style={styles.analysisFreeMetaRow}>
+              <View style={styles.analysisFreeMetaItem}>
+                <Text style={styles.analysisFreeMetaLabel}>計算方法</Text>
+                <Text style={styles.analysisFreeMetaValue}>平均予算</Text>
+              </View>
+              <View style={styles.analysisFreeMetaItem}>
+                <Text style={styles.analysisFreeMetaLabel}>対象</Text>
+                <Text style={styles.analysisFreeMetaValue}>{currentAnalytics.monthLabel}の抽選結果</Text>
+              </View>
+            </View>
+          </>
+        )}
       </View>
 
       <View style={styles.analysisStatsGrid}>
@@ -4824,22 +5599,73 @@ function AnalyticsTab({
         ))}
       </View>
 
+      <View style={styles.proFeatureGrid}>
+        <ProFeatureCard
+          icon="swap-vertical-outline"
+          title="先月との差"
+          description="先月より何円増えたか、節約できたかを見られます。"
+          value={comparison.label}
+          detailLines={[`先月: 約${formatYen(comparison.previous.estimatedSpend)}`, `今月: 約${formatYen(comparison.current.estimatedSpend)}`]}
+          isPro={isPro}
+          onPress={() => openPaywall('先月との差はPro機能です。', '先月より何円増えたか、節約できたかを見られます。')}
+        />
+        <ProFeatureCard
+          icon="bar-chart-outline"
+          title="月別の推定外食費"
+          description="過去月の分析を保存して、外食費の流れを見返せます。"
+          value={`今月 約${formatYen(currentAnalytics.estimatedSpend)}`}
+          isPro={isPro}
+          onPress={() => openPaywall('月別グラフはPro機能です。', '過去月の抽選結果と推定外食費を残して見返せます。')}
+        >
+          <ProMonthBars items={monthSeries} />
+        </ProFeatureCard>
+        <ProFeatureCard
+          icon="restaurant-outline"
+          title="ジャンル別傾向"
+          description="よく出るジャンルや偏りを確認できます。"
+          value={currentAnalytics.topGenre}
+          detailLines={currentAnalytics.genreAnalytics.slice(0, 3).map((item) => `${item.label}: ${item.count}回`)}
+          isPro={isPro}
+          onPress={openGenrePaywall}
+        />
+        <ProFeatureCard
+          icon="cash-outline"
+          title="価格帯の傾向"
+          description="抽選された店の価格帯を月ごとに確認できます。"
+          value={topPriceRange}
+          detailLines={currentAnalytics.priceRangeAnalytics.slice(0, 3).map((item) => `${item.label}: ${item.count}回`)}
+          isPro={isPro}
+          onPress={() => openPaywall('価格帯の傾向はPro機能です。', '抽選された店の価格帯を月ごとに確認できます。')}
+        />
+        <ProFeatureCard
+          icon="bookmark-outline"
+          title="保存した店の分析"
+          description="保存した店のジャンルや価格帯を見返せます。"
+          value={`${savedAnalytics.totalSaved}件保存`}
+          detailLines={[`ジャンル: ${topSavedGenre}`, `価格帯: ${topSavedPrice}`]}
+          isPro={isPro}
+          onPress={() => openPaywall('保存した店の分析はPro機能です。', '保存した店のジャンルや価格帯を見返せます。')}
+        />
+      </View>
+
       <View style={styles.analysisHistoryCard}>
         <View style={styles.analysisHistoryHeader}>
           <Text style={styles.analysisHistoryTitle}>今月の抽選結果</Text>
-          <View style={styles.analysisPremiumMark}>
-            <Ionicons name="lock-closed-outline" size={15} color={INK} />
-            <Text style={styles.analysisPremiumMarkText}>先月はPro</Text>
-          </View>
+          {isPro ? <ProBadge label="Pro保存中" /> : (
+            <Pressable style={styles.analysisProMark} onPress={() => openPaywall('過去月の履歴保存はPro機能です。', 'Freeでは今月分だけ。Proなら過去月の抽選履歴を見返せます。')}>
+              <Ionicons name="lock-closed-outline" size={15} color={INK} />
+              <Text style={styles.analysisProMarkText}>先月はPro</Text>
+            </Pressable>
+          )}
         </View>
 
-        {recentDraws.length === 0 ? (
+        {currentAnalytics.recentDraws.length === 0 ? (
           <View style={styles.analysisHistoryEmpty}>
             <Ionicons name="receipt-outline" size={28} color="#9a9187" />
             <Text style={styles.analysisHistoryEmptyText}>今月の抽選結果が入ると、ここに推定予算が並びます。</Text>
           </View>
         ) : (
-          recentDraws.map((entry) => {
+          currentAnalytics.recentDraws.map((entry) => {
             const budget = getEstimatedBudget(entry.restaurant);
             return (
               <View key={entry.id} style={styles.analysisHistoryRow}>
@@ -4858,17 +5684,17 @@ function AnalyticsTab({
       <View style={styles.analysisGenreCard}>
         <View style={styles.analysisGenreHeader}>
           <Text style={styles.analysisGenreTitle}>ジャンル傾向</Text>
-          <View style={styles.analysisPremiumMark}>
-            <Ionicons name="diamond" size={15} color={INK} />
-            <Text style={styles.analysisPremiumMarkText}>Premium</Text>
-          </View>
+          <ProBadge />
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.analysisGenreRail}>
-          {trendGenres.map((genre, index) => {
-            const active = index === trendGenres.length - 1;
+          {(isPro && currentAnalytics.genreAnalytics.length
+            ? currentAnalytics.genreAnalytics.slice(0, 6).map((item) => ({ label: `${item.label} ${item.count}`, icon: 'silverware-fork-knife' as keyof typeof MaterialCommunityIcons.glyphMap }))
+            : trendGenres
+          ).map((genre, index) => {
+            const active = isPro ? index === 0 : index === trendGenres.length - 1;
             return (
-              <Pressable key={genre.label} style={[styles.analysisGenrePill, active && styles.analysisGenrePillActive]}>
+              <Pressable key={genre.label} style={[styles.analysisGenrePill, active && styles.analysisGenrePillActive]} onPress={isPro ? undefined : openGenrePaywall}>
                 <MaterialCommunityIcons name={genre.icon} size={28} color={active ? '#ffffff' : INK} />
                 <Text style={[styles.analysisGenreLabel, active && styles.analysisGenreLabelActive]}>{genre.label}</Text>
               </Pressable>
@@ -4879,16 +5705,25 @@ function AnalyticsTab({
         <View style={styles.analysisInsightPanel}>
           <Ionicons name="analytics-outline" size={74} color="#444444" />
           <View style={styles.analysisInsightCopy}>
-            <Text style={styles.analysisInsightTitle}>プレミアムで傾向を可視化</Text>
+            <Text style={styles.analysisInsightTitle}>{isPro ? 'ジャンル傾向を表示中' : 'Proで傾向を可視化'}</Text>
             <Text style={styles.analysisInsightText}>
-              ジャンルごとの出現頻度や、保存率などのデータをグラフで確認できます。
+              {isPro
+                ? '今月の抽選から、よく出るジャンルや偏りを確認できます。'
+                : 'ジャンルごとの出現頻度や、保存率などのデータをグラフで確認できます。'}
             </Text>
-            <Pressable style={styles.analysisInsightButton}>
-              <Text style={styles.analysisInsightButtonText}>プレミアム機能をみる</Text>
+            <Pressable style={styles.analysisInsightButton} onPress={isPro ? undefined : openGenrePaywall}>
+              <Text style={styles.analysisInsightButtonText}>{isPro ? 'Proで表示中' : 'Pro機能をみる'}</Text>
             </Pressable>
           </View>
         </View>
       </View>
+      <ProPaywall
+        visible={paywallContext != null}
+        title={paywallContext?.title}
+        message={paywallContext?.message}
+        onStartPro={onStartPro}
+        onClose={() => setPaywallContext(null)}
+      />
     </View>
   );
 }
@@ -4922,10 +5757,13 @@ function ResultCard({
   onMapPress: () => void;
 }) {
   const stationOrigin = getNearestStationOrigin(restaurant);
-  const stationDistanceLabel = stationOrigin ? getDistanceLabel(stationOrigin.location, restaurant) : uiText.mapCheck;
-  const currentDistanceLabel = userLocation ? getDistanceLabel(userLocation, restaurant) : uiText.loading;
-  const minutesLabel = getWalkingMinutesLabel(stationOrigin?.location ?? distanceOrigin.location, restaurant);
-  const miniMapDistanceLabel = stationOrigin ? `${stationOrigin.label} ${stationDistanceLabel}` : stationDistanceLabel;
+  const stationLocation = stationOrigin?.location ?? null;
+  const stationDistanceLabel = stationLocation ? getDistanceLabel(stationLocation, restaurant, uiText) : uiText.mapCheck;
+  const currentDistanceLabel = userLocation ? getDistanceLabel(userLocation, restaurant, uiText) : uiText.loading;
+  const minutesLabel = getWalkingMinutesLabel(stationLocation ?? distanceOrigin.location, restaurant, uiText);
+  const stationLabel = stationLocation ? formatStationOriginLabelForUi(stationLocation.label, uiText) : uiText.nearestStationFrom;
+  const miniMapDistanceLabel = stationLocation ? `${stationLabel} ${stationDistanceLabel}` : stationDistanceLabel;
+  const priceLabel = formatPrice(restaurant, uiText);
   const openStatus = getOpenStatus(restaurant);
 
   return (
@@ -4936,7 +5774,7 @@ function ResultCard({
         <View style={styles.resultDistanceBand}>
           <View style={styles.resultDistanceList}>
             <View style={styles.resultDistanceItem}>
-              <Text style={styles.resultDistanceLabel}>{stationOrigin?.label ?? uiText.nearestStationFrom}</Text>
+              <Text style={styles.resultDistanceLabel}>{stationLabel}</Text>
               <Text style={styles.resultDistanceValue}>{stationDistanceLabel}</Text>
             </View>
             <View style={styles.resultDistanceItem}>
@@ -4951,7 +5789,7 @@ function ResultCard({
         <View style={styles.metaRow}>
           {selectedGenre !== 'すべて' && <MetaPill label={`${uiText.selectedPrefix} ${selectedGenre}`} />}
           <MetaPill label={`API ${restaurant.genre}`} />
-          <MetaPill label={restaurant.priceRange ?? formatPrice(restaurant)} />
+          <MetaPill label={priceLabel} />
           <MetaPill label={minutesLabel} />
         </View>
         <View style={styles.ratingRow}>
@@ -5001,7 +5839,7 @@ function MiniGoogleMap({
   );
 }
 
-function RestaurantCard({ restaurant }: { restaurant: Restaurant }) {
+function RestaurantCard({ restaurant, uiText = UI_TEXT.ja }: { restaurant: Restaurant; uiText?: Record<string, string> }) {
   return (
     <View style={styles.restaurantCard}>
       <View style={styles.restaurantThumbWrap}>
@@ -5014,15 +5852,15 @@ function RestaurantCard({ restaurant }: { restaurant: Restaurant }) {
         </View>
         <Text style={styles.restaurantSub} numberOfLines={1}>{restaurant.area} / {restaurant.genre}</Text>
         <View style={styles.restaurantMetaRow}>
-          <Text style={styles.restaurantMetaPill}>{getStoredMinutesLabel(restaurant)}</Text>
-          <Text style={styles.restaurantMetaPill}>{restaurant.priceRange ?? formatPrice(restaurant)}</Text>
+          <Text style={styles.restaurantMetaPill}>{getStoredMinutesLabel(restaurant, uiText)}</Text>
+          <Text style={styles.restaurantMetaPill}>{formatPrice(restaurant, uiText)}</Text>
         </View>
       </View>
     </View>
   );
 }
 
-function CandidateCard({ restaurant }: { restaurant: Restaurant }) {
+function CandidateCard({ restaurant, uiText = UI_TEXT.ja }: { restaurant: Restaurant; uiText?: Record<string, string> }) {
   return (
     <View style={styles.candidateCard}>
       <View style={styles.candidateImageWrap}>
@@ -5039,8 +5877,8 @@ function CandidateCard({ restaurant }: { restaurant: Restaurant }) {
         <Text style={styles.candidateName} numberOfLines={1}>{restaurant.name}</Text>
         <Text style={styles.candidateMeta} numberOfLines={1}>{restaurant.area}</Text>
         <View style={styles.candidateInfoRow}>
-          <Text style={styles.candidateInfoPill}>{getStoredMinutesLabel(restaurant)}</Text>
-          <Text style={styles.candidateInfoPill}>{restaurant.priceRange ?? formatPrice(restaurant)}</Text>
+          <Text style={styles.candidateInfoPill}>{getStoredMinutesLabel(restaurant, uiText)}</Text>
+          <Text style={styles.candidateInfoPill}>{formatPrice(restaurant, uiText)}</Text>
         </View>
       </View>
     </View>
@@ -5102,7 +5940,7 @@ function HistorySection({ history, uiText }: { history: Restaurant[]; uiText: Re
       {history.length === 0 ? (
         <Text style={styles.mutedText}>{uiText.historyEmpty}</Text>
       ) : (
-        history.slice(0, 5).map((restaurant) => <RestaurantCard key={`${restaurant.id}-history`} restaurant={restaurant} />)
+        history.slice(0, 5).map((restaurant) => <RestaurantCard key={`${restaurant.id}-history`} restaurant={restaurant} uiText={uiText} />)
       )}
     </View>
   );
@@ -5178,7 +6016,7 @@ function AppFooter({ activeTab, onPress, uiText }: { activeTab: TabKey; onPress:
         return (
           <Pressable key={item.key} style={styles.footerItem} onPress={() => onPress(item.key)}>
             <View style={[styles.footerIconWrap, active && styles.footerIconWrapActive]}>
-              <Ionicons name={item.icon} size={26} color={active ? ORANGE : '#777777'} />
+              <Ionicons name={item.icon} size={26} color={active ? '#ffffff' : '#777777'} />
             </View>
             <Text style={[styles.footerLabel, active && styles.footerLabelActive]}>{labels[item.key]}</Text>
           </Pressable>
