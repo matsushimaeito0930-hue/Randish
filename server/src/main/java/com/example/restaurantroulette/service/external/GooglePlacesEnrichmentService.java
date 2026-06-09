@@ -42,6 +42,18 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "places.currentOpeningHours.openNow",
       "places.currentOpeningHours.nextOpenTime",
       "places.currentOpeningHours.nextCloseTime");
+  private static final String DETAIL_FIELD_MASK = String.join(",",
+      "id",
+      "displayName",
+      "formattedAddress",
+      "location",
+      "rating",
+      "types",
+      "photos.name",
+      "googleMapsUri",
+      "currentOpeningHours.openNow",
+      "currentOpeningHours.nextOpenTime",
+      "currentOpeningHours.nextCloseTime");
   private static final int GOOGLE_RESULT_COUNT_PER_KEYWORD = 20;
   private static final int RANDOM_ALL_GENRE_KEYWORD_COUNT = 5;
   private static final int RANDOM_GENRE_KEYWORD_COUNT = 3;
@@ -156,6 +168,11 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
   }
 
   @Override
+  public String providerKey() {
+    return "GOOGLE_PLACES";
+  }
+
+  @Override
   public boolean isAvailable() {
     return enabled && apiKey != null && !apiKey.isBlank() && sessionRequestCount.get() < sessionRequestLimit;
   }
@@ -208,6 +225,33 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
     }
 
     return List.copyOf(restaurants.values());
+  }
+
+  @Override
+  public Optional<Restaurant> findByExternalId(
+      String externalId,
+      String savedArea,
+      String savedGenre,
+      Integer savedBudgetMin,
+      Integer savedBudgetMax) {
+    if (!isAvailable() || externalId == null || externalId.isBlank()) {
+      return Optional.empty();
+    }
+    try {
+      if (!reserveGoogleRequests(1, "place details")) {
+        return Optional.empty();
+      }
+      GooglePlace place = restClient.get()
+          .uri("/places/{placeId}", externalId.trim())
+          .header("X-Goog-Api-Key", apiKey)
+          .header("X-Goog-FieldMask", DETAIL_FIELD_MASK)
+          .retrieve()
+          .body(GooglePlace.class);
+      return toRestaurant(place, savedArea, normalizeGenre(savedGenre), savedBudgetMin, savedBudgetMax);
+    } catch (RuntimeException exception) {
+      logger.warn("Google Places detail fetch failed: {}", externalId, exception);
+      return Optional.empty();
+    }
   }
 
   @Override

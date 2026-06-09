@@ -18,8 +18,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
-import type { RandomHistory as ApiRandomHistory } from './services/randishApi';
+import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
+import type { Favorite as ApiFavorite, RandomHistory as ApiRandomHistory } from './services/randishApi';
 import { JAPAN_MUNICIPALITY_PRESETS } from './data/japanMunicipalities';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -82,6 +82,22 @@ type DrawHistoryEntry = {
   createdAt: string;
 };
 
+type SavedRestaurant = {
+  id: string;
+  userId: string;
+  provider: string;
+  providerPlaceId: string;
+  restaurantId: string | null;
+  savedArea: string | null;
+  savedGenre: string | null;
+  savedBudgetMin: number | null;
+  savedBudgetMax: number | null;
+  userMemo: string | null;
+  userTags: string | null;
+  createdAt: string;
+  snapshot?: Restaurant | null;
+};
+
 type SubscriptionState = {
   isPro: boolean;
   source: 'dev-stub';
@@ -133,9 +149,12 @@ type UserLocation = {
   label: string;
 };
 
-type DistanceOrigin = {
-  location: UserLocation | null;
-  label: string;
+type StationAccessItem = {
+  stationName: string;
+  lineLabel?: string;
+  walkingMinutes: number;
+  distanceKm: number;
+  location: UserLocation;
 };
 
 type LocationRequestMode = 'sync-search' | 'background';
@@ -176,13 +195,17 @@ type DrawAnimationProfile = {
 
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
+const DEV_DISABLE_MEAL_TICKET_LIMIT = true;
 const DEV_LAN_API_BASE_URLS = [
+  'http://10.230.36.13:8080',
   'http://10.230.36.4:8080',
   'http://10.230.36.45:8080',
   'http://10.230.36.34:8080',
 ];
 const LOCAL_API_BASE_URLS = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://10.0.2.2:8080'];
 const TETHER_HOST_PATTERN = /^http:\/\/10\.230\.36\.\d+(?::8080)?$/;
+const LOCAL_NETWORK_HOST_PATTERN = /^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/;
+const LOCAL_NETWORK_HOST_IN_TEXT_PATTERN = /(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)/g;
 const RANDISH_LOGO = require('./assets/randish-logo-square1.png');
 const HOME_HEADER_MAP = require('./assets/home-map/homeHeader.png');
 const HOTPEPPER_CREDIT_URL = 'https://webservice.recruit.co.jp/';
@@ -203,10 +226,15 @@ const getHostFromUrl = (value?: string) => {
 };
 
 const toApiBaseUrlFromHost = (host: string | null) => {
-  if (!host) {
+  if (!host || !LOCAL_NETWORK_HOST_PATTERN.test(host)) {
     return null;
   }
   return `http://${host}:${API_PORT}`;
+};
+
+const getConfiguredApiBaseUrl = () => {
+  const runtimeGlobal = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
+  return runtimeGlobal.process?.env?.EXPO_PUBLIC_RANDISH_API_BASE_URL ?? null;
 };
 
 const getMetroScriptUrl = () => {
@@ -219,10 +247,48 @@ const getWebLocationUrl = () => {
   return runtimeGlobal.location?.href;
 };
 
+const getApiBaseUrlsFromRuntimeUrl = (value?: string) => {
+  if (!value) {
+    return [];
+  }
+  const urls: string[] = [];
+  const directHost = toApiBaseUrlFromHost(getHostFromUrl(value));
+  if (directHost) {
+    urls.push(directHost);
+  }
+
+  try {
+    const parsed = new URL(value);
+    parsed.searchParams.forEach((paramValue) => {
+      const nestedHost = toApiBaseUrlFromHost(getHostFromUrl(paramValue));
+      if (nestedHost) {
+        urls.push(nestedHost);
+      }
+    });
+  } catch {
+    // Some Expo URLs are not parseable by URL; the regex fallback below still catches LAN hosts.
+  }
+
+  const hostMatches = value.match(LOCAL_NETWORK_HOST_IN_TEXT_PATTERN) ?? [];
+  hostMatches.forEach((host) => {
+    const baseUrl = toApiBaseUrlFromHost(host);
+    if (baseUrl) {
+      urls.push(baseUrl);
+    }
+  });
+
+  return uniqueApiBaseUrls(urls);
+};
+
+const getRuntimeApiBaseUrls = () =>
+  uniqueApiBaseUrls([
+    getConfiguredApiBaseUrl(),
+    ...getApiBaseUrlsFromRuntimeUrl(getMetroScriptUrl()),
+    ...getApiBaseUrlsFromRuntimeUrl(getWebLocationUrl()),
+  ].filter((value): value is string => Boolean(value)));
+
 const getRuntimeApiBaseUrl = () =>
-  toApiBaseUrlFromHost(getHostFromUrl(getMetroScriptUrl()))
-  ?? toApiBaseUrlFromHost(getHostFromUrl(getWebLocationUrl()))
-  ?? DEV_LAN_API_BASE_URLS[0];
+  getRuntimeApiBaseUrls()[0] ?? DEV_LAN_API_BASE_URLS[0];
 
 const uniqueApiBaseUrls = (baseUrls: string[]) => {
   const seen = new Set<string>();
@@ -239,7 +305,7 @@ const uniqueApiBaseUrls = (baseUrls: string[]) => {
 };
 
 const buildApiBaseUrlCandidates = (primaryBaseUrl: string, runtimeBaseUrl: string) =>
-  uniqueApiBaseUrls([primaryBaseUrl, runtimeBaseUrl, ...DEV_LAN_API_BASE_URLS, ...LOCAL_API_BASE_URLS]);
+  uniqueApiBaseUrls([primaryBaseUrl, runtimeBaseUrl, ...getRuntimeApiBaseUrls(), ...DEV_LAN_API_BASE_URLS, ...LOCAL_API_BASE_URLS]);
 
 const toAbsoluteApiAssetUrl = (value?: string | null) => {
   if (!value || !value.startsWith('/')) {
@@ -941,11 +1007,33 @@ const formatLocalizedBudgetLimit = (budgetMax: string, uiText: Record<string, st
   return value > 0 ? `${formatLocalizedYen(value, uiText)}${uiText.yenMaxSuffix}` : uiText.noBudget;
 };
 
+const formatUnknownPriceLabel = (uiText: Record<string, string>) => {
+  const language = getUiLanguage(uiText);
+  if (language === 'en') {
+    return 'Price not listed';
+  }
+  if (language === 'zh') {
+    return '价格未提供';
+  }
+  if (language === 'ko') {
+    return '가격 정보 없음';
+  }
+  return '予算目安なし';
+};
+
 const formatLocalizedPrice = (restaurant: ApiRestaurant, uiText: Record<string, string>) => {
   const min = toOptionalNumber(restaurant.budgetMin);
   const max = toOptionalNumber(restaurant.budgetMax);
-  if (min == null && max == null) {
-    return uiText.noBudget;
+  const hasOpenEndedMax = max != null && max >= 100000;
+  const hasFreeLikeMin = min == null || min <= 0;
+  if ((min == null && max == null) || (hasFreeLikeMin && hasOpenEndedMax) || (min === 0 && max === 0)) {
+    return formatUnknownPriceLabel(uiText);
+  }
+  if (hasOpenEndedMax && min != null && min > 0) {
+    return `${formatLocalizedYen(min, uiText)}〜`;
+  }
+  if ((min == null || min <= 0) && max != null && max > 0) {
+    return `${formatLocalizedYen(max, uiText)}${uiText.yenMaxSuffix}`;
   }
   if (min == null || max == null || min === max) {
     return formatLocalizedYen(min ?? max ?? 0, uiText);
@@ -1688,26 +1776,29 @@ const getNextTicketStartDate = (now: Date, isProUser: boolean) => {
   return candidates[0] ?? addDays(now, 1);
 };
 
-const buildMealTicketState = (now: Date, drawHistories: DrawHistoryEntry[], isProUser: boolean): MealTicketState => {
+const buildMealTicketState = (now: Date, drawHistories: DrawHistoryEntry[], isProUser: boolean, disableLimit = false): MealTicketState => {
   const dayKey = getLocalDayKey(now);
   const minutes = getMinutesOfDay(now);
   const currentDefinition = getMealTicketDefinitionForDate(now);
-  const nextUnlockDate = getNextTicketStartDate(now, isProUser);
+  const effectiveIsProUser = isProUser || disableLimit;
+  const nextUnlockDate = getNextTicketStartDate(now, effectiveIsProUser);
   const nextUnlockLabel = formatCountdown(nextUnlockDate, now);
 
   const usedKeys = new Set<MealSlotKey>();
-  drawHistories.forEach((entry) => {
-    const createdAt = new Date(entry.createdAt);
-    if (Number.isNaN(createdAt.getTime()) || getLocalDayKey(createdAt) !== dayKey) {
-      return;
-    }
-    usedKeys.add(getMealTicketDefinitionForDate(createdAt).key);
-  });
+  if (!disableLimit) {
+    drawHistories.forEach((entry) => {
+      const createdAt = new Date(entry.createdAt);
+      if (Number.isNaN(createdAt.getTime()) || getLocalDayKey(createdAt) !== dayKey) {
+        return;
+      }
+      usedKeys.add(getMealTicketDefinitionForDate(createdAt).key);
+    });
+  }
 
   const tickets = MEAL_TICKET_DEFINITIONS.map((ticket) => {
     const active = currentDefinition.key === ticket.key;
     const used = usedKeys.has(ticket.key);
-    const proLocked = Boolean(ticket.proOnly && !isProUser);
+    const proLocked = Boolean(ticket.proOnly && !effectiveIsProUser);
     const upcomingStart = getUpcomingStartDateForTicket(now, ticket);
     const past = !active && !ticket.proOnly && ticket.endMinute <= minutes;
     const available = active && !used && !proLocked;
@@ -1754,7 +1845,7 @@ const buildMealTicketState = (now: Date, drawHistories: DrawHistoryEntry[], isPr
     nextUnlockAt: nextUnlockDate.toISOString(),
     usedFreeCount,
     totalFreeCount: FREE_MEAL_TICKET_COUNT,
-    isProUser,
+    isProUser: effectiveIsProUser,
   };
 };
 
@@ -1868,6 +1959,125 @@ const toDrawHistoryEntry = (history: ApiRandomHistory): DrawHistoryEntry => ({
   restaurant: normalizeRestaurant(history.restaurant),
   createdAt: history.createdAt,
 });
+
+const cleanTextOrNull = (value?: string | null) => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+};
+
+const parseBudgetNumber = (value: string) => {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) && numeric > 0 && numeric < 100000 ? numeric : null;
+};
+
+const getProviderLabel = (provider: string) => {
+  const normalized = provider.toUpperCase();
+  if (normalized === 'GOOGLE_PLACES') {
+    return 'Google Maps';
+  }
+  if (normalized === 'HOTPEPPER') {
+    return 'Hot Pepper';
+  }
+  return 'RANDISH';
+};
+
+const getProviderPlaceId = (restaurant: Restaurant) =>
+  restaurant.externalId || restaurant.googlePlaceId || restaurant.id;
+
+const shouldPersistRestaurantId = (restaurant: Restaurant) =>
+  (restaurant.externalProvider || '').toUpperCase() === 'RANDISH_SEED';
+
+const toSavedRestaurantFromApi = (favorite: ApiFavorite): SavedRestaurant => ({
+  id: favorite.id,
+  userId: favorite.userId,
+  provider: favorite.provider,
+  providerPlaceId: favorite.providerPlaceId,
+  restaurantId: favorite.restaurantId,
+  savedArea: favorite.savedArea,
+  savedGenre: favorite.savedGenre,
+  savedBudgetMin: favorite.savedBudgetMin,
+  savedBudgetMax: favorite.savedBudgetMax,
+  userMemo: favorite.userMemo,
+  userTags: favorite.userTags,
+  createdAt: favorite.createdAt,
+  snapshot: favorite.restaurant ? normalizeRestaurant(favorite.restaurant) : null,
+});
+
+const toSavedRestaurantFromSelection = ({
+  restaurant,
+  userId,
+  area,
+  genre,
+  budgetMin,
+  budgetMax,
+}: {
+  restaurant: Restaurant;
+  userId: string;
+  area: string;
+  genre: string;
+  budgetMin: string;
+  budgetMax: string;
+}): SavedRestaurant => {
+  const provider = (restaurant.externalProvider || 'RANDISH_SEED').toUpperCase();
+  const createdAt = new Date().toISOString();
+  return {
+    id: `local-${provider}-${getProviderPlaceId(restaurant)}-${createdAt}`,
+    userId,
+    provider,
+    providerPlaceId: getProviderPlaceId(restaurant),
+    restaurantId: shouldPersistRestaurantId(restaurant) ? restaurant.id : null,
+    savedArea: cleanTextOrNull(area === '現在地' ? '現在地周辺' : area),
+    savedGenre: cleanTextOrNull(genre === 'すべて' ? null : genre),
+    savedBudgetMin: parseBudgetNumber(budgetMin),
+    savedBudgetMax: parseBudgetNumber(budgetMax),
+    userMemo: null,
+    userTags: null,
+    createdAt,
+    snapshot: restaurant,
+  };
+};
+
+const isSameSavedRestaurant = (first: SavedRestaurant, second: SavedRestaurant) =>
+  first.provider === second.provider && first.providerPlaceId === second.providerPlaceId;
+
+const formatSavedBudgetLabel = (favorite: SavedRestaurant) => {
+  if (favorite.savedBudgetMin != null && favorite.savedBudgetMax != null) {
+    return `${formatYen(favorite.savedBudgetMin)}〜${formatYen(favorite.savedBudgetMax)}`;
+  }
+  if (favorite.savedBudgetMax != null) {
+    return `〜${formatYen(favorite.savedBudgetMax)}`;
+  }
+  if (favorite.savedBudgetMin != null) {
+    return `${formatYen(favorite.savedBudgetMin)}〜`;
+  }
+  return '予算おまかせ';
+};
+
+const buildSavedMetaLine = (favorite: SavedRestaurant) => [
+  favorite.savedGenre ?? 'ジャンルおまかせ',
+  favorite.savedArea ?? 'エリアおまかせ',
+  formatSavedBudgetLabel(favorite),
+].join(' / ');
+
+const API_CONNECTION_MESSAGE = 'お店データに接続できませんでした。サーバーを確認して、もう一度試してください。';
+const API_DRAW_MESSAGE = '抽選データに接続できませんでした。少し時間をおいてもう一度押してください。';
+
+const toDebugErrorMessage = (error: unknown) => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return typeof error === 'string' ? error : 'unknown error';
+};
+
+const logApiUiError = (context: string, error: unknown, baseUrls: readonly string[]) => {
+  console.warn(`[RANDISH] ${context}`, {
+    baseUrls,
+    message: toDebugErrorMessage(error),
+  });
+};
+
+const isNoRestaurantMatchError = (error: unknown) =>
+  error instanceof RandishApiError && error.kind === 'http' && error.status === 404;
 
 const isSameMonth = (dateText: string, monthDate: Date) => {
   const date = new Date(dateText);
@@ -2002,12 +2212,39 @@ const getPreviousMonthComparison = (entries: DrawHistoryEntry[], now = new Date(
   };
 };
 
-const getSavedRestaurantAnalytics = (savedRestaurants: Restaurant[]): SavedRestaurantAnalytics => {
-  const entries = savedRestaurants.map((restaurant, index) => ({
-    id: `saved-${restaurant.id}-${index}`,
-    restaurant,
-    createdAt: new Date().toISOString(),
-  }));
+const getSavedRestaurantAnalytics = (savedRestaurants: SavedRestaurant[]): SavedRestaurantAnalytics => {
+  const entries = savedRestaurants.map((favorite, index) => {
+    const savedBudget = favorite.savedBudgetMin != null || favorite.savedBudgetMax != null
+      ? Math.round(((favorite.savedBudgetMin ?? favorite.savedBudgetMax ?? 0) + (favorite.savedBudgetMax ?? favorite.savedBudgetMin ?? 0)) / 2)
+      : null;
+    const snapshot = favorite.snapshot;
+    const budgetMin = savedBudget ?? snapshot?.budgetMin ?? 0;
+    const budgetMax = savedBudget ?? snapshot?.budgetMax ?? 999999;
+    return {
+      id: `saved-${favorite.id}-${index}`,
+      restaurant: {
+        ...(snapshot ?? {
+          id: favorite.id,
+          externalProvider: favorite.provider,
+          externalId: favorite.providerPlaceId,
+          name: '保存したお店',
+          area: favorite.savedArea ?? 'エリアおまかせ',
+          genre: favorite.savedGenre ?? 'ジャンルおまかせ',
+          rating: 0,
+          minutes: 0,
+          address: '',
+          photoUrl: null,
+          note: '',
+          budgetMin,
+          budgetMax,
+        }),
+        genre: favorite.savedGenre ?? snapshot?.genre ?? 'ジャンルおまかせ',
+        budgetMin,
+        budgetMax,
+      } as Restaurant,
+      createdAt: favorite.createdAt,
+    };
+  });
   return {
     totalSaved: savedRestaurants.length,
     genreAnalytics: getGenreAnalytics(entries),
@@ -2153,6 +2390,21 @@ const NON_STATION_AREA_LABELS = new Set([
   '堀江',
   'みなとみらい',
 ]);
+const MAX_TRUSTED_STATION_DISTANCE_KM = 3;
+const MAX_STATION_ACCESS_ITEMS = 3;
+const STATION_LINE_LABELS: Record<string, string> = {
+  梅田: '大阪メトロ御堂筋線',
+  大阪駅: 'JR大阪環状線',
+  北新地: 'JR東西線',
+  中崎町: '大阪メトロ谷町線',
+  天満: 'JR大阪環状線',
+  扇町: '大阪メトロ堺筋線',
+  南森町: '大阪メトロ谷町線・堺筋線',
+  天神橋筋六丁目: '大阪メトロ谷町線・堺筋線',
+  横浜: 'JR・東急・京急・相鉄',
+  渋谷: 'JR・東急・東京メトロ',
+  新宿: 'JR・小田急・京王',
+};
 
 const uniqueAreaPresets = (items: AreaPreset[]) => {
   const seen = new Set<string>();
@@ -2226,25 +2478,13 @@ const getAreaPreset = (area: string) => {
 
 const isStationLikePreset = (preset: AreaPreset) => hasUsablePresetCoordinates(preset) && !NON_STATION_AREA_LABELS.has(preset.label);
 
-const formatStationOriginLabel = (label: string) => `${label}${label.endsWith('駅') ? '' : '駅'}から`;
+const formatStationName = (label: string) => `${label}${label.endsWith('駅') ? '' : '駅'}`;
 
-const formatStationOriginLabelForUi = (label: string, uiText: Record<string, string>) => {
-  const language = getUiLanguage(uiText);
-  if (language === 'en') {
-    return `From ${label}${label.endsWith('駅') ? '' : ' Station'}`;
-  }
-  if (language === 'zh') {
-    return `从${label}${label.endsWith('駅') ? '' : '站'}起`;
-  }
-  if (language === 'ko') {
-    return `${label}${label.endsWith('駅') ? '' : '역'}에서`;
-  }
-  return formatStationOriginLabel(label);
-};
+const getWalkingMinutesFromKm = (km: number) => Math.max(1, Math.round(km * 12.5));
 
-const getNearestStationOrigin = (restaurant: Restaurant): DistanceOrigin | null => {
+const getNearestStationAccessItems = (restaurant: Restaurant): StationAccessItem[] => {
   if (restaurant.latitude == null || restaurant.longitude == null) {
-    return null;
+    return [];
   }
 
   const prefecture = getPrefectureFromText(`${restaurant.area} ${restaurant.address}`);
@@ -2252,7 +2492,7 @@ const getNearestStationOrigin = (restaurant: Restaurant): DistanceOrigin | null 
     .filter(isStationLikePreset)
     .filter((preset) => !prefecture || getPresetPrefecture(preset) === prefecture);
 
-  const nearest = candidates
+  return candidates
     .map((preset) => ({
       preset,
       distance: getDistanceKm(
@@ -2260,20 +2500,23 @@ const getNearestStationOrigin = (restaurant: Restaurant): DistanceOrigin | null 
         restaurant,
       ) ?? Number.POSITIVE_INFINITY,
     }))
-    .sort((a, b) => a.distance - b.distance)[0];
-
-  if (!nearest || !Number.isFinite(nearest.distance)) {
-    return null;
-  }
-
-  return {
-    label: formatStationOriginLabel(nearest.preset.label),
-    location: {
-      latitude: nearest.preset.latitude,
-      longitude: nearest.preset.longitude,
-      label: nearest.preset.label,
-    },
-  };
+    .filter((item) => Number.isFinite(item.distance) && item.distance <= MAX_TRUSTED_STATION_DISTANCE_KM)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, MAX_STATION_ACCESS_ITEMS)
+    .map(({ preset, distance }) => {
+      const stationName = formatStationName(preset.label);
+      return {
+        stationName,
+        lineLabel: STATION_LINE_LABELS[preset.label],
+        walkingMinutes: getWalkingMinutesFromKm(distance),
+        distanceKm: distance,
+        location: {
+          latitude: preset.latitude,
+          longitude: preset.longitude,
+          label: preset.label,
+        },
+      };
+    });
 };
 
 const getCoordinatePresetForArea = (area: string) => {
@@ -2313,9 +2556,11 @@ const getCoordinatePresetForArea = (area: string) => {
         || preset.label === cleanArea
         || preset.group.includes(cleanArea)
         || (preset.searchValue?.includes(cleanArea) ?? false)
-      ),
+    ),
   );
-  const prefectureAnchor = ALL_AREA_PRESETS.find((preset) => getPresetPrefecture(preset) === prefecture && hasUsablePresetCoordinates(preset));
+  const prefectureAnchor = isPrefectureName(cleanArea)
+    ? ALL_AREA_PRESETS.find((preset) => getPresetPrefecture(preset) === prefecture && hasUsablePresetCoordinates(preset))
+    : null;
   const preset = sameAreaPreset ?? prefectureAnchor;
   if (!preset) {
     return null;
@@ -2608,7 +2853,10 @@ export default function App() {
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [randomHistory, setRandomHistory] = useState<Restaurant[]>([]);
   const [drawHistories, setDrawHistories] = useState<DrawHistoryEntry[]>([]);
-  const [savedRestaurants, setSavedRestaurants] = useState<Restaurant[]>([]);
+  const [savedRestaurants, setSavedRestaurants] = useState<SavedRestaurant[]>([]);
+  const [savedDetail, setSavedDetail] = useState<{ favorite: SavedRestaurant; restaurant: Restaurant } | null>(null);
+  const [savedDetailLoadingId, setSavedDetailLoadingId] = useState<string | null>(null);
+  const [savedDetailError, setSavedDetailError] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const [profileName, setProfileName] = useState('RANDISH Guest');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
@@ -2633,6 +2881,9 @@ export default function App() {
   const spinValue = useRef(new Animated.Value(0)).current;
   const resultRevealValue = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef<ScrollView | null>(null);
+  const randomTabOffsetRef = useRef(0);
+  const randomResultOffsetRef = useRef(0);
+  const savedDetailCacheRef = useRef(new Map<string, Restaurant>());
   const didAskLocation = useRef(false);
   const areaRef = useRef(area);
 
@@ -2640,6 +2891,11 @@ export default function App() {
     setTimeout(() => {
       scrollViewRef.current?.scrollTo({ y: 0, animated });
     }, 0);
+  }, []);
+
+  const scrollToRandomResult = useCallback(() => {
+    const targetY = Math.max(randomTabOffsetRef.current + randomResultOffsetRef.current - 18, 0);
+    scrollViewRef.current?.scrollTo({ y: targetY, animated: true });
   }, []);
 
   useEffect(() => {
@@ -2656,7 +2912,7 @@ export default function App() {
   }, []);
 
   const mealTicketState = useMemo(
-    () => buildMealTicketState(now, drawHistories, subscription.isPro),
+    () => buildMealTicketState(now, drawHistories, subscription.isPro, DEV_DISABLE_MEAL_TICKET_LIMIT),
     [drawHistories, now, subscription.isPro],
   );
   const isRegisteredUser = userId !== APP_USER_ID;
@@ -2693,6 +2949,16 @@ export default function App() {
       setRandomHistory(recentRestaurants.slice(0, 8));
     } catch {
       // Keep the current in-app session history when the API is not reachable yet.
+    }
+  }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl, userId]);
+
+  const loadSavedRestaurants = useCallback(async () => {
+    try {
+      const data = await randishApi.getFavorites(apiBaseUrlCandidates, userId);
+      syncWorkingApiBaseUrl();
+      setSavedRestaurants(data.map(toSavedRestaurantFromApi));
+    } catch {
+      // Keep local saved cards when the API is not reachable.
     }
   }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl, userId]);
 
@@ -2752,48 +3018,16 @@ export default function App() {
     () => ({
       ...apiParams,
       genre: conditionRandom.genre ? undefined : apiParams.genre,
-      budgetMin: conditionRandom.budget ? 0 : apiParams.budgetMin,
-      budgetMax: conditionRandom.budget ? 999999 : apiParams.budgetMax,
     }),
-    [apiParams, conditionRandom.budget, conditionRandom.genre],
+    [apiParams, conditionRandom.genre],
   );
 
   const drawApiParams = useMemo(
-    () => ({
-      ...apiParams,
-      budgetMin: conditionRandom.budget ? 0 : apiParams.budgetMin,
-      budgetMax: conditionRandom.budget ? 999999 : apiParams.budgetMax,
-    }),
-    [apiParams, conditionRandom.budget],
+    () => apiParams,
+    [apiParams],
   );
 
   const hasHiddenPreviewCondition = conditionRandom.area || conditionRandom.budget || conditionRandom.genre;
-
-  const distanceOrigin = useMemo<DistanceOrigin>(() => {
-    const coordinatePreset = getCoordinatePresetForArea(area);
-    if (coordinatePreset) {
-      return {
-        label: `${coordinatePreset.label}から`,
-        location: {
-          latitude: coordinatePreset.preset.latitude,
-          longitude: coordinatePreset.preset.longitude,
-          label: coordinatePreset.label,
-        },
-      };
-    }
-
-    if (area.trim() && area !== '現在地') {
-      return {
-        label: `${area}から`,
-        location: null,
-      };
-    }
-
-    return {
-      label: '現在地から',
-      location: userLocation,
-    };
-  }, [area, userLocation]);
 
   const visibleRestaurants = restaurants;
 
@@ -2837,9 +3071,9 @@ export default function App() {
       }
     } catch (error) {
       setRestaurants([]);
-      const reason = error instanceof Error ? error.message : '通信エラー';
-      const diagnosticMessage = await loadGenreDiagnosticMessage();
-      setMessage(diagnosticMessage ?? `APIに接続できませんでした。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
+      logApiUiError('restaurant search failed', error, apiBaseUrlCandidates);
+      const diagnosticMessage = isApiConnectivityError(error) ? null : await loadGenreDiagnosticMessage();
+      setMessage(diagnosticMessage ?? API_CONNECTION_MESSAGE);
     } finally {
       setIsLoading(false);
     }
@@ -2917,7 +3151,8 @@ export default function App() {
       return;
     }
     loadDrawHistories();
-  }, [loadDrawHistories, stage]);
+    loadSavedRestaurants();
+  }, [loadDrawHistories, loadSavedRestaurants, stage]);
 
   const runRandomAnimation = useCallback(() => {
     spinValue.setValue(0);
@@ -3018,18 +3253,22 @@ export default function App() {
   const chooseRandomRestaurant = useCallback(async () => {
     const isTravelDraw = drawMode === 'travel';
     setActiveTab('random');
-    scrollToContentTop();
     setIsLoading(true);
     const drawAnimation = startDrawAnimation();
+    const travelRevealTimers: ReturnType<typeof setTimeout>[] = [];
+    const scheduleTravelReveal = (callback: () => void, delay: number) => {
+      const timer = setTimeout(callback, delay);
+      travelRevealTimers.push(timer);
+    };
     if (isTravelDraw) {
       const travelGenreLabel = genre;
       const travelAreaLabel = travelDisplayArea ?? area;
       setTravelRevealStep('hidden');
-      setTimeout(() => {
+      scheduleTravelReveal(() => {
         setTravelRevealStep('genre');
         setMessage(`ジャンルを開きました。${travelGenreLabel}`);
       }, 320);
-      setTimeout(() => {
+      scheduleTravelReveal(() => {
         setTravelRevealStep('area');
         setMessage(`エリアを開きました。${travelAreaLabel}`);
       }, 920);
@@ -3047,13 +3286,64 @@ export default function App() {
     };
 
     try {
-      const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
-        userId,
-        ...drawApiParams,
-      });
-      syncWorkingApiBaseUrl();
-      let normalized = normalizeRestaurant(data);
-      if (!restaurantMatchesSelectedGenre(normalized, genre)) {
+      const chooseWithParams = async (params: typeof drawApiParams) => {
+        const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
+          userId,
+          ...params,
+        });
+        syncWorkingApiBaseUrl();
+        return normalizeRestaurant(data);
+      };
+      let normalized: Restaurant | null = null;
+      let relaxedTravelMessage: string | null = null;
+      let allowGenreMismatch = false;
+      try {
+        normalized = await chooseWithParams(drawApiParams);
+      } catch (error) {
+        if (!isTravelDraw || !isNoRestaurantMatchError(error)) {
+          throw error;
+        }
+        const fallbackAttempts = [
+          {
+            params: { ...drawApiParams, genre: undefined },
+            message: `${genre}の候補が少ないので、ジャンルを広げました。`,
+            allowGenreMismatch: true,
+          },
+          {
+            params: { ...drawApiParams, range: undefined },
+            message: '近くの候補が少ないので、距離を広げました。',
+            allowGenreMismatch: false,
+          },
+          {
+            params: { ...drawApiParams, genre: undefined, range: undefined },
+            message: '候補が少ないので、ジャンルと距離を広げました。',
+            allowGenreMismatch: true,
+          },
+          {
+            params: { ...drawApiParams, genre: undefined, latitude: undefined, longitude: undefined, range: undefined },
+            message: '旅先エリアで広めに探しました。',
+            allowGenreMismatch: true,
+          },
+        ];
+        let lastError: unknown = error;
+        for (const attempt of fallbackAttempts) {
+          try {
+            normalized = await chooseWithParams(attempt.params);
+            relaxedTravelMessage = attempt.message;
+            allowGenreMismatch = attempt.allowGenreMismatch;
+            break;
+          } catch (fallbackError) {
+            lastError = fallbackError;
+            if (!isNoRestaurantMatchError(fallbackError)) {
+              throw fallbackError;
+            }
+          }
+        }
+        if (!normalized) {
+          throw lastError;
+        }
+      }
+      if (!allowGenreMismatch && !restaurantMatchesSelectedGenre(normalized, genre)) {
         const alternatives = await loadAlternatives();
         if (!alternatives.length) {
           throw new Error(`${genre}に合う候補が見つかりませんでした。`);
@@ -3070,27 +3360,34 @@ export default function App() {
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
       recordDrawForAnalytics(normalized);
       const doneMessage = recentIds.has(normalized.id) ? '候補が一巡しています。条件を広げると新しい店が出やすくなります。' : drawAnimation.doneMessage;
-      setMessage(isTravelDraw ? '最後にお店を開きます。' : doneMessage);
+      setMessage(isTravelDraw ? relaxedTravelMessage ?? '最後にお店を開きます。' : doneMessage);
       if (isTravelDraw) {
-        setTimeout(() => {
+        scheduleTravelReveal(() => {
           setTravelRevealStep('restaurant');
           setMessage(`旅の一店を開きました。${normalized.name}`);
         }, 1500);
       }
-      setTimeout(revealSelectedRestaurant, isTravelDraw ? 1680 : 980);
+      const resultRevealDelay = isTravelDraw ? 1680 : 980;
+      setTimeout(revealSelectedRestaurant, resultRevealDelay);
+      setTimeout(scrollToRandomResult, resultRevealDelay + 320);
     } catch (error) {
+      travelRevealTimers.forEach(clearTimeout);
+      if (isTravelDraw) {
+        setTravelRevealStep('hidden');
+      }
       setSelectedRestaurant(null);
-      const reason = error instanceof Error ? error.message : '通信エラー';
-      const diagnosticMessage = await loadGenreDiagnosticMessage();
-      setMessage(diagnosticMessage ?? `APIから抽選できませんでした。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
+      logApiUiError('condition draw failed', error, apiBaseUrlCandidates);
+      const diagnosticMessage = isApiConnectivityError(error) ? null : await loadGenreDiagnosticMessage();
+      setMessage(isTravelDraw && isNoRestaurantMatchError(error)
+        ? 'この旅先は候補が少なすぎました。もう一度押すと別の旅先で探せます。'
+        : diagnosticMessage ?? API_DRAW_MESSAGE);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, area, drawApiParams, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToContentTop, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
+  }, [apiBaseUrlCandidates, area, drawApiParams, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
-    scrollToContentTop();
     setIsLoading(true);
     const drawAnimation = startDrawAnimation(true);
     const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
@@ -3113,14 +3410,15 @@ export default function App() {
       recordDrawForAnalytics(normalized);
       setMessage(recentIds.has(normalized.id) ? 'ぜんぶおまかせの候補が一巡しています。条件を少し変えると広がります。' : `ぜんぶおまかせ。${drawAnimation.doneMessage}`);
       setTimeout(revealSelectedRestaurant, 980);
+      setTimeout(scrollToRandomResult, 1300);
     } catch (error) {
       setSelectedRestaurant(null);
-      const reason = error instanceof Error ? error.message : '通信エラー';
-      setMessage(`全部ランダム抽選に失敗しました。接続先: ${apiBaseUrlCandidates.join(' / ')} / ${reason}`);
+      logApiUiError('everything draw failed', error, apiBaseUrlCandidates);
+      setMessage(API_DRAW_MESSAGE);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToContentTop, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
 
   const startPreparedDraw = useCallback(() => {
     if (isLoading) {
@@ -3151,21 +3449,67 @@ export default function App() {
       return;
     }
 
-    setSavedRestaurants((current) => {
-      if (current.some((item) => item.id === selectedRestaurant.id)) {
-        return current;
-      }
-      return [selectedRestaurant, ...current];
+    const localFavorite = toSavedRestaurantFromSelection({
+      restaurant: selectedRestaurant,
+      userId,
+      area,
+      genre,
+      budgetMin,
+      budgetMax,
     });
 
+    if (savedRestaurants.some((item) => isSameSavedRestaurant(item, localFavorite))) {
+      setMessage('このお店はすでに保存しています。');
+      setActiveTab('save');
+      scrollToContentTop();
+      return;
+    }
+
+    setSavedRestaurants((current) => {
+      return [localFavorite, ...current];
+    });
+    savedDetailCacheRef.current.set(localFavorite.id, selectedRestaurant);
+    setSavedDetail({ favorite: localFavorite, restaurant: selectedRestaurant });
+    setSavedDetailError(null);
+    setSavedDetailLoadingId(null);
+    setActiveTab('save');
+    scrollToContentTop();
+    setMessage('保存しました。保存タブに追加しました。');
+
     try {
-      await randishApi.addFavorite(apiBaseUrlCandidates, userId, selectedRestaurant.id);
+      const favorite = await randishApi.addFavorite(apiBaseUrlCandidates, {
+        userId,
+        restaurantId: localFavorite.restaurantId,
+        provider: localFavorite.provider,
+        providerPlaceId: localFavorite.providerPlaceId,
+        savedArea: localFavorite.savedArea,
+        savedGenre: localFavorite.savedGenre,
+        savedBudgetMin: localFavorite.savedBudgetMin,
+        savedBudgetMax: localFavorite.savedBudgetMax,
+        userMemo: localFavorite.userMemo,
+        userTags: localFavorite.userTags,
+      });
       syncWorkingApiBaseUrl();
-      setMessage('保存しました。');
+      const syncedFavorite = {
+        ...toSavedRestaurantFromApi(favorite),
+        snapshot: localFavorite.snapshot,
+      };
+      savedDetailCacheRef.current.delete(localFavorite.id);
+      savedDetailCacheRef.current.set(syncedFavorite.id, localFavorite.snapshot ?? selectedRestaurant);
+      setSavedRestaurants((current) => [
+        syncedFavorite,
+        ...current.filter((item) => !isSameSavedRestaurant(item, syncedFavorite)),
+      ]);
+      setSavedDetail((current) => (
+        current?.favorite.id === localFavorite.id
+          ? { favorite: syncedFavorite, restaurant: localFavorite.snapshot ?? selectedRestaurant }
+          : current
+      ));
+      setMessage('保存しました。保存タブに追加しました。');
     } catch {
       setMessage('端末内に保存しました。API接続後はサーバー保存もできます。');
     }
-  }, [apiBaseUrlCandidates, selectedRestaurant, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, genre, savedRestaurants, scrollToContentTop, selectedRestaurant, syncWorkingApiBaseUrl, userId]);
 
   const openMap = useCallback(() => {
     if (!selectedRestaurant) return;
@@ -3176,6 +3520,44 @@ export default function App() {
     const query = encodeURIComponent(`${selectedRestaurant.name} ${selectedRestaurant.address}`);
     Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
   }, [selectedRestaurant]);
+
+  const openSavedMap = useCallback((restaurant: Restaurant) => {
+    if (restaurant.googleMapsUri) {
+      Linking.openURL(restaurant.googleMapsUri);
+      return;
+    }
+    const query = encodeURIComponent(`${restaurant.name} ${restaurant.address}`);
+    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+  }, []);
+
+  const openSavedRestaurant = useCallback(async (favorite: SavedRestaurant) => {
+    setSavedDetailError(null);
+    const cached = savedDetailCacheRef.current.get(favorite.id);
+    if (cached) {
+      setSavedDetail({ favorite, restaurant: cached });
+      return;
+    }
+
+    setSavedDetailLoadingId(favorite.id);
+    if (favorite.snapshot) {
+      setSavedDetail({ favorite, restaurant: favorite.snapshot });
+    }
+    try {
+      const detail = await randishApi.getFavoriteRestaurant(apiBaseUrlCandidates, favorite.id);
+      syncWorkingApiBaseUrl();
+      const normalized = normalizeRestaurant(detail);
+      savedDetailCacheRef.current.set(favorite.id, normalized);
+      setSavedDetail({ favorite: { ...favorite, snapshot: normalized }, restaurant: normalized });
+      setSavedRestaurants((current) => current.map((item) => item.id === favorite.id ? { ...item, snapshot: normalized } : item));
+    } catch {
+      if (!favorite.snapshot) {
+        setSavedDetail(null);
+      }
+      setSavedDetailError('最新情報を取得できませんでした。少し時間をおいてもう一度試してください。');
+    } finally {
+      setSavedDetailLoadingId(null);
+    }
+  }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl]);
 
   const updateGenre = (value: string) => {
     setGenre(value);
@@ -3388,7 +3770,6 @@ export default function App() {
             message={message}
             isLoading={isLoading}
             selectedRestaurant={selectedRestaurant}
-            distanceOrigin={distanceOrigin}
             userLocation={userLocation}
             history={randomHistory}
             conditionRandom={conditionRandom}
@@ -3399,12 +3780,30 @@ export default function App() {
             mealTicketState={mealTicketState}
             spinValue={spinValue}
             resultRevealValue={resultRevealValue}
+            onTabLayout={(offsetY) => {
+              randomTabOffsetRef.current = offsetY;
+            }}
+            onResultLayout={(offsetY) => {
+              randomResultOffsetRef.current = offsetY;
+            }}
             onRandomPress={startPreparedDraw}
             onSavePress={saveSelectedRestaurant}
             onGoPress={openMap}
           />
         )}
-        {activeTab === 'save' && <SaveTab savedRestaurants={savedRestaurants} history={randomHistory} uiText={UI_TEXT[appLanguage]} />}
+        {activeTab === 'save' && (
+          <SaveTab
+            savedRestaurants={savedRestaurants}
+            history={randomHistory}
+            uiText={UI_TEXT[appLanguage]}
+            savedDetail={savedDetail}
+            savedDetailLoadingId={savedDetailLoadingId}
+            savedDetailError={savedDetailError}
+            userLocation={userLocation}
+            onSavedPress={openSavedRestaurant}
+            onSavedMapPress={openSavedMap}
+          />
+        )}
         {activeTab === 'analytics' && (
           <AnalyticsTab
             uiText={UI_TEXT[appLanguage]}
@@ -4937,7 +5336,6 @@ function RandomTab({
   message,
   isLoading,
   selectedRestaurant,
-  distanceOrigin,
   userLocation,
   history,
   conditionRandom,
@@ -4948,6 +5346,8 @@ function RandomTab({
   mealTicketState,
   spinValue,
   resultRevealValue,
+  onTabLayout,
+  onResultLayout,
   onRandomPress,
   onSavePress,
   onGoPress,
@@ -4961,7 +5361,6 @@ function RandomTab({
   message: string;
   isLoading: boolean;
   selectedRestaurant: Restaurant | null;
-  distanceOrigin: DistanceOrigin;
   userLocation: UserLocation | null;
   history: Restaurant[];
   conditionRandom: ConditionRandomState;
@@ -4972,6 +5371,8 @@ function RandomTab({
   mealTicketState: MealTicketState;
   spinValue: Animated.Value;
   resultRevealValue: Animated.Value;
+  onTabLayout: (offsetY: number) => void;
+  onResultLayout: (offsetY: number) => void;
   onRandomPress: () => void;
   onSavePress: () => void;
   onGoPress: () => void;
@@ -5049,15 +5450,41 @@ function RandomTab({
     { text: isEverythingRandom ? '直感' : '予算内', style: styles.rouletteLabelLeft },
   ];
   const visibleSelectedRestaurant = isTravelDraw && travelRevealStep !== 'restaurant' ? null : selectedRestaurant;
+  const actualTravelGenre = isTravelDraw && selectedRestaurant && !restaurantMatchesSelectedGenre(selectedRestaurant, genre)
+    ? selectedRestaurant.genre
+    : genre;
+  const hasHiddenDrawCondition = isEverythingRandom || isTravelDraw
+    || conditionRandom.area
+    || conditionRandom.budget
+    || conditionRandom.distance
+    || conditionRandom.genre;
+  const shouldShowDrawReveal = hasHiddenDrawCondition && (isLoading || selectedRestaurant != null || (isTravelDraw && travelRevealStep !== 'hidden'));
+  const revealedArea = isEverythingRandom ? uiText.allRandom : isTravelDraw && !canShowTravelArea ? '？' : displayAreaBase;
+  const revealedGenre = isEverythingRandom ? uiText.allRandom : isTravelDraw && !canShowTravelGenre ? '？' : actualTravelGenre;
+  const revealedBudget = isEverythingRandom ? 'おまかせ' : formatBudgetLimit(budgetMax, uiText);
+  const revealedDistance = isEverythingRandom ? 'おまかせ' : isTravelDraw && !canShowTravelArea ? '？' : distance;
+  const revealItems = [
+    { label: uiText.genreLabel, value: revealedGenre, active: isEverythingRandom || conditionRandom.genre || isTravelDraw },
+    { label: 'エリア', value: revealedArea, active: isEverythingRandom || conditionRandom.area || isTravelDraw },
+    { label: uiText.budget, value: revealedBudget, active: isEverythingRandom || conditionRandom.budget },
+    { label: uiText.distanceLabel, value: revealedDistance, active: isEverythingRandom || conditionRandom.distance || isTravelDraw },
+  ];
+  const language = getUiLanguage(uiText);
+  const areaLabel = language === 'en' ? 'Area' : language === 'zh' ? '地区' : language === 'ko' ? '지역' : 'エリア';
+  const formatHiddenCondition = (label: string, value: string) => value === '？' ? `${label}？` : value;
+  const conditionGenreLabel = formatHiddenCondition(uiText.genreLabel, displayGenre);
+  const conditionAreaLabel = formatHiddenCondition(areaLabel, displayArea);
+  const conditionBudgetLabel = formatHiddenCondition(uiText.budget, displayBudget);
+  const conditionDistanceLabel = formatHiddenCondition(uiText.distanceLabel, displayDistance);
 
   return (
-    <View>
+    <View onLayout={(event) => onTabLayout(event.nativeEvent.layout.y)}>
       <MealTicketPanel state={mealTicketState} compact uiText={uiText} />
       <View style={styles.drawConditionRow}>
-          <ConditionPill label={displayGenre} active />
-          <ConditionPill label={isEverythingRandom ? uiText.allRandom : displayArea} />
-          <ConditionPill label={displayBudget} />
-          <ConditionPill label={displayDistance} />
+          <ConditionPill label={conditionGenreLabel} active />
+          <ConditionPill label={conditionAreaLabel} />
+          <ConditionPill label={conditionBudgetLabel} />
+          <ConditionPill label={conditionDistanceLabel} />
       </View>
       <Pressable style={[styles.drawStage, isLoading && styles.drawStageLoading]} onPress={onRandomPress} disabled={isLoading}>
         <View style={styles.rouletteStatusPill}>
@@ -5155,13 +5582,37 @@ function RandomTab({
               </>
             )}
           </View>
-          <Text style={styles.rouletteMessage}>{message}</Text>
+          <Text style={styles.rouletteMessage} numberOfLines={3} ellipsizeMode="tail">{message}</Text>
         </View>
       </Pressable>
+      {shouldShowDrawReveal && (
+        <View style={styles.drawRevealPanel}>
+          <View style={styles.drawRevealHeader}>
+            <View>
+              <Text style={styles.drawRevealKicker}>OPEN RESULT</Text>
+              <Text style={styles.drawRevealTitle}>{isLoading ? '条件をひらいています' : '今回の抽選条件'}</Text>
+            </View>
+            <View style={styles.drawRevealBadge}>
+              <Ionicons name={isLoading ? 'sync-outline' : 'checkmark'} size={16} color="#ffffff" />
+            </View>
+          </View>
+          <View style={styles.drawRevealGrid}>
+            {revealItems.map((item) => (
+              <View key={item.label} style={[styles.drawRevealItem, item.active && styles.drawRevealItemActive]}>
+                <Text style={styles.drawRevealLabel}>{item.label}</Text>
+                <Text style={styles.drawRevealValue} numberOfLines={1}>{item.value}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
       {visibleSelectedRestaurant ? (
-        <Animated.View style={[styles.resultWrap, { opacity: resultRevealValue, transform: [{ translateY: resultTranslateY }, { scale: resultScale }] }]}>
+        <Animated.View
+          style={[styles.resultWrap, { opacity: resultRevealValue, transform: [{ translateY: resultTranslateY }, { scale: resultScale }] }]}
+          onLayout={(event) => onResultLayout(event.nativeEvent.layout.y)}
+        >
           <Text style={styles.resultKicker}>{uiText.resultKicker}</Text>
-          <ResultCard restaurant={visibleSelectedRestaurant} selectedGenre={isEverythingRandom ? 'すべて' : genre} distanceOrigin={distanceOrigin} userLocation={userLocation} uiText={uiText} onMapPress={onGoPress} />
+          <ResultCard restaurant={visibleSelectedRestaurant} userLocation={userLocation} uiText={uiText} onMapPress={onGoPress} />
           <View style={styles.resultActions}>
             <Pressable style={styles.secondaryAction} onPress={onRandomPress}>
               <Text style={styles.secondaryActionText}>{uiText.drawAgain}</Text>
@@ -5186,7 +5637,31 @@ function RandomTab({
   );
 }
 
-function SaveTab({ savedRestaurants, history, uiText }: { savedRestaurants: Restaurant[]; history: Restaurant[]; uiText: Record<string, string> }) {
+function SaveTab({
+  savedRestaurants,
+  history,
+  uiText,
+  savedDetail,
+  savedDetailLoadingId,
+  savedDetailError,
+  userLocation,
+  onSavedPress,
+  onSavedMapPress,
+}: {
+  savedRestaurants: SavedRestaurant[];
+  history: Restaurant[];
+  uiText: Record<string, string>;
+  savedDetail: { favorite: SavedRestaurant; restaurant: Restaurant } | null;
+  savedDetailLoadingId: string | null;
+  savedDetailError: string | null;
+  userLocation: UserLocation | null;
+  onSavedPress: (favorite: SavedRestaurant) => void;
+  onSavedMapPress: (restaurant: Restaurant) => void;
+}) {
+  const showHotPepperCredit =
+    history.some((restaurant) => restaurant.externalProvider === 'HOTPEPPER') ||
+    savedRestaurants.some((favorite) => favorite.provider === 'HOTPEPPER' || favorite.snapshot?.externalProvider === 'HOTPEPPER');
+
   return (
     <View>
       <PageIntro title={uiText.savedTitle} lead={uiText.savedLead} />
@@ -5196,11 +5671,83 @@ function SaveTab({ savedRestaurants, history, uiText }: { savedRestaurants: Rest
           <Text style={styles.emptyText}>{uiText.savedEmptyText}</Text>
         </View>
       ) : (
-        savedRestaurants.map((restaurant) => <RestaurantCard key={`${restaurant.id}-saved`} restaurant={restaurant} uiText={uiText} />)
+        <View style={styles.savedList}>
+          {savedRestaurants.map((favorite) => (
+            <SavedPlaceCard
+              key={`${favorite.id}-saved`}
+              favorite={favorite}
+              loading={savedDetailLoadingId === favorite.id}
+              selected={savedDetail?.favorite.id === favorite.id}
+              onPress={() => onSavedPress(favorite)}
+            />
+          ))}
+        </View>
+      )}
+      {savedDetailError && (
+        <View style={styles.savedErrorNotice}>
+          <Ionicons name="alert-circle-outline" size={18} color={ORANGE} />
+          <Text style={styles.savedErrorText}>{savedDetailError}</Text>
+        </View>
+      )}
+      {savedDetail && (
+        <View style={styles.savedDetailBlock}>
+          <SectionHeader title="最新情報" action="APIから取得" />
+          <ResultCard
+            restaurant={savedDetail.restaurant}
+            userLocation={userLocation}
+            uiText={uiText}
+            onMapPress={() => onSavedMapPress(savedDetail.restaurant)}
+          />
+        </View>
       )}
       <HistorySection history={history} uiText={uiText} />
-      {(savedRestaurants.length > 0 || history.length > 0) && <HotPepperCredit />}
+      {showHotPepperCredit && <HotPepperCredit />}
     </View>
+  );
+}
+
+function SavedPlaceCard({
+  favorite,
+  loading,
+  selected,
+  onPress,
+}: {
+  favorite: SavedRestaurant;
+  loading: boolean;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const savedDate = formatShortDate(favorite.createdAt);
+  const providerLabel = getProviderLabel(favorite.provider);
+  const snapshot = favorite.snapshot ?? null;
+  return (
+    <Pressable style={[styles.savedPlaceCard, selected && styles.savedPlaceCardActive]} onPress={onPress}>
+      {snapshot ? (
+        <View style={styles.savedPlaceThumb}>
+          <RestaurantVisual restaurant={snapshot} />
+        </View>
+      ) : (
+        <View style={styles.savedPlaceIcon}>
+          <Ionicons name={favorite.provider === 'GOOGLE_PLACES' ? 'map-outline' : 'bookmark-outline'} size={22} color={ORANGE} />
+        </View>
+      )}
+      <View style={styles.savedPlaceBody}>
+        <View style={styles.savedPlaceTopRow}>
+          <Text style={styles.savedPlaceKicker}>保存したお店</Text>
+          <Text style={styles.savedPlaceProvider}>{providerLabel}</Text>
+        </View>
+        <Text style={styles.savedPlaceTitle} numberOfLines={1}>{snapshot?.name ?? '保存したお店'}</Text>
+        <Text style={styles.savedPlaceMeta} numberOfLines={2}>{buildSavedMetaLine(favorite)}</Text>
+        <Text style={styles.savedPlaceDate}>{savedDate ? `${savedDate}に保存` : '保存済み'}</Text>
+      </View>
+      <View style={styles.savedPlaceAction}>
+        {loading ? (
+          <ActivityIndicator size="small" color={ORANGE} />
+        ) : (
+          <Ionicons name="chevron-forward" size={20} color={selected ? ORANGE : '#9b9185'} />
+        )}
+      </View>
+    </Pressable>
   );
 }
 
@@ -5471,7 +6018,7 @@ function AnalyticsTab({
   restaurants: Restaurant[];
   history: Restaurant[];
   drawHistories: DrawHistoryEntry[];
-  savedRestaurants: Restaurant[];
+  savedRestaurants: SavedRestaurant[];
   isPro: boolean;
   onStartPro: () => void;
   onAreaPress: () => void;
@@ -5743,27 +6290,24 @@ function AnalyticsMetric({ icon, label, value }: { icon: string; label: string; 
 
 function ResultCard({
   restaurant,
-  selectedGenre,
-  distanceOrigin,
   userLocation,
   uiText = UI_TEXT.ja,
   onMapPress,
 }: {
   restaurant: Restaurant;
-  selectedGenre: string;
-  distanceOrigin: DistanceOrigin;
   userLocation: UserLocation | null;
   uiText?: Record<string, string>;
   onMapPress: () => void;
 }) {
-  const stationOrigin = getNearestStationOrigin(restaurant);
-  const stationLocation = stationOrigin?.location ?? null;
-  const stationDistanceLabel = stationLocation ? getDistanceLabel(stationLocation, restaurant, uiText) : uiText.mapCheck;
+  const stationAccessItems = getNearestStationAccessItems(restaurant);
+  const primaryStation = stationAccessItems[0] ?? null;
+  const stationLocation = primaryStation?.location ?? null;
+  const stationDistanceLabel = primaryStation ? `徒歩${primaryStation.walkingMinutes}分` : uiText.mapCheck;
   const currentDistanceLabel = userLocation ? getDistanceLabel(userLocation, restaurant, uiText) : uiText.loading;
-  const minutesLabel = getWalkingMinutesLabel(stationLocation ?? distanceOrigin.location, restaurant, uiText);
-  const stationLabel = stationLocation ? formatStationOriginLabelForUi(stationLocation.label, uiText) : uiText.nearestStationFrom;
-  const miniMapDistanceLabel = stationLocation ? `${stationLabel} ${stationDistanceLabel}` : stationDistanceLabel;
+  const stationLabel = primaryStation ? primaryStation.stationName : uiText.nearestStationFrom;
+  const miniMapDistanceLabel = primaryStation ? `${primaryStation.stationName} ${stationDistanceLabel}` : stationDistanceLabel;
   const priceLabel = formatPrice(restaurant, uiText);
+  const actualGenreLabel = restaurant.genre?.trim() || 'ジャンル未分類';
   const openStatus = getOpenStatus(restaurant);
 
   return (
@@ -5786,11 +6330,10 @@ function ResultCard({
             <Text style={styles.resultMapShortcutText}>Google Map</Text>
           </Pressable>
         </View>
+        <NearestStationAccess items={stationAccessItems} />
         <View style={styles.metaRow}>
-          {selectedGenre !== 'すべて' && <MetaPill label={`${uiText.selectedPrefix} ${selectedGenre}`} />}
-          <MetaPill label={`API ${restaurant.genre}`} />
+          <MetaPill label={`ジャンル ${actualGenreLabel}`} />
           <MetaPill label={priceLabel} />
-          <MetaPill label={minutesLabel} />
         </View>
         <View style={styles.ratingRow}>
           <Text style={[styles.ratingText, getRatingValue(restaurant) == null && styles.ratingTextPending]}>{getRatingLabel(restaurant)}</Text>
@@ -5805,6 +6348,33 @@ function ResultCard({
         <MiniGoogleMap restaurant={restaurant} distanceLabel={miniMapDistanceLabel} onPress={onMapPress} />
         {!!restaurant.note && <Text style={styles.restaurantNote}>{restaurant.note}</Text>}
         {restaurant.externalProvider === 'HOTPEPPER' && <HotPepperCredit compact />}
+      </View>
+    </View>
+  );
+}
+
+function NearestStationAccess({ items }: { items: StationAccessItem[] }) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.nearestStationPanel}>
+      <Text style={styles.nearestStationTitle}>[ 最寄駅 ]</Text>
+      <View style={styles.nearestStationList}>
+        {items.map((item) => {
+          const linePrefix = item.lineLabel ? `${item.lineLabel} / ` : '';
+          return (
+            <Text
+              key={`${item.stationName}-${item.walkingMinutes}`}
+              style={styles.nearestStationText}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {linePrefix}{item.stationName}（徒歩{item.walkingMinutes}分）
+            </Text>
+          );
+        })}
       </View>
     </View>
   );
@@ -5897,13 +6467,15 @@ function RestaurantVisual({
     ? '画像提供：Google Places'
     : '画像提供：ホットペッパー グルメ';
 
-  if (large && restaurant.photoUrl) {
+  if (restaurant.photoUrl) {
     return (
-      <View style={[styles.restaurantVisualLarge, styles.restaurantVisualFrame]}>
+      <View style={[large ? styles.restaurantVisualLarge : styles.restaurantVisual, styles.restaurantVisualFrame]}>
         <Image source={{ uri: restaurant.photoUrl }} style={styles.restaurantVisualPhoto} resizeMode="cover" />
-        <Text style={styles.hotpepperImageCredit} numberOfLines={1}>
-          {imageCredit}
-        </Text>
+        {large && (
+          <Text style={styles.hotpepperImageCredit} numberOfLines={1}>
+            {imageCredit}
+          </Text>
+        )}
       </View>
     );
   }

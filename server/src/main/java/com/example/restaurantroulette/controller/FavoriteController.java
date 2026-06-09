@@ -3,6 +3,7 @@ package com.example.restaurantroulette.controller;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteCheckResponse;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteResponse;
+import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.service.FavoriteService;
 import java.util.List;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -38,6 +39,11 @@ public class FavoriteController {
   @GetMapping("/user/{userId}")
   public List<FavoriteResponse> findByUserId(@PathVariable String userId) {
     return favoriteService.findByUserId(userId);
+  }
+
+  @GetMapping("/{id}/restaurant")
+  public RestaurantResponse findRestaurant(@PathVariable String id) {
+    return favoriteService.findRestaurant(id);
   }
 
   @GetMapping("/check")

@@ -100,12 +100,34 @@ public final class ApiDtos {
       String accessToken) {
   }
 
-  public record FavoriteCreateRequest(String userId, String restaurantId) {
+  public record FavoriteCreateRequest(
+      String userId,
+      String restaurantId,
+      String provider,
+      String providerPlaceId,
+      String savedArea,
+      String savedGenre,
+      Integer savedBudgetMin,
+      Integer savedBudgetMax,
+      String userMemo,
+      String userTags) {
+    public FavoriteCreateRequest(String userId, String restaurantId) {
+      this(userId, restaurantId, null, null, null, null, null, null, null, null);
+    }
   }
 
   public record FavoriteResponse(
       String id,
       String userId,
+      String provider,
+      String providerPlaceId,
+      String restaurantId,
+      String savedArea,
+      String savedGenre,
+      Integer savedBudgetMin,
+      Integer savedBudgetMax,
+      String userMemo,
+      String userTags,
       RestaurantResponse restaurant,
       Instant createdAt) {
   }

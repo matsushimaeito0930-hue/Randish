@@ -19,12 +19,28 @@ public class FavoriteRestaurantRepository {
 
   public FavoriteRestaurant save(FavoriteRestaurant favorite) {
     jdbcClient.sql("""
-        INSERT INTO favorite_restaurants (id, user_id, restaurant_id, created_at)
-        VALUES (:id, :userId, :restaurantId, :createdAt)
+        INSERT INTO favorite_restaurants (
+          id, user_id, provider, provider_place_id, restaurant_id,
+          saved_area, saved_genre, saved_budget_min, saved_budget_max,
+          user_memo, user_tags, created_at
+        )
+        VALUES (
+          :id, :userId, :provider, :providerPlaceId, :restaurantId,
+          :savedArea, :savedGenre, :savedBudgetMin, :savedBudgetMax,
+          :userMemo, :userTags, :createdAt
+        )
         """)
         .param("id", favorite.id())
         .param("userId", favorite.userId())
+        .param("provider", favorite.provider())
+        .param("providerPlaceId", favorite.providerPlaceId())
         .param("restaurantId", favorite.restaurantId())
+        .param("savedArea", favorite.savedArea())
+        .param("savedGenre", favorite.savedGenre())
+        .param("savedBudgetMin", favorite.savedBudgetMin())
+        .param("savedBudgetMax", favorite.savedBudgetMax())
+        .param("userMemo", favorite.userMemo())
+        .param("userTags", favorite.userTags())
         .param("createdAt", Timestamp.from(favorite.createdAt()))
         .update();
     return favorite;
@@ -38,7 +54,9 @@ public class FavoriteRestaurantRepository {
 
   public List<FavoriteRestaurant> findByUserId(String userId) {
     return jdbcClient.sql("""
-        SELECT id, user_id, restaurant_id, created_at
+        SELECT id, user_id, provider, provider_place_id, restaurant_id,
+               saved_area, saved_genre, saved_budget_min, saved_budget_max,
+               user_memo, user_tags, created_at
         FROM favorite_restaurants
         WHERE user_id = :userId
         ORDER BY created_at DESC
@@ -50,7 +68,9 @@ public class FavoriteRestaurantRepository {
 
   public Optional<FavoriteRestaurant> findById(String id) {
     return jdbcClient.sql("""
-        SELECT id, user_id, restaurant_id, created_at
+        SELECT id, user_id, provider, provider_place_id, restaurant_id,
+               saved_area, saved_genre, saved_budget_min, saved_budget_max,
+               user_memo, user_tags, created_at
         FROM favorite_restaurants
         WHERE id = :id
         """)
@@ -61,7 +81,9 @@ public class FavoriteRestaurantRepository {
 
   public Optional<FavoriteRestaurant> findByUserIdAndRestaurantId(String userId, String restaurantId) {
     return jdbcClient.sql("""
-        SELECT id, user_id, restaurant_id, created_at
+        SELECT id, user_id, provider, provider_place_id, restaurant_id,
+               saved_area, saved_genre, saved_budget_min, saved_budget_max,
+               user_memo, user_tags, created_at
         FROM favorite_restaurants
         WHERE user_id = :userId AND restaurant_id = :restaurantId
         """)
@@ -71,11 +93,39 @@ public class FavoriteRestaurantRepository {
         .optional();
   }
 
+  public Optional<FavoriteRestaurant> findByUserIdAndProviderPlaceId(String userId, String provider, String providerPlaceId) {
+    return jdbcClient.sql("""
+        SELECT id, user_id, provider, provider_place_id, restaurant_id,
+               saved_area, saved_genre, saved_budget_min, saved_budget_max,
+               user_memo, user_tags, created_at
+        FROM favorite_restaurants
+        WHERE user_id = :userId AND provider = :provider AND provider_place_id = :providerPlaceId
+        """)
+        .param("userId", userId)
+        .param("provider", provider)
+        .param("providerPlaceId", providerPlaceId)
+        .query(this::mapFavorite)
+        .optional();
+  }
+
   private FavoriteRestaurant mapFavorite(ResultSet resultSet, int rowNumber) throws SQLException {
     return new FavoriteRestaurant(
         resultSet.getString("id"),
         resultSet.getString("user_id"),
+        resultSet.getString("provider"),
+        resultSet.getString("provider_place_id"),
         resultSet.getString("restaurant_id"),
+        resultSet.getString("saved_area"),
+        resultSet.getString("saved_genre"),
+        getNullableInteger(resultSet, "saved_budget_min"),
+        getNullableInteger(resultSet, "saved_budget_max"),
+        resultSet.getString("user_memo"),
+        resultSet.getString("user_tags"),
         resultSet.getTimestamp("created_at").toInstant());
+  }
+
+  private Integer getNullableInteger(ResultSet resultSet, String column) throws SQLException {
+    int value = resultSet.getInt(column);
+    return resultSet.wasNull() ? null : value;
   }
 }

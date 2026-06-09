@@ -81,6 +81,11 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   }
 
   @Override
+  public String providerKey() {
+    return PROVIDER;
+  }
+
+  @Override
   public boolean isAvailable() {
     return apiKey != null && !apiKey.isBlank();
   }
@@ -141,6 +146,23 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
           .forEach(restaurant -> restaurantsById.putIfAbsent(restaurant.id(), restaurant));
     }
     return List.copyOf(restaurantsById.values());
+  }
+
+  @Override
+  public synchronized Optional<Restaurant> findByExternalId(
+      String externalId,
+      String savedArea,
+      String savedGenre,
+      Integer savedBudgetMin,
+      Integer savedBudgetMax) {
+    if (!isAvailable() || externalId == null || externalId.isBlank()) {
+      return Optional.empty();
+    }
+    HotPepperResponse response = requestById(externalId.trim());
+    if (response == null || response.results() == null || response.results().shop() == null || response.results().shop().isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(toRestaurant(response.results().shop().getFirst()));
   }
 
   @Override
@@ -254,6 +276,19 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
             .queryParamIfPresent("genre", buildGenreCodes(plan))
             .queryParam("start", start)
             .queryParam("count", count)
+            .queryParam("format", "json")
+            .build())
+        .retrieve()
+        .body(byte[].class);
+
+    return parseResponse(responseBody == null ? null : new String(responseBody, StandardCharsets.UTF_8));
+  }
+
+  private HotPepperResponse requestById(String id) {
+    byte[] responseBody = restClient.get()
+        .uri(uriBuilder -> uriBuilder
+            .queryParam("key", apiKey)
+            .queryParam("id", id)
             .queryParam("format", "json")
             .build())
         .retrieve()

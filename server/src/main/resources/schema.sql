@@ -293,11 +293,21 @@ CREATE TABLE IF NOT EXISTS random_histories (
 CREATE TABLE IF NOT EXISTS favorite_restaurants (
   id VARCHAR(120) PRIMARY KEY,
   user_id VARCHAR(120) NOT NULL,
-  restaurant_id VARCHAR(120) NOT NULL,
+  provider VARCHAR(80) NOT NULL DEFAULT 'RANDISH_SEED',
+  provider_place_id VARCHAR(255) NOT NULL DEFAULT '',
+  restaurant_id VARCHAR(120),
+  saved_area VARCHAR(120),
+  saved_genre VARCHAR(120),
+  saved_budget_min INT,
+  saved_budget_max INT,
+  user_memo VARCHAR(1000),
+  user_tags VARCHAR(1000),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL,
   CONSTRAINT fk_favorite_restaurants_restaurant
     FOREIGN KEY (restaurant_id) REFERENCES restaurants(id),
-  CONSTRAINT uk_favorite_user_restaurant UNIQUE (user_id, restaurant_id)
+  CONSTRAINT ck_favorite_budget CHECK (
+    saved_budget_min IS NULL OR saved_budget_max IS NULL OR saved_budget_min <= saved_budget_max
+  )
 );
 
 CREATE TABLE IF NOT EXISTS visit_collections (
@@ -358,6 +368,19 @@ ALTER TABLE app_users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(40) NOT NUL
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS range_meters INT;
+ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS provider VARCHAR(80) NOT NULL DEFAULT 'RANDISH_SEED';
+ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS provider_place_id VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS saved_area VARCHAR(120);
+ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS saved_genre VARCHAR(120);
+ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS saved_budget_min INT;
+ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS saved_budget_max INT;
+ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS user_memo VARCHAR(1000);
+ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS user_tags VARCHAR(1000);
+ALTER TABLE favorite_restaurants ALTER COLUMN restaurant_id DROP NOT NULL;
+ALTER TABLE favorite_restaurants DROP CONSTRAINT IF EXISTS uk_favorite_user_restaurant;
+UPDATE favorite_restaurants
+SET provider_place_id = restaurant_id
+WHERE (provider_place_id IS NULL OR provider_place_id = '') AND restaurant_id IS NOT NULL;
 ALTER TABLE visit_collections DROP CONSTRAINT IF EXISTS uk_visit_user_restaurant;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
@@ -381,6 +404,7 @@ CREATE INDEX IF NOT EXISTS idx_histories_user ON random_histories(user_id, creat
 CREATE INDEX IF NOT EXISTS idx_histories_restaurant ON random_histories(restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorite_restaurants(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_favorites_restaurant ON favorite_restaurants(restaurant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_user_provider_place ON favorite_restaurants(user_id, provider, provider_place_id);
 CREATE INDEX IF NOT EXISTS idx_visits_user ON visit_collections(user_id, visit_date);
 CREATE INDEX IF NOT EXISTS idx_visits_user_restaurant ON visit_collections(user_id, restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_visits_restaurant ON visit_collections(restaurant_id);

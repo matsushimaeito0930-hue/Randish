@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -235,6 +236,25 @@ public class RestaurantQueryService {
 
   public void cacheForUserAction(Restaurant restaurant) {
     restaurantRepository.saveAll(List.of(restaurant));
+  }
+
+  public Optional<Restaurant> findExternalByProviderPlaceId(
+      String provider,
+      String providerPlaceId,
+      String savedArea,
+      String savedGenre,
+      Integer savedBudgetMin,
+      Integer savedBudgetMax) {
+    if (provider == null || provider.isBlank() || providerPlaceId == null || providerPlaceId.isBlank()) {
+      return Optional.empty();
+    }
+    return externalRestaurantProviders.stream()
+        .filter(ExternalRestaurantProvider::isAvailable)
+        .filter(externalProvider -> provider.equalsIgnoreCase(externalProvider.providerKey()))
+        .map(externalProvider -> externalProvider.findByExternalId(providerPlaceId, savedArea, savedGenre, savedBudgetMin, savedBudgetMax))
+        .filter(Optional::isPresent)
+        .map(Optional::get)
+        .findFirst();
   }
 
   private int fallbackCandidateLimit(int targetResultCount, int currentResultCount) {

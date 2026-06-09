@@ -75,8 +75,30 @@ export type RandomHistory = {
 export type Favorite = {
   id: string;
   userId: string;
-  restaurant: Restaurant;
+  provider: string;
+  providerPlaceId: string;
+  restaurantId: string | null;
+  savedArea: string | null;
+  savedGenre: string | null;
+  savedBudgetMin: number | null;
+  savedBudgetMax: number | null;
+  userMemo: string | null;
+  userTags: string | null;
+  restaurant: Restaurant | null;
   createdAt: string;
+};
+
+export type FavoriteCreateParams = {
+  userId: string;
+  restaurantId?: string | null;
+  provider: string;
+  providerPlaceId: string;
+  savedArea?: string | null;
+  savedGenre?: string | null;
+  savedBudgetMin?: number | null;
+  savedBudgetMax?: number | null;
+  userMemo?: string | null;
+  userTags?: string | null;
 };
 
 export type Visit = {
@@ -109,7 +131,9 @@ type RequestOptions = {
 type ApiBaseUrlInput = string | readonly string[];
 type ApiErrorKind = 'connection' | 'timeout' | 'http';
 
-const REQUEST_TIMEOUT_MS = 25000;
+const REQUEST_TIMEOUT_MS = 5000;
+const REQUEST_TOTAL_TIMEOUT_MS = 9000;
+const MIN_REQUEST_TIMEOUT_MS = 1200;
 
 export class RandishApiError extends Error {
   constructor(
@@ -172,9 +196,10 @@ const buildUrl = (baseUrl: string, path: string, params?: Record<string, string 
   return `${cleanBaseUrl}/${cleanPath}${query ? `?${query}` : ''}`;
 };
 
-const requestUrl = async <T>(url: string, options: RequestOptions = {}): Promise<T> => {
+const requestUrl = async <T>(url: string, options: RequestOptions = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> => {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const safeTimeoutMs = Math.max(MIN_REQUEST_TIMEOUT_MS, timeoutMs);
+  const timeoutId = setTimeout(() => controller.abort(), safeTimeoutMs);
 
   let response: Response;
   try {
@@ -222,15 +247,25 @@ const request = async <T>(
 ): Promise<T> => {
   const candidates = toBaseUrlCandidates(baseUrl);
   let lastError: unknown;
+  const startedAt = Date.now();
 
   for (const candidate of candidates) {
+    const remainingMs = REQUEST_TOTAL_TIMEOUT_MS - (Date.now() - startedAt);
+    if (remainingMs <= 0) {
+      break;
+    }
+
     try {
-      const result = await requestUrl<T>(buildUrl(candidate, path, params), options);
+      const result = await requestUrl<T>(
+        buildUrl(candidate, path, params),
+        options,
+        Math.min(REQUEST_TIMEOUT_MS, remainingMs),
+      );
       lastSuccessfulBaseUrl = candidate;
       return result;
     } catch (error) {
       lastError = error;
-      if (candidates.length > 1 && isApiConnectivityError(error)) {
+      if (candidates.length > 1 && isApiConnectivityError(error) && Date.now() - startedAt < REQUEST_TOTAL_TIMEOUT_MS) {
         continue;
       }
       throw error;
@@ -274,10 +309,10 @@ export const randishApi = {
   getRandomHistories: (baseUrl: ApiBaseUrlInput, userId: string) =>
     request<RandomHistory[]>(baseUrl, `api/random-histories/user/${userId}`),
 
-  addFavorite: (baseUrl: ApiBaseUrlInput, userId: string, restaurantId: string) =>
+  addFavorite: (baseUrl: ApiBaseUrlInput, favorite: FavoriteCreateParams) =>
     request<Favorite>(baseUrl, 'api/favorites', undefined, {
       method: 'POST',
-      body: { userId, restaurantId },
+      body: favorite,
     }),
 
   removeFavorite: (baseUrl: ApiBaseUrlInput, favoriteId: string) =>
@@ -285,6 +320,9 @@ export const randishApi = {
 
   getFavorites: (baseUrl: ApiBaseUrlInput, userId: string) =>
     request<Favorite[]>(baseUrl, `api/favorites/user/${userId}`),
+
+  getFavoriteRestaurant: (baseUrl: ApiBaseUrlInput, favoriteId: string) =>
+    request<Restaurant>(baseUrl, `api/favorites/${favoriteId}/restaurant`),
 
   addVisit: (baseUrl: ApiBaseUrlInput, visit: {
     userId: string;

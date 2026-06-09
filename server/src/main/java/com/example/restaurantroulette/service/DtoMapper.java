@@ -64,7 +64,20 @@ public class DtoMapper {
   }
 
   public FavoriteResponse toFavoriteResponse(FavoriteRestaurant favorite, Restaurant restaurant) {
-    return new FavoriteResponse(favorite.id(), favorite.userId(), toRestaurantResponse(restaurant), favorite.createdAt());
+    return new FavoriteResponse(
+        favorite.id(),
+        favorite.userId(),
+        favorite.provider(),
+        favorite.providerPlaceId(),
+        favorite.restaurantId(),
+        favorite.savedArea(),
+        favorite.savedGenre(),
+        favorite.savedBudgetMin(),
+        favorite.savedBudgetMax(),
+        favorite.userMemo(),
+        favorite.userTags(),
+        restaurant == null ? null : toRestaurantResponse(restaurant),
+        favorite.createdAt());
   }
 
   public VisitResponse toVisitResponse(VisitCollection visit, Restaurant restaurant) {
