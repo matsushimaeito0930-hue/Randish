@@ -37,6 +37,11 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
       Map.entry("カレー", List.of(new SearchPlan(List.of("G009"), List.of("カレー")), new SearchPlan(List.of(), List.of("スパイスカレー")))),
       Map.entry("うどん", List.of(new SearchPlan(List.of("G004"), List.of("うどん")), new SearchPlan(List.of(), List.of("うどん")))),
       Map.entry("そば", List.of(new SearchPlan(List.of("G004"), List.of("そば")), new SearchPlan(List.of(), List.of("蕎麦")))),
+      Map.entry("粉もの", List.of(
+          new SearchPlan(List.of("G016"), List.of("お好み焼き")),
+          new SearchPlan(List.of("G016"), List.of("たこ焼き")),
+          new SearchPlan(List.of("G016"), List.of("もんじゃ")),
+          new SearchPlan(List.of(), List.of("粉もの")))),
       Map.entry("たこ焼き", List.of(new SearchPlan(List.of("G016"), List.of("たこ焼き")), new SearchPlan(List.of(), List.of("たこ焼き")))),
       Map.entry("お好み焼き", List.of(new SearchPlan(List.of("G016"), List.of("お好み焼き")))),
       Map.entry("焼き鳥", List.of(new SearchPlan(List.of("G001"), List.of("焼き鳥")), new SearchPlan(List.of(), List.of("焼鳥")))),
@@ -57,6 +62,11 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
       Map.entry("スイーツ", List.of(new SearchPlan(List.of("G014"), List.of("スイーツ")))),
       Map.entry("カフェ", List.of(new SearchPlan(List.of("G014"), List.of("カフェ")))),
       Map.entry("パン", List.of(new SearchPlan(List.of("G014"), List.of("パン")), new SearchPlan(List.of("G015"), List.of("パン")))),
+      Map.entry("郷土料理", List.of(
+          new SearchPlan(List.of("G004"), List.of("郷土料理")),
+          new SearchPlan(List.of(), List.of("ご当地 グルメ")),
+          new SearchPlan(List.of(), List.of("名物料理")))),
+      Map.entry("その他", List.of(SearchPlan.noGenre())),
       Map.entry("ファストフード", List.of(
           new SearchPlan(List.of("G015"), List.of()),
           new SearchPlan(List.of(), List.of("ハンバーガー")),
@@ -186,6 +196,7 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
         continue;
       }
 
+      int sizeBeforePlan = restaurantsById.size();
       int pageCount = Math.min(RANDOM_PAGE_COUNT_PER_PLAN, Math.max(1, maxCandidates / PAGE_SIZE + 1));
       for (int index = 0; index < pageCount && restaurantsById.size() < maxCandidates; index++) {
         int maxStart = Math.max(1, available - PAGE_SIZE + 1);
@@ -203,6 +214,17 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
             .filter(restaurant -> matchesRequestedGenre(restaurant, genre))
             .filter(restaurant -> matchesBudget(restaurant, budgetMin, budgetMax))
             .forEach(restaurant -> restaurantsById.putIfAbsent(restaurant.id(), restaurant));
+      }
+
+      if (restaurantsById.size() == sizeBeforePlan && restaurantsById.size() < maxCandidates) {
+        fetchAll(area, plan, latitude, longitude, range).stream()
+            .filter(restaurant -> matchesRequestedGenre(restaurant, genre))
+            .filter(restaurant -> matchesBudget(restaurant, budgetMin, budgetMax))
+            .forEach(restaurant -> {
+              if (restaurantsById.size() < maxCandidates) {
+                restaurantsById.putIfAbsent(restaurant.id(), restaurant);
+              }
+            });
       }
     }
 
@@ -426,6 +448,7 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
       case "カレー" -> containsAny(source, List.of("カレー", "スパイス"));
       case "うどん" -> containsAny(source, List.of("うどん"));
       case "そば" -> containsAny(source, List.of("そば", "蕎麦"));
+      case "粉もの" -> containsAny(source, List.of("粉もの", "たこ焼き", "お好み焼き", "もんじゃ"));
       case "たこ焼き" -> containsAny(source, List.of("たこ焼き"));
       case "お好み焼き" -> containsAny(source, List.of("お好み焼き", "もんじゃ"));
       case "焼き鳥" -> containsAny(source, List.of("焼き鳥", "焼鳥"));
@@ -439,6 +462,7 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
       case "中華" -> containsAny(source, List.of("中華", "中国料理", "餃子", "四川"));
       case "寿司" -> containsAny(source, List.of("寿司", "鮨", "すし"));
       case "海鮮" -> containsAny(source, List.of("海鮮", "魚", "刺身", "浜焼き"));
+      case "郷土料理" -> containsAny(source, List.of("郷土料理", "郷土", "ご当地", "名物", "地元料理", "沖縄料理", "北海道料理"));
       case "肉料理" -> containsAny(source, List.of("肉", "焼肉", "ステーキ", "ハンバーグ", "ホルモン"));
       case "サラダ・野菜" -> containsAny(source, List.of("サラダ", "野菜", "ベジ"));
       case "スープ" -> containsAny(source, List.of("スープ", "汁", "鍋"));
@@ -464,6 +488,7 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
           "ドムドム"));
       case "お酒・バー" -> containsAny(source, List.of("バー", "ダイニングバー", "居酒屋", "ワイン", "ビール", "酒"));
       case "各国料理" -> containsAny(source, List.of("各国料理", "韓国", "アジア", "エスニック", "タイ", "インド", "メキシコ", "スペイン", "ベトナム"));
+      case "その他" -> true;
       default -> true;
     };
   }

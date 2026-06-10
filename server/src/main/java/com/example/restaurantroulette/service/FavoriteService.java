@@ -82,6 +82,12 @@ public class FavoriteService {
     favoriteRepository.deleteById(id);
   }
 
+  public String findOwnerUserId(String id) {
+    return favoriteRepository.findById(id)
+        .orElseThrow(() -> new NotFoundException("Favorite not found: " + id))
+        .userId();
+  }
+
   public List<FavoriteResponse> findByUserId(String userId) {
     validationService.requireUserId(userId);
     return favoriteRepository.findByUserId(userId).stream()

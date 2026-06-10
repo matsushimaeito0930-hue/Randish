@@ -98,6 +98,19 @@ public class RestaurantQueryService {
           externalOnlyRestaurants) || hasAvailableProvider;
     }
 
+    if (hasAvailableProvider && externalOnlyRestaurants.isEmpty()) {
+      hasAvailableProvider = queryProviders(
+          primaryProviders(),
+          area,
+          genre,
+          budgetMin,
+          budgetMax,
+          latitude,
+          longitude,
+          range,
+          externalOnlyRestaurants) || hasAvailableProvider;
+    }
+
     if (!hasAvailableProvider) {
       return restaurantRepository.search(area, genre, budgetMin, budgetMax);
     }

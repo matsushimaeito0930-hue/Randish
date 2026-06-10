@@ -3,18 +3,23 @@ package com.example.restaurantroulette;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
+import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.dto.ApiDtos.VisitCreateRequest;
 import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.exception.ConflictException;
+import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.repository.AppUserRepository;
 import com.example.restaurantroulette.repository.FavoriteRestaurantRepository;
 import com.example.restaurantroulette.repository.RandomHistoryRepository;
 import com.example.restaurantroulette.repository.RestaurantRepository;
 import com.example.restaurantroulette.repository.StampRepository;
 import com.example.restaurantroulette.repository.VisitCollectionRepository;
+import com.example.restaurantroulette.service.AuthService;
+import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.DtoMapper;
 import com.example.restaurantroulette.service.FavoriteService;
 import com.example.restaurantroulette.service.RandomHistoryService;
@@ -26,11 +31,22 @@ import com.example.restaurantroulette.service.UserService;
 import com.example.restaurantroulette.service.ValidationService;
 import com.example.restaurantroulette.service.VisitCollectionService;
 import com.example.restaurantroulette.service.external.ExternalRestaurantProvider;
+import com.example.restaurantroulette.service.external.HotPepperRestaurantProvider;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.Method;
+import java.time.Instant;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
+import org.springframework.web.client.RestClient;
 
 class RandishLogicTest {
   private final JdbcClient jdbcClient = JdbcClient.create(new EmbeddedDatabaseBuilder()
@@ -189,6 +205,139 @@ class RandishLogicTest {
     assertThat(restaurants).hasSize(100);
     assertThat(restaurants).allMatch(restaurant -> restaurant.externalProvider().equals("HOTPEPPER"));
     assertThat(googleLikeProvider.randomCallCount).isZero();
+  }
+
+  @Test
+  void mobileInitialGenreCatalogIsCuratedAndUnique() throws Exception {
+    String source = Files.readString(Path.of("..", "mobile", "App.tsx"));
+    String catalog = source.substring(source.indexOf("const GENRES"), source.indexOf("const LEGACY_GENRE_VISUAL_LABELS"));
+    var matcher = Pattern.compile("\\{ label: '([^']+)'").matcher(catalog);
+    var labels = new ArrayList<String>();
+    while (matcher.find()) {
+      labels.add(matcher.group(1));
+    }
+
+    assertThat(labels).containsExactly(
+        "すべて",
+        "ラーメン",
+        "焼肉",
+        "居酒屋",
+        "韓国料理",
+        "カレー",
+        "うどん",
+        "そば",
+        "粉もの",
+        "焼き鳥",
+        "ピザ",
+        "定食",
+        "餃子",
+        "中華",
+        "寿司",
+        "海鮮",
+        "洋食",
+        "イタリアン",
+        "カフェ",
+        "スイーツ",
+        "郷土料理",
+        "その他");
+    assertThat(new LinkedHashSet<>(labels)).hasSameSizeAs(labels);
+    assertThat(labels).allMatch(label -> label != null && !label.isBlank());
+    assertThat(labels).doesNotContain("スープ", "サラダ・野菜", "パン", "各国料理", "肉料理", "ファストフード", "串カツ");
+  }
+
+  @Test
+  void hotPepperGenrePlansExpandMergedAndLegacyGenres() throws Exception {
+    HotPepperRestaurantProvider provider = new HotPepperRestaurantProvider(RestClient.builder(), new ObjectMapper());
+    Method buildSearchPlans = HotPepperRestaurantProvider.class.getDeclaredMethod("buildSearchPlans", String.class);
+    buildSearchPlans.setAccessible(true);
+
+    List<?> powderPlans = (List<?>) buildSearchPlans.invoke(provider, "粉もの");
+    assertThat(powderPlans).hasSizeGreaterThanOrEqualTo(3);
+    assertThat(powderPlans.toString()).contains("お好み焼き", "たこ焼き", "もんじゃ");
+
+    List<?> legacyPlans = (List<?>) buildSearchPlans.invoke(provider, "お好み焼き");
+    assertThat(legacyPlans).isNotEmpty();
+    assertThat(legacyPlans.toString()).contains("お好み焼き");
+  }
+
+  @Test
+  void hotPepperGenreMatcherAcceptsMergedAndLegacyGenres() throws Exception {
+    HotPepperRestaurantProvider provider = new HotPepperRestaurantProvider(RestClient.builder(), new ObjectMapper());
+    Method matchesRequestedGenre = HotPepperRestaurantProvider.class.getDeclaredMethod("matchesRequestedGenre", Restaurant.class, String.class);
+    matchesRequestedGenre.setAccessible(true);
+    Restaurant okonomiyaki = new Restaurant(
+        "test-okonomiyaki",
+        "HOTPEPPER",
+        "test-okonomiyaki",
+        "大阪お好み焼き まち焼き",
+        "大阪",
+        "お好み焼き・もんじゃ",
+        1000,
+        2500,
+        0,
+        0,
+        "大阪府大阪市",
+        null,
+        "鉄板の粉もの",
+        null,
+        null);
+    Restaurant takoyaki = new Restaurant(
+        "test-takoyaki",
+        "HOTPEPPER",
+        "test-takoyaki",
+        "たこ焼き まる",
+        "大阪",
+        "お好み焼き・もんじゃ",
+        500,
+        1200,
+        0,
+        0,
+        "大阪府大阪市",
+        null,
+        null,
+        null,
+        null);
+    Restaurant localFood = new Restaurant(
+        "test-local",
+        "HOTPEPPER",
+        "test-local",
+        "出雲ご当地めし",
+        "島根",
+        "和食",
+        1000,
+        2200,
+        0,
+        0,
+        "島根県出雲市",
+        null,
+        "郷土料理と地元料理",
+        null,
+        null);
+
+    assertThat((Boolean) matchesRequestedGenre.invoke(provider, okonomiyaki, "粉もの")).isTrue();
+    assertThat((Boolean) matchesRequestedGenre.invoke(provider, takoyaki, "たこ焼き")).isTrue();
+    assertThat((Boolean) matchesRequestedGenre.invoke(provider, okonomiyaki, "お好み焼き")).isTrue();
+    assertThat((Boolean) matchesRequestedGenre.invoke(provider, localFood, "郷土料理")).isTrue();
+  }
+
+  @Test
+  void authenticatedUserGuardAllowsGuestAndRejectsMismatchedUserId() {
+    AuthService authService = Mockito.mock(AuthService.class);
+    var guard = new AuthenticatedUserService(authService);
+    var authenticatedUser = new UserResponse(
+        "user-1",
+        "user@example.com",
+        "User",
+        "SUPABASE",
+        Instant.parse("2026-06-10T00:00:00Z"),
+        Instant.parse("2026-06-10T00:00:00Z"));
+    Mockito.when(authService.me("Bearer token")).thenReturn(new AuthResponse(authenticatedUser, null));
+
+    guard.requireSameUserOrGuest(null, "guest");
+    guard.requireSameUser("Bearer token", "user-1");
+
+    assertThatThrownBy(() -> guard.requireSameUser("Bearer token", "user-2"))
+        .isInstanceOf(UnauthorizedException.class);
   }
 
   private static class FixedProvider implements ExternalRestaurantProvider {

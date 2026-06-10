@@ -477,6 +477,17 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     prefectureCount: '都道府県',
     cityAreaDefault: '県を選ぶと市町村が出ます',
     cityAreaSuffix: 'の市町村・主要エリア',
+    osakaWardsTitle: '大阪市24区',
+    osakaWardsLead: '区から探す',
+    majorAreasTitle: '人気の周辺エリア',
+    municipalitiesTitle: 'その他の市町村',
+    areaTabPopular: '人気',
+    areaTabStation: '駅',
+    areaTabArea: 'エリア',
+    popularAreasTitle: '人気の周辺エリア',
+    otherAreasTitle: 'その他の候補',
+    currentSetting: '現在の設定',
+    changeSetting: '変更する',
     seeMoreCities: 'もっとまちを見る ＞',
     hideCities: 'きゅっと戻す',
     exploreAll: '全体で探す',
@@ -503,6 +514,12 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     budget: '予算',
     budgetWithin: '円以内',
     distanceLabel: '距離',
+    distanceOriginPrefix: '周辺エリア',
+    distanceOriginCurrent: '現在地から',
+    distanceOriginRandomArea: 'ランダムの街から',
+    distanceOriginWideArea: '県全域では距離で絞りません',
+    distanceOriginKeywordArea: '市町村名で探します（距離は強く絞りません）',
+    distanceOriginAroundSuffix: 'から',
     genreLabel: 'ジャンル',
     random: 'ランダム',
     showAll: 'すべてを表示',
@@ -620,6 +637,17 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     prefectureCount: 'prefectures',
     cityAreaDefault: 'Choose a prefecture to see cities',
     cityAreaSuffix: ' cities and areas',
+    osakaWardsTitle: 'Osaka City 24 Wards',
+    osakaWardsLead: 'Search by ward',
+    majorAreasTitle: 'Popular Nearby Areas',
+    municipalitiesTitle: 'Other Cities and Towns',
+    areaTabPopular: 'Popular',
+    areaTabStation: 'Stations',
+    areaTabArea: 'Areas',
+    popularAreasTitle: 'Popular Nearby Areas',
+    otherAreasTitle: 'Other Options',
+    currentSetting: 'Current Setting',
+    changeSetting: 'Change',
     seeMoreCities: 'See more towns >',
     hideCities: 'Show fewer',
     exploreAll: 'Explore All',
@@ -646,6 +674,12 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     budget: 'Budget',
     budgetWithin: 'yen max',
     distanceLabel: 'Distance',
+    distanceOriginPrefix: 'Nearby area',
+    distanceOriginCurrent: 'within ',
+    distanceOriginRandomArea: 'random town within ',
+    distanceOriginWideArea: 'Whole-prefecture search does not narrow by distance',
+    distanceOriginKeywordArea: 'Searching by city/town name without strong distance narrowing',
+    distanceOriginAroundSuffix: ' within ',
     genreLabel: 'Genre',
     random: 'Random',
     showAll: 'Show all',
@@ -763,6 +797,17 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     prefectureCount: '都道府县',
     cityAreaDefault: '选择都道府县后显示市町村',
     cityAreaSuffix: '的市町村・主要区域',
+    osakaWardsTitle: '大阪市24区',
+    osakaWardsLead: '按区搜索',
+    majorAreasTitle: '热门周边区域',
+    municipalitiesTitle: '其他市町村',
+    areaTabPopular: '热门',
+    areaTabStation: '车站',
+    areaTabArea: '区域',
+    popularAreasTitle: '热门周边区域',
+    otherAreasTitle: '其他候选',
+    currentSetting: '当前设置',
+    changeSetting: '更改',
     seeMoreCities: '查看更多城镇 >',
     hideCities: '收起',
     exploreAll: '全域探索',
@@ -789,6 +834,12 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     budget: '预算',
     budgetWithin: '日元以内',
     distanceLabel: '距离',
+    distanceOriginPrefix: '周边区域',
+    distanceOriginCurrent: '从当前位置',
+    distanceOriginRandomArea: '从随机城镇',
+    distanceOriginWideArea: '搜索整个都道府县时不按距离缩小',
+    distanceOriginKeywordArea: '按市町村名搜索，不强制按距离缩小',
+    distanceOriginAroundSuffix: '从',
     genreLabel: '类型',
     random: '随机',
     showAll: '显示全部',
@@ -906,6 +957,17 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     prefectureCount: '도도부현',
     cityAreaDefault: '도도부현을 선택하면 시구정촌이 나옵니다',
     cityAreaSuffix: '의 시구정촌・주요 지역',
+    osakaWardsTitle: '오사카시 24구',
+    osakaWardsLead: '구에서 찾기',
+    majorAreasTitle: '인기 주변 지역',
+    municipalitiesTitle: '그 외 시구정촌',
+    areaTabPopular: '인기',
+    areaTabStation: '역',
+    areaTabArea: '지역',
+    popularAreasTitle: '인기 주변 지역',
+    otherAreasTitle: '기타 후보',
+    currentSetting: '현재 설정',
+    changeSetting: '변경',
     seeMoreCities: '동네 더 보기 >',
     hideCities: '줄여 보기',
     exploreAll: '전체 탐색',
@@ -932,6 +994,12 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     budget: '예산',
     budgetWithin: '엔 이내',
     distanceLabel: '거리',
+    distanceOriginPrefix: '주변 지역',
+    distanceOriginCurrent: '현재 위치에서',
+    distanceOriginRandomArea: '랜덤 동네에서',
+    distanceOriginWideArea: '도도부현 전체 검색은 거리로 좁히지 않습니다',
+    distanceOriginKeywordArea: '시구정촌명으로 찾고 거리는 강하게 좁히지 않습니다',
+    distanceOriginAroundSuffix: '에서',
     genreLabel: '장르',
     random: '랜덤',
     showAll: '전체 보기',
@@ -1408,6 +1476,7 @@ const AREA_PRESETS: AreaPreset[] = [
 
   { label: '三宮', group: '兵庫県 / 神戸市中央区', latitude: 34.6941, longitude: 135.1955 },
   { label: '元町', group: '兵庫県 / 神戸市中央区', latitude: 34.6896, longitude: 135.1877 },
+  { label: '花隈', group: '兵庫県 / 神戸市中央区', latitude: 34.6885, longitude: 135.1818 },
   { label: '神戸駅', group: '兵庫県 / 神戸市中央区', latitude: 34.6795, longitude: 135.1781 },
   { label: '旧居留地', group: '兵庫県 / 神戸市中央区', latitude: 34.6886, longitude: 135.193 },
   { label: '北野', group: '兵庫県 / 神戸市中央区', latitude: 34.6999, longitude: 135.1906 },
@@ -1656,6 +1725,64 @@ const SUPPLEMENTAL_AREA_NAMES: Record<string, string[]> = {
   沖縄県: ['宜野湾市', '名護市', '糸満市', '豊見城市', 'うるま市', '宮古島市', '石垣市', '南城市', '北谷町', '読谷村', '恩納村', '本部町', '与那原町'],
 };
 
+const OSAKA_CITY_WARDS = [
+  '北区',
+  '都島区',
+  '福島区',
+  '此花区',
+  '中央区',
+  '西区',
+  '港区',
+  '大正区',
+  '天王寺区',
+  '浪速区',
+  '西淀川区',
+  '淀川区',
+  '東淀川区',
+  '東成区',
+  '生野区',
+  '旭区',
+  '城東区',
+  '阿倍野区',
+  '住吉区',
+  '東住吉区',
+  '西成区',
+  '住之江区',
+  '平野区',
+  '鶴見区',
+];
+
+const OSAKA_CITY_WARD_SET = new Set(OSAKA_CITY_WARDS);
+
+const PREFECTURE_POPULAR_AREA_ORDER: Record<string, string[]> = {
+  大阪府: [
+    '梅田',
+    '大阪駅',
+    '難波',
+    '心斎橋',
+    '京橋',
+    '天王寺',
+    '鶴橋',
+    '北新地',
+    '天満',
+    '福島',
+    '中崎町',
+    '天神橋筋六丁目',
+    '南森町',
+    '堀江',
+    '新世界',
+    '本町',
+    '淀屋橋',
+    '北浜',
+    '日本橋',
+    '上本町',
+    '阿倍野',
+    '新大阪',
+    '十三',
+    '弁天町',
+  ],
+};
+
 const SUPPLEMENTAL_AREA_PRESETS: AreaPreset[] = Object.entries(SUPPLEMENTAL_AREA_NAMES).flatMap(([prefecture, labels]) =>
   labels.map((label) => ({
     label,
@@ -1683,35 +1810,50 @@ const GENRES: GenreItem[] = [
   { label: 'カレー', color: '#e5a100', image: require('./assets/category/curry.png') },
   { label: 'うどん', color: '#9a6a43', image: require('./assets/category/udon.png') },
   { label: 'そば', color: '#5d7f32', image: require('./assets/category/soba.png') },
-  { label: 'たこ焼き', color: '#e2a11a', image: require('./assets/category/takoyaki.png') },
-  { label: 'お好み焼き', color: '#e17400', image: require('./assets/category/okonomiyaki.png') },
+  { label: '粉もの', color: '#e17400', image: require('./assets/category/okonomiyaki.png') },
   { label: '焼き鳥', color: '#8d5a35', image: require('./assets/category/yakitori.png') },
   { label: 'ピザ', color: '#df482f', image: require('./assets/category/pizza.png') },
-  { label: 'ハンバーガー', color: '#dfa300', image: require('./assets/category/hamburger.png') },
   { label: '定食', color: '#2f70b3', image: require('./assets/category/teishoku.png') },
-  { label: '串カツ', color: '#a560a5', image: require('./assets/category/kushikatsu.png') },
   { label: '餃子', color: '#5f8f45', image: require('./assets/category/gyoza-new.jpg') },
-  { label: '和食', color: '#de5b3d', image: require('./assets/category/washoku.png') },
-  { label: '洋食', color: '#f28c18', image: require('./assets/category/yoshoku.png') },
-  { label: 'イタリアン', color: '#6b9144', image: require('./assets/category/italian.png') },
   { label: '中華', color: '#d94b42', image: require('./assets/category/chuka.png') },
   { label: '寿司', color: '#a06f47', image: require('./assets/category/sushi.png') },
   { label: '海鮮', color: '#3f6bad', image: require('./assets/category/seafood.png') },
-  { label: '肉料理', color: '#895f43', image: require('./assets/category/meat.png') },
-  { label: 'サラダ・野菜', color: '#6a984c', image: require('./assets/category/salad.png') },
-  { label: 'スープ', color: '#e4aa19', image: require('./assets/category/soup.png') },
-  { label: 'スイーツ', color: '#a465a4', image: require('./assets/category/sweets.png') },
+  { label: '洋食', color: '#f28c18', image: require('./assets/category/yoshoku.png') },
+  { label: 'イタリアン', color: '#6b9144', image: require('./assets/category/italian.png') },
   { label: 'カフェ', color: '#469fa0', image: require('./assets/category/cafe.png') },
-  { label: 'パン', color: '#cf6688', image: require('./assets/category/bread.png') },
-  { label: 'ファストフード', color: '#e2a61e', image: require('./assets/category/fastfood.png') },
-  { label: 'お酒・バー', color: '#426cac', image: require('./assets/category/bar.png') },
-  { label: '各国料理', color: '#a98652', image: require('./assets/category/world.png') },
+  { label: 'スイーツ', color: '#a465a4', image: require('./assets/category/sweets.png') },
+  { label: '郷土料理', color: '#de5b3d', image: require('./assets/category/washoku.png') },
+  { label: 'その他', color: '#8f7f68', image: require('./assets/category/world.png') },
 ];
 
-const getGenreVisual = (genre?: string | null) =>
-  GENRES.find((item) => item.label === genre) ?? GENRES[0];
+const LEGACY_GENRE_VISUAL_LABELS: Record<string, string> = {
+  たこ焼き: '粉もの',
+  お好み焼き: '粉もの',
+  肉料理: '焼肉',
+  串カツ: '焼き鳥',
+  和食: '定食',
+  ハンバーガー: '洋食',
+  ハンバーグ: '洋食',
+  サラダ: 'その他',
+  'サラダ・野菜': 'その他',
+  スープ: 'その他',
+  パン: 'その他',
+  ファストフード: 'その他',
+  お酒・バー: '居酒屋',
+  各国料理: 'その他',
+};
 
-const TRAVEL_GENRES = GENRES.filter((item) => item.label !== 'すべて').map((item) => item.label);
+const normalizeGenreLabel = (genre?: string | null) => {
+  const label = genre?.trim() ?? '';
+  return LEGACY_GENRE_VISUAL_LABELS[label] ?? label;
+};
+
+const getGenreVisual = (genre?: string | null) =>
+  GENRES.find((item) => item.label === normalizeGenreLabel(genre)) ?? GENRES[0];
+
+const isWideGenreLabel = (label: string) => label.length >= 6 || label.includes('・');
+
+const TRAVEL_GENRES = GENRES.filter((item) => item.label !== 'すべて' && item.label !== 'その他').map((item) => item.label);
 
 const pickRandomTravelGenre = (currentGenre: string) => pickRandomDifferent(TRAVEL_GENRES, currentGenre);
 
@@ -2404,6 +2546,7 @@ const STATION_LINE_LABELS: Record<string, string> = {
   横浜: 'JR・東急・京急・相鉄',
   渋谷: 'JR・東急・東京メトロ',
   新宿: 'JR・小田急・京王',
+  花隈: '神戸高速線',
 };
 
 const uniqueAreaPresets = (items: AreaPreset[]) => {
@@ -2428,7 +2571,20 @@ const getPrefectureFromText = (value?: string | null) => {
   if (!value) {
     return undefined;
   }
-  return PREFECTURE_REGIONS.find((item) => value.includes(item.prefecture))?.prefecture;
+  const directMatch = PREFECTURE_REGIONS.find((item) => value.includes(item.prefecture))?.prefecture;
+  if (directMatch) {
+    return directMatch;
+  }
+  const areaMatch = ALL_AREA_PRESETS.find((preset) => {
+    const groupArea = preset.group.split('/')[1]?.trim();
+    return preset.label !== '現在地'
+      && (
+        preset.group.includes(value)
+        || (groupArea ? value.includes(groupArea) || groupArea.includes(value) : false)
+        || value.includes(preset.label)
+      );
+  });
+  return areaMatch ? getPresetPrefecture(areaMatch) : undefined;
 };
 
 const isPrefectureName = (value: string) => PREFECTURE_REGIONS.some((item) => item.prefecture === value);
@@ -2480,6 +2636,28 @@ const isStationLikePreset = (preset: AreaPreset) => hasUsablePresetCoordinates(p
 
 const formatStationName = (label: string) => `${label}${label.endsWith('駅') ? '' : '駅'}`;
 
+const sortAreaPresetsForPicker = (items: AreaPreset[], prefecture: string) => {
+  const popularOrder = PREFECTURE_POPULAR_AREA_ORDER[prefecture] ?? [];
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      priority: popularOrder.includes(item.label) ? popularOrder.indexOf(item.label) : Number.POSITIVE_INFINITY,
+    }))
+    .sort((a, b) => {
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority;
+      }
+      const coordinateScoreA = hasUsablePresetCoordinates(a.item) ? 0 : 1;
+      const coordinateScoreB = hasUsablePresetCoordinates(b.item) ? 0 : 1;
+      if (coordinateScoreA !== coordinateScoreB) {
+        return coordinateScoreA - coordinateScoreB;
+      }
+      return a.index - b.index;
+    })
+    .map(({ item }) => item);
+};
+
 const getWalkingMinutesFromKm = (km: number) => Math.max(1, Math.round(km * 12.5));
 
 const getNearestStationAccessItems = (restaurant: Restaurant): StationAccessItem[] => {
@@ -2525,6 +2703,10 @@ const getCoordinatePresetForArea = (area: string) => {
     return null;
   }
 
+  if (isPrefectureName(cleanArea)) {
+    return null;
+  }
+
   const exactPreset = ALL_AREA_PRESETS.find(
     (preset) =>
       hasUsablePresetCoordinates(preset)
@@ -2535,11 +2717,9 @@ const getCoordinatePresetForArea = (area: string) => {
   }
 
   const selectedPreset = getAreaPreset(cleanArea);
-  const prefecture = isPrefectureName(cleanArea)
-    ? cleanArea
-    : selectedPreset
-      ? getPresetPrefecture(selectedPreset)
-      : getPrefectureFromText(cleanArea);
+  const prefecture = selectedPreset
+    ? getPresetPrefecture(selectedPreset)
+    : getPrefectureFromText(cleanArea);
 
   if (!prefecture) {
     return null;
@@ -2558,15 +2738,12 @@ const getCoordinatePresetForArea = (area: string) => {
         || (preset.searchValue?.includes(cleanArea) ?? false)
     ),
   );
-  const prefectureAnchor = isPrefectureName(cleanArea)
-    ? ALL_AREA_PRESETS.find((preset) => getPresetPrefecture(preset) === prefecture && hasUsablePresetCoordinates(preset))
-    : null;
-  const preset = sameAreaPreset ?? prefectureAnchor;
+  const preset = sameAreaPreset;
   if (!preset) {
     return null;
   }
 
-  return { preset, label: isPrefectureName(cleanArea) ? `${cleanArea}中心` : cleanArea };
+  return { preset, label: cleanArea };
 };
 
 const getRestaurantAreaLabel = (restaurant: Restaurant) => {
@@ -2715,7 +2892,7 @@ const pickFreshRestaurant = (items: Restaurant[], recentIds: Set<string>, curren
 };
 
 const restaurantMatchesSelectedGenre = (restaurant: Restaurant, selectedGenre: string) => {
-  const genre = selectedGenre.trim();
+  const genre = normalizeGenreLabel(selectedGenre);
   if (!genre || genre === 'すべて') {
     return true;
   }
@@ -2739,6 +2916,8 @@ const restaurantMatchesSelectedGenre = (restaurant: Restaurant, selectedGenre: s
       return includesAny(source, ['うどん']);
     case 'そば':
       return includesAny(source, ['そば', '蕎麦']);
+    case '粉もの':
+      return includesAny(source, ['粉もの', 'たこ焼き', 'お好み焼き', 'もんじゃ']);
     case 'たこ焼き':
       return includesAny(source, ['たこ焼き']);
     case 'お好み焼き':
@@ -2765,6 +2944,8 @@ const restaurantMatchesSelectedGenre = (restaurant: Restaurant, selectedGenre: s
       return includesAny(source, ['寿司', '鮨', 'すし']);
     case '海鮮':
       return includesAny(source, ['海鮮', '魚', '刺身', '浜焼き']);
+    case '郷土料理':
+      return includesAny(source, ['郷土料理', '郷土', 'ご当地', '名物', '地元料理', '沖縄料理', '北海道料理']);
     case '肉料理':
       return includesAny(source, ['肉', '焼肉', 'ステーキ', 'ハンバーグ', 'ホルモン']);
     case 'サラダ・野菜':
@@ -2800,6 +2981,8 @@ const restaurantMatchesSelectedGenre = (restaurant: Restaurant, selectedGenre: s
       return includesAny(source, ['バー', 'ダイニングバー', '居酒屋', 'ワイン', 'ビール', '酒']);
     case '各国料理':
       return includesAny(source, ['各国料理', '韓国', 'アジア', 'エスニック', 'タイ', 'インド', 'メキシコ', 'スペイン', 'ベトナム']);
+    case 'その他':
+      return true;
     default:
       return true;
   }
@@ -2886,6 +3069,7 @@ export default function App() {
   const savedDetailCacheRef = useRef(new Map<string, Restaurant>());
   const didAskLocation = useRef(false);
   const areaRef = useRef(area);
+  const userLocationRef = useRef<UserLocation | null>(userLocation);
 
   const scrollToContentTop = useCallback((animated = true) => {
     setTimeout(() => {
@@ -2901,6 +3085,10 @@ export default function App() {
   useEffect(() => {
     areaRef.current = area;
   }, [area]);
+
+  useEffect(() => {
+    userLocationRef.current = userLocation;
+  }, [userLocation]);
 
   useEffect(() => {
     setApiBaseUrl((current) => shouldReplaceWithRuntimeApiBaseUrl(current, runtimeApiBaseUrl) ? runtimeApiBaseUrl : current);
@@ -2991,12 +3179,13 @@ export default function App() {
 
   const apiParams = useMemo(
     () => {
-      const selectedPreset = getAreaPreset(area);
-      const usePresetCoordinates = selectedPreset != null && selectedPreset.label !== '現在地' && selectedPreset.useCoordinates !== false;
-      const useCurrentLocationCoordinates = (!selectedPreset || selectedPreset.label === '現在地') && (!area.trim() || area === '現在地');
+      const cleanArea = area.trim();
+      const areaCoordinatePreset = getCoordinatePresetForArea(area);
+      const useAreaCoordinates = areaCoordinatePreset != null && cleanArea !== '現在地';
+      const useCurrentLocationCoordinates = !useAreaCoordinates && (!cleanArea || cleanArea === '現在地');
       const coordinateSource =
-        usePresetCoordinates
-          ? { latitude: selectedPreset.latitude, longitude: selectedPreset.longitude }
+        useAreaCoordinates
+          ? { latitude: areaCoordinatePreset.preset.latitude, longitude: areaCoordinatePreset.preset.longitude }
           : useCurrentLocationCoordinates
             ? userLocation
             : null;
@@ -3089,7 +3278,7 @@ export default function App() {
       if (mode === 'sync-search' || areaRef.current === '現在地') {
         setLocationStatus('現在地取得には expo-location が必要です');
       }
-      return;
+      return null;
     }
 
     try {
@@ -3101,7 +3290,7 @@ export default function App() {
         if (mode === 'sync-search' || areaRef.current === '現在地') {
           setLocationStatus('位置情報の許可がオフです');
         }
-        return;
+        return null;
       }
 
       const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
@@ -3123,18 +3312,22 @@ export default function App() {
         label = areaRef.current;
       }
 
-      setUserLocation({ ...coords, label });
+      const nextLocation = { ...coords, label };
+      userLocationRef.current = nextLocation;
+      setUserLocation(nextLocation);
       if (mode === 'sync-search') {
-        setArea(label);
+        setArea('現在地');
         setLocationStatus(formatLocationStatus(prefecture, label));
       } else if (areaRef.current === '現在地') {
-        setArea(label);
+        setArea('現在地');
         setLocationStatus(formatLocationStatus(prefecture, label));
       }
+      return nextLocation;
     } catch {
       if (mode === 'sync-search' || areaRef.current === '現在地') {
         setLocationStatus('現在地を取得できませんでした');
       }
+      return null;
     }
   }, []);
 
@@ -3273,15 +3466,38 @@ export default function App() {
         setMessage(`エリアを開きました。${travelAreaLabel}`);
       }, 920);
     }
+    const latestLocation = userLocationRef.current;
+    const effectiveDrawApiParams = areaRef.current.trim() === '現在地' && latestLocation
+      ? {
+        ...drawApiParams,
+        area: undefined,
+        latitude: latestLocation.latitude,
+        longitude: latestLocation.longitude,
+        range: toHotPepperRange(distance),
+      }
+      : drawApiParams;
     const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
     let alternativesCache: Restaurant[] | null = null;
+    const fetchCandidatesWithParams = async (params: typeof drawApiParams, allowGenreMismatchForFilter = false) => {
+      const data = await randishApi.getRestaurants(apiBaseUrlCandidates, params);
+      syncWorkingApiBaseUrl();
+      const normalizedCandidates = data.map(normalizeRestaurant);
+      return allowGenreMismatchForFilter
+        ? normalizedCandidates
+        : normalizedCandidates.filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
+    };
+    const chooseFromListWithParams = async (params: typeof drawApiParams, allowGenreMismatchForFilter: boolean, currentId?: string) => {
+      const candidates = await fetchCandidatesWithParams(params, allowGenreMismatchForFilter);
+      if (!candidates.length) {
+        return null;
+      }
+      return pickFreshRestaurant(candidates, recentIds, currentId) ?? pickRandomRestaurant(candidates);
+    };
     const loadAlternatives = async () => {
       if (alternativesCache) {
         return alternativesCache;
       }
-      alternativesCache = (await randishApi.getRestaurants(apiBaseUrlCandidates, drawApiParams))
-        .map(normalizeRestaurant)
-        .filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
+      alternativesCache = await fetchCandidatesWithParams(effectiveDrawApiParams, false);
       return alternativesCache;
     };
 
@@ -3295,56 +3511,91 @@ export default function App() {
         return normalizeRestaurant(data);
       };
       let normalized: Restaurant | null = null;
-      let relaxedTravelMessage: string | null = null;
+      let relaxedDrawMessage: string | null = null;
       let allowGenreMismatch = false;
       try {
-        normalized = await chooseWithParams(drawApiParams);
+        normalized = await chooseWithParams(effectiveDrawApiParams);
       } catch (error) {
-        if (!isTravelDraw || !isNoRestaurantMatchError(error)) {
+        if (!isNoRestaurantMatchError(error)) {
           throw error;
         }
-        const fallbackAttempts = [
-          {
-            params: { ...drawApiParams, genre: undefined },
-            message: `${genre}の候補が少ないので、ジャンルを広げました。`,
-            allowGenreMismatch: true,
-          },
-          {
-            params: { ...drawApiParams, range: undefined },
-            message: '近くの候補が少ないので、距離を広げました。',
-            allowGenreMismatch: false,
-          },
-          {
-            params: { ...drawApiParams, genre: undefined, range: undefined },
-            message: '候補が少ないので、ジャンルと距離を広げました。',
-            allowGenreMismatch: true,
-          },
-          {
-            params: { ...drawApiParams, genre: undefined, latitude: undefined, longitude: undefined, range: undefined },
-            message: '旅先エリアで広めに探しました。',
-            allowGenreMismatch: true,
-          },
-        ];
-        let lastError: unknown = error;
-        for (const attempt of fallbackAttempts) {
-          try {
-            normalized = await chooseWithParams(attempt.params);
-            relaxedTravelMessage = attempt.message;
-            allowGenreMismatch = attempt.allowGenreMismatch;
-            break;
-          } catch (fallbackError) {
-            lastError = fallbackError;
-            if (!isNoRestaurantMatchError(fallbackError)) {
-              throw fallbackError;
+        normalized = await chooseFromListWithParams(effectiveDrawApiParams, false);
+        if (normalized) {
+          relaxedDrawMessage = '候補リストから一店を選びました。';
+        } else {
+          const fallbackAttempts = isTravelDraw
+            ? [
+              {
+                params: { ...effectiveDrawApiParams, genre: undefined },
+                message: `${genre}の候補が少ないので、ジャンルを広げました。`,
+                allowGenreMismatch: true,
+              },
+              {
+                params: { ...effectiveDrawApiParams, range: undefined },
+                message: '近くの候補が少ないので、距離を広げました。',
+                allowGenreMismatch: false,
+              },
+              {
+                params: { ...effectiveDrawApiParams, genre: undefined, range: undefined },
+                message: '候補が少ないので、ジャンルと距離を広げました。',
+                allowGenreMismatch: true,
+              },
+              {
+                params: { ...effectiveDrawApiParams, genre: undefined, latitude: undefined, longitude: undefined, range: undefined },
+                message: '旅先エリアで広めに探しました。',
+                allowGenreMismatch: true,
+              },
+            ]
+            : [
+              {
+                params: { ...effectiveDrawApiParams, range: undefined },
+                message: '近くの候補が少ないので、同じジャンルで距離を広げました。',
+                allowGenreMismatch: false,
+              },
+            ];
+          let lastError: unknown = error;
+          for (const attempt of fallbackAttempts) {
+            try {
+              const candidate = await chooseWithParams(attempt.params);
+              if (!attempt.allowGenreMismatch && !restaurantMatchesSelectedGenre(candidate, genre)) {
+                const genreMatchedCandidate = await chooseFromListWithParams(attempt.params, false, candidate.id);
+                if (!genreMatchedCandidate) {
+                  lastError = new Error(`${genre}に合う候補が見つかりませんでした。`);
+                  continue;
+                }
+                normalized = genreMatchedCandidate;
+              } else {
+                normalized = candidate;
+              }
+              relaxedDrawMessage = attempt.message;
+              allowGenreMismatch = attempt.allowGenreMismatch;
+              break;
+            } catch (fallbackError) {
+              lastError = fallbackError;
+              if (!isNoRestaurantMatchError(fallbackError)) {
+                throw fallbackError;
+              }
+              normalized = await chooseFromListWithParams(attempt.params, attempt.allowGenreMismatch);
+              if (normalized) {
+                relaxedDrawMessage = attempt.message;
+                allowGenreMismatch = attempt.allowGenreMismatch;
+                break;
+              }
             }
           }
-        }
-        if (!normalized) {
-          throw lastError;
+          if (!normalized) {
+            throw lastError;
+          }
         }
       }
       if (!allowGenreMismatch && !restaurantMatchesSelectedGenre(normalized, genre)) {
-        const alternatives = await loadAlternatives();
+        let alternatives = await loadAlternatives();
+        if (!alternatives.length) {
+          alternatives = await fetchCandidatesWithParams({ ...effectiveDrawApiParams, range: undefined }, false);
+          if (alternatives.length) {
+            relaxedDrawMessage = '近くの候補が少ないので、同じジャンルで距離を広げました。';
+          }
+        }
         if (!alternatives.length) {
           throw new Error(`${genre}に合う候補が見つかりませんでした。`);
         }
@@ -3360,7 +3611,7 @@ export default function App() {
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
       recordDrawForAnalytics(normalized);
       const doneMessage = recentIds.has(normalized.id) ? '候補が一巡しています。条件を広げると新しい店が出やすくなります。' : drawAnimation.doneMessage;
-      setMessage(isTravelDraw ? relaxedTravelMessage ?? '最後にお店を開きます。' : doneMessage);
+      setMessage(isTravelDraw ? relaxedDrawMessage ?? '最後にお店を開きます。' : relaxedDrawMessage ?? doneMessage);
       if (isTravelDraw) {
         scheduleTravelReveal(() => {
           setTravelRevealStep('restaurant');
@@ -3378,13 +3629,16 @@ export default function App() {
       setSelectedRestaurant(null);
       logApiUiError('condition draw failed', error, apiBaseUrlCandidates);
       const diagnosticMessage = isApiConnectivityError(error) ? null : await loadGenreDiagnosticMessage();
-      setMessage(isTravelDraw && isNoRestaurantMatchError(error)
+      const noMatchError = isNoRestaurantMatchError(error) || toDebugErrorMessage(error).includes('候補が見つかりません');
+      setMessage(isTravelDraw && noMatchError
         ? 'この旅先は候補が少なすぎました。もう一度押すと別の旅先で探せます。'
-        : diagnosticMessage ?? API_DRAW_MESSAGE);
+        : noMatchError
+          ? diagnosticMessage ?? '条件に合う候補が見つかりませんでした。距離・予算・ジャンルを少し広げてください。'
+          : diagnosticMessage ?? API_DRAW_MESSAGE);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, area, drawApiParams, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
+  }, [apiBaseUrlCandidates, area, distance, drawApiParams, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
@@ -3420,7 +3674,7 @@ export default function App() {
     }
   }, [apiBaseUrlCandidates, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
 
-  const startPreparedDraw = useCallback(() => {
+  const startPreparedDraw = useCallback(async () => {
     if (isLoading) {
       return;
     }
@@ -3440,8 +3694,16 @@ export default function App() {
       chooseEverythingRandom();
       return;
     }
+    if (areaRef.current.trim() === '現在地' && !userLocationRef.current) {
+      setMessage('現在地を確認してから抽選します。');
+      const nextLocation = await requestCurrentLocation('sync-search');
+      if (!nextLocation) {
+        setMessage('現在地が取得できませんでした。位置情報を許可するか、エリアを選んでください。');
+        return;
+      }
+    }
     chooseRandomRestaurant();
-  }, [chooseEverythingRandom, chooseRandomRestaurant, drawMode, isLoading, mealTicketState, scrollToContentTop]);
+  }, [chooseEverythingRandom, chooseRandomRestaurant, drawMode, isLoading, mealTicketState, requestCurrentLocation, scrollToContentTop]);
 
   const saveSelectedRestaurant = useCallback(async () => {
     if (!selectedRestaurant) {
@@ -3570,6 +3832,7 @@ export default function App() {
 
   const updateArea = (value: string) => {
     const preset = getAreaPreset(value);
+    const inferredPrefecture = getPrefectureFromText(value);
     if (value === '現在地') {
       setLocationStatus(userLocation ? `${userLocation.label} 周辺から探します` : '現在地を確認できます');
     } else if (preset?.useCoordinates === false) {
@@ -3578,6 +3841,10 @@ export default function App() {
       setLocationStatus(formatAreaPresetStatus(preset));
     } else if (isPrefectureName(value)) {
       setLocationStatus(formatLocationStatus(value, '全域'));
+    } else if (inferredPrefecture) {
+      setLocationStatus(formatLocationStatus(inferredPrefecture, value));
+    } else {
+      setLocationStatus(formatLocationStatus(undefined, value));
     }
     setArea(value);
     setDrawMode('condition');
@@ -3754,6 +4021,7 @@ export default function App() {
             onBudgetMaxChange={updateBudgetMax}
             onDistanceChange={updateDistance}
             onConditionRandomize={markConditionRandom}
+            onRequestCurrentLocation={requestCurrentLocation}
             onSearch={loadRestaurants}
             onRandomPress={prepareConditionDraw}
             onAllRandomPress={prepareEverythingDraw}
@@ -4160,8 +4428,8 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
             <Text style={styles.mealTicketNightTitle}>{uiText.proLateNightGenres}</Text>
           </View>
           <View style={styles.mealTicketNightChips}>
-            {midnightTicket.genreHints.map((hint) => (
-              <View key={hint} style={styles.mealTicketNightChip}>
+            {midnightTicket.genreHints.map((hint, index) => (
+              <View key={`${hint}-${index}`} style={styles.mealTicketNightChip}>
                 <Text style={styles.mealTicketNightChipText}>{hint}</Text>
               </View>
             ))}
@@ -4383,9 +4651,23 @@ function HomeLocationPanel({
       return getPresetPrefecture(label) === selectedPrefecture;
     });
   const currentAreaPreset = selectedPreset && selectedPrefecture && getPresetPrefecture(selectedPreset) === selectedPrefecture ? selectedPreset : undefined;
-  const allFavoriteAreas = uniqueAreaPresets([...(currentAreaPreset ? [currentAreaPreset] : []), ...historyAreaPresets, ...prefecturePresets])
-    .filter((preset) => preset.label !== '現在地');
-  const favoriteAreas = showAllFavorites ? allFavoriteAreas : allFavoriteAreas.slice(0, 8);
+  const allFavoriteAreas = sortAreaPresetsForPicker(
+    uniqueAreaPresets([...(currentAreaPreset ? [currentAreaPreset] : []), ...historyAreaPresets, ...prefecturePresets])
+      .filter((preset) => preset.label !== '現在地'),
+    selectedPrefecture ?? '',
+  );
+  const isOsakaPrefecture = selectedPrefecture === '大阪府';
+  const isOsakaWardPreset = (preset: AreaPreset) => isOsakaPrefecture && OSAKA_CITY_WARD_SET.has(preset.label);
+  const osakaPrimaryAreas = isOsakaPrefecture
+    ? allFavoriteAreas.filter((preset) => preset.useCoordinates !== false && !isOsakaWardPreset(preset))
+    : [];
+  const osakaMunicipalityAreas = isOsakaPrefecture
+    ? allFavoriteAreas.filter((preset) => preset.useCoordinates === false && !isOsakaWardPreset(preset))
+    : [];
+  const favoriteSourceAreas = isOsakaPrefecture ? osakaPrimaryAreas : allFavoriteAreas;
+  const favoriteAreas = showAllFavorites ? favoriteSourceAreas : favoriteSourceAreas.slice(0, isOsakaPrefecture ? 12 : 8);
+  const osakaMunicipalities = showAllFavorites ? osakaMunicipalityAreas : osakaMunicipalityAreas.slice(0, 12);
+  const favoriteToggleCount = isOsakaPrefecture ? osakaPrimaryAreas.length + osakaMunicipalityAreas.length : allFavoriteAreas.length;
   const favoriteAreaTitle = selectedPrefecture ? `${selectedPrefecture}${t.cityAreaSuffix}` : t.cityAreaDefault;
   const regionRows = AREA_REGION_GROUPS.map((group) => ({
     ...group,
@@ -4618,8 +4900,8 @@ function HomeLocationPanel({
                   })}
                 </View>
               )}
-              {accountMenuItems.map((item) => (
-                <Pressable key={item.label} style={styles.homeAccountMenuItem}>
+              {accountMenuItems.map((item, index) => (
+                <Pressable key={`${item.label}-${index}`} style={styles.homeAccountMenuItem}>
                   <View style={styles.homeAccountMenuIcon}>
                     <Ionicons name={item.icon} size={18} color={ORANGE} />
                   </View>
@@ -4821,7 +5103,7 @@ function HomeLocationPanel({
             <View style={styles.homeSubsectionHeader}>
               <Ionicons name="trail-sign-outline" size={28} color={INK} />
               <Text style={styles.homeSubsectionTitle}>{favoriteAreaTitle}</Text>
-              {!!selectedPrefecture && allFavoriteAreas.length > 8 && (
+              {!!selectedPrefecture && favoriteToggleCount > (isOsakaPrefecture ? 24 : 8) && (
                 <Pressable onPress={() => setShowAllFavorites((current) => !current)}>
                   <Text style={styles.homeSectionSeeAll}>{showAllFavorites ? t.hideCities : t.seeMoreCities}</Text>
                 </Pressable>
@@ -4839,6 +5121,40 @@ function HomeLocationPanel({
                   </View>
                   <Ionicons name="arrow-forward" size={20} color="#ffffff" />
                 </Pressable>
+                {isOsakaPrefecture && (
+                  <View style={styles.homeAreaGroupCard}>
+                    <View style={styles.homeAreaGroupHeader}>
+                      <View style={styles.homeAreaGroupIcon}>
+                        <Ionicons name="business-outline" size={18} color={ORANGE} />
+                      </View>
+                      <View style={styles.homeAreaGroupText}>
+                        <Text style={styles.homeAreaGroupTitle}>{t.osakaWardsTitle}</Text>
+                        <Text style={styles.homeAreaGroupLead}>{t.osakaWardsLead}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.homeWardGrid}>
+                      {OSAKA_CITY_WARDS.map((ward) => {
+                        const itemValue = `大阪市${ward}`;
+                        const selected = area === itemValue || area === ward;
+                        return (
+                          <Pressable
+                            key={ward}
+                            style={[styles.homeWardChip, selected && styles.homeWardChipActive]}
+                            onPress={() => openConditionsForArea(itemValue)}
+                          >
+                            <Text style={[styles.homeWardText, selected && styles.homeWardTextActive]}>{ward}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+                {isOsakaPrefecture && favoriteAreas.length > 0 && (
+                  <View style={styles.homeAreaInlineHeader}>
+                    <Ionicons name="train-outline" size={15} color={ORANGE} />
+                    <Text style={styles.homeAreaInlineTitle}>{t.majorAreasTitle}</Text>
+                  </View>
+                )}
                 <View style={styles.homeFavoriteWrap}>
                   {favoriteAreas.map((item, index) => {
                     const itemValue = getAreaPresetValue(item);
@@ -4851,6 +5167,26 @@ function HomeLocationPanel({
                     );
                   })}
                 </View>
+                {isOsakaPrefecture && osakaMunicipalities.length > 0 && (
+                  <>
+                    <View style={styles.homeAreaInlineHeader}>
+                      <Ionicons name="map-outline" size={15} color={ORANGE} />
+                      <Text style={styles.homeAreaInlineTitle}>{t.municipalitiesTitle}</Text>
+                    </View>
+                    <View style={styles.homeFavoriteWrap}>
+                      {osakaMunicipalities.map((item, index) => {
+                        const itemValue = getAreaPresetValue(item);
+                        const selected = area === itemValue || area === item.label;
+                        return (
+                          <Pressable key={`${getAreaPresetKey(item)}-municipality-${index}`} style={[styles.homeFavoriteChip, selected && styles.homeFavoriteChipActive]} onPress={() => openConditionsForArea(itemValue)}>
+                            <Ionicons name={selected ? 'checkmark-circle' : 'location-outline'} size={18} color={selected ? ORANGE : '#9b9184'} />
+                            <Text style={[styles.homeFavoriteText, selected && styles.homeFavoriteTextActive]}>{item.label}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
               </>
             ) : (
               <View style={styles.homePrefecturePrompt}>
@@ -4883,6 +5219,7 @@ function FilterPanel({
   onBudgetMaxChange,
   onDistanceChange,
   onRandomized,
+  onUseCurrentLocation,
   onSubmit,
 }: {
   area: string;
@@ -4902,14 +5239,25 @@ function FilterPanel({
   onBudgetMaxChange: (value: string) => void;
   onDistanceChange: (value: string) => void;
   onRandomized?: (field: ConditionRandomField) => void;
+  onUseCurrentLocation?: () => void | Promise<unknown>;
   onSubmit: () => void;
 }) {
   const [showAllGenres, setShowAllGenres] = useState(false);
   const randomState = conditionRandom ?? { area: false, budget: false, distance: false, genre: false };
   const selectableGenres = compact ? genres.slice(1) : genres;
-  const mainGenres = selectableGenres.slice(0, 12);
+  const mainGenres = selectableGenres;
   const selectedHiddenGenre = selectableGenres.find((item) => item.label === genre && !mainGenres.some((mainGenre) => mainGenre.label === item.label));
-  const visibleGenres = showAllGenres ? selectableGenres : selectedHiddenGenre ? [...mainGenres, selectedHiddenGenre] : mainGenres;
+  const sortGenresForDisplay = useCallback((items: GenreItem[]) => {
+    return [...items].sort((a, b) => {
+      const aWide = isWideGenreLabel(a.label);
+      const bWide = isWideGenreLabel(b.label);
+      if (aWide !== bWide) {
+        return aWide ? 1 : -1;
+      }
+      return 0;
+    });
+  }, []);
+  const visibleGenres = sortGenresForDisplay(showAllGenres ? selectableGenres : selectedHiddenGenre ? [...mainGenres, selectedHiddenGenre] : mainGenres);
   const selectArea = useCallback((value: string) => {
     if (randomState.area) {
       onRandomized?.('area');
@@ -4948,6 +5296,26 @@ function FilterPanel({
       onRandomized?.('genre');
     }
   }, [genre, onGenreChange, onRandomized, randomState.genre, selectableGenres]);
+  const distanceOriginHelp = useMemo(() => {
+    const cleanArea = area.trim();
+    const prefix = uiText.distanceOriginPrefix;
+    if (randomState.area) {
+      return `${prefix}: ${uiText.distanceOriginRandomArea}${distance}`;
+    }
+    if (!cleanArea || cleanArea === '現在地') {
+      return `${prefix}: ${uiText.distanceOriginCurrent}${distance}`;
+    }
+    if (isPrefectureName(cleanArea)) {
+      return uiText.distanceOriginWideArea;
+    }
+
+    const coordinatePreset = getCoordinatePresetForArea(cleanArea);
+    if (coordinatePreset) {
+      return `${prefix}: ${formatStationName(coordinatePreset.preset.label)}${uiText.distanceOriginAroundSuffix}${distance}`;
+    }
+
+    return uiText.distanceOriginKeywordArea;
+  }, [area, distance, randomState.area, uiText]);
 
   return (
     <View style={styles.filterPanel}>
@@ -4980,13 +5348,13 @@ function FilterPanel({
               <Text style={styles.areaRandomHiddenLead}>{uiText.areaHiddenLead}</Text>
             </View>
           ) : (
-            <AreaPresetPicker selectedArea={area} presets={areaPresets} onSelect={selectArea} uiText={uiText} />
+            <AreaPresetPicker selectedArea={area} distance={distance} presets={areaPresets} onSelect={selectArea} onUseCurrentLocation={onUseCurrentLocation} uiText={uiText} />
           )}
         </>
       )}
       <View style={styles.filterGrid}>
         <SmallField label={uiText.budget} value={budgetMax} suffix={uiText.budgetWithin} onChangeText={onBudgetMaxChange} onRandom={randomizeBudget} randomActive={randomState.budget} randomLabel={uiText.random} />
-        <SegmentedValue label={uiText.distanceLabel} value={distance} values={DISTANCE_OPTIONS} onChange={onDistanceChange} onRandom={randomizeDistance} randomActive={randomState.distance} randomLabel={uiText.random} />
+        <SegmentedValue label={uiText.distanceLabel} value={distance} values={DISTANCE_OPTIONS} onChange={onDistanceChange} onRandom={randomizeDistance} randomActive={randomState.distance} randomLabel={uiText.random} helperText={distanceOriginHelp} />
       </View>
       <View style={styles.genreSectionHeader}>
         <Text style={styles.genreSectionTitle}>{uiText.genreLabel}</Text>
@@ -4996,24 +5364,33 @@ function FilterPanel({
         </Pressable>
       </View>
       <View style={styles.genreGridTwo}>
-        {visibleGenres.map((item) => {
+        {visibleGenres.map((item, index) => {
           const selected = !randomState.genre && genre === item.label;
+          const wideGenre = isWideGenreLabel(item.label);
           return (
             <Pressable
-              key={item.label}
-              style={[styles.genreChip, selected && { borderColor: item.color, backgroundColor: '#fff7ed' }]}
+              key={`${item.label}-${index}`}
+              style={[styles.genreChip, wideGenre && styles.genreChipWide, selected && { borderColor: item.color, backgroundColor: '#fff7ed' }]}
               onPress={() => onGenreChange(item.label)}
             >
               <View
                 style={[
                   styles.genreIconChip,
+                  wideGenre && styles.genreIconChipCompact,
                   { backgroundColor: `${item.color}12`, borderColor: `${item.color}30` },
                   selected && { backgroundColor: '#ffffff', borderColor: item.color },
                 ]}
               >
-                <Image source={item.image} style={[styles.genreChipImage, selected && styles.genreChipImageActive]} resizeMode="contain" />
+                <Image source={item.image} style={[styles.genreChipImage, wideGenre && styles.genreChipImageCompact, selected && styles.genreChipImageActive]} resizeMode="contain" />
               </View>
-              <Text style={[styles.genreChipText, selected && { color: item.color }]} numberOfLines={1}>{item.label}</Text>
+              <Text
+                style={[styles.genreChipText, wideGenre && styles.genreChipTextWide, selected && { color: item.color }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+              >
+                {item.label}
+              </Text>
             </Pressable>
           );
         })}
@@ -5027,27 +5404,64 @@ function FilterPanel({
   );
 }
 
+type AreaPickerMode = 'popular' | 'station' | 'area';
+
 function AreaPresetPicker({
   selectedArea,
+  distance,
   presets,
   onSelect,
+  onUseCurrentLocation,
   uiText = UI_TEXT.ja,
 }: {
   selectedArea: string;
+  distance: string;
   presets: AreaPreset[];
   onSelect: (value: string) => void;
+  onUseCurrentLocation?: () => void | Promise<unknown>;
   uiText?: Record<string, string>;
 }) {
-  const prefectures = useMemo(() => Array.from(new Set(presets.map(getPresetPrefecture))), [presets]);
+  const prefectures = useMemo(() => Array.from(new Set(presets.map(getPresetPrefecture).filter(isPrefectureName))), [presets]);
   const selectedPreset = getAreaPreset(selectedArea);
+  const selectedAreaPrefecture = selectedPreset
+    ? getPresetPrefecture(selectedPreset)
+    : isPrefectureName(selectedArea)
+      ? selectedArea
+      : getPrefectureFromText(selectedArea);
+  const fallbackPrefecture = selectedAreaPrefecture && prefectures.includes(selectedAreaPrefecture)
+    ? selectedAreaPrefecture
+    : prefectures[0] ?? '大阪府';
   const [areaQuery, setAreaQuery] = useState('');
-  const [selectedPrefecture, setSelectedPrefecture] = useState(
-    selectedPreset ? getPresetPrefecture(selectedPreset) : isPrefectureName(selectedArea) ? selectedArea : prefectures[0] ?? '現在地',
-  );
+  const [selectedPrefecture, setSelectedPrefecture] = useState(fallbackPrefecture);
+  const [areaMode, setAreaMode] = useState<AreaPickerMode>('popular');
+  const [showAllPopularAreas, setShowAllPopularAreas] = useState(false);
+  const [showAllOtherAreas, setShowAllOtherAreas] = useState(false);
   const selectedPrefectureAreas = useMemo(
-    () => uniqueAreaPresets(presets.filter((preset) => getPresetPrefecture(preset) === selectedPrefecture)),
+    () => sortAreaPresetsForPicker(
+      uniqueAreaPresets(
+        presets.filter((preset) =>
+          getPresetPrefecture(preset) === selectedPrefecture
+          && preset.label !== '現在地'
+          && preset.label !== selectedPrefecture,
+        ),
+      ),
+      selectedPrefecture,
+    ),
     [presets, selectedPrefecture],
   );
+  const filteredPrefectureAreas = useMemo(() => {
+    if (areaMode === 'station') {
+      return selectedPrefectureAreas.filter(isStationLikePreset);
+    }
+    if (areaMode === 'area') {
+      return selectedPrefectureAreas.filter((preset) => !isStationLikePreset(preset));
+    }
+    return selectedPrefectureAreas;
+  }, [areaMode, selectedPrefectureAreas]);
+  const popularAreaPresets = filteredPrefectureAreas.filter(hasUsablePresetCoordinates);
+  const otherAreaPresets = filteredPrefectureAreas.filter((preset) => !hasUsablePresetCoordinates(preset));
+  const visiblePopularAreas = showAllPopularAreas ? popularAreaPresets : popularAreaPresets.slice(0, 12);
+  const visibleOtherAreas = showAllOtherAreas ? otherAreaPresets : otherAreaPresets.slice(0, 12);
   const searchResults = useMemo(() => {
     const query = areaQuery.trim().toLowerCase();
     if (!query) {
@@ -5056,6 +5470,54 @@ function AreaPresetPicker({
     return uniqueAreaPresets(presets.filter((preset) => getAreaPresetSearchText(preset).includes(query))).slice(0, 24);
   }, [areaQuery, presets]);
   const hasQuery = areaQuery.trim().length > 0;
+  const tabs: { key: AreaPickerMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { key: 'popular', label: uiText.areaTabPopular, icon: 'flame-outline' },
+    { key: 'station', label: uiText.areaTabStation, icon: 'train-outline' },
+    { key: 'area', label: uiText.areaTabArea, icon: 'location-outline' },
+  ];
+  const currentLocationSelected = selectedArea.trim() === '現在地';
+  const currentLocationHelp = `${uiText.distanceOriginPrefix}: ${uiText.distanceOriginCurrent}${distance}`;
+  const selectedSettingText = currentLocationSelected
+      ? `${uiText.currentLocation} / ${distance}`
+    : selectedPreset
+      ? `${selectedPreset.group} / ${selectedPreset.label}周辺`
+    : selectedArea
+      ? `${selectedArea}周辺`
+      : `${selectedPrefecture} / 全域`;
+
+  useEffect(() => {
+    setSelectedPrefecture(fallbackPrefecture);
+  }, [fallbackPrefecture]);
+
+  useEffect(() => {
+    setShowAllPopularAreas(false);
+    setShowAllOtherAreas(false);
+  }, [areaMode, selectedPrefecture]);
+
+  const selectPreset = (item: AreaPreset) => {
+    onSelect(getAreaPresetValue(item));
+    setSelectedPrefecture(getPresetPrefecture(item));
+  };
+
+  const selectCurrentLocation = async () => {
+    onSelect('現在地');
+    setAreaQuery('');
+    await onUseCurrentLocation?.();
+  };
+
+  const renderAreaChoice = (item: AreaPreset, index: number) => {
+    const itemValue = getAreaPresetValue(item);
+    const selected = selectedArea === itemValue || selectedArea === item.label || selectedArea === getAreaPresetSearchValue(item);
+    return (
+      <Pressable
+        key={`${getAreaPresetKey(item)}-${index}`}
+        style={[styles.areaChoiceChip, selected && styles.areaChoiceChipActive]}
+        onPress={() => selectPreset(item)}
+      >
+        <Text style={[styles.areaChoiceText, selected && styles.areaChoiceTextActive]} numberOfLines={2}>{item.label}</Text>
+      </Pressable>
+    );
+  };
 
   return (
     <View style={styles.areaPicker}>
@@ -5078,13 +5540,27 @@ function AreaPresetPicker({
           </Pressable>
         )}
       </View>
-      {hasQuery ? (
-        <View style={styles.areaGroup}>
+      <View style={styles.areaPickerCard}>
+        <Pressable
+          style={[styles.areaCurrentLocationSelect, currentLocationSelected && styles.areaCurrentLocationSelectActive]}
+          onPress={selectCurrentLocation}
+        >
+          <View style={[styles.areaCurrentLocationIcon, currentLocationSelected && styles.areaCurrentLocationIconActive]}>
+            <Ionicons name="navigate" size={19} color={currentLocationSelected ? '#ffffff' : ORANGE} />
+          </View>
+          <View style={styles.areaCurrentLocationBody}>
+            <Text style={[styles.areaCurrentLocationTitle, currentLocationSelected && styles.areaCurrentLocationTitleActive]}>{uiText.currentLocation}</Text>
+            <Text style={[styles.areaCurrentLocationLead, currentLocationSelected && styles.areaCurrentLocationLeadActive]}>{currentLocationHelp}</Text>
+          </View>
+          <Ionicons name={currentLocationSelected ? 'checkmark-circle' : 'chevron-forward'} size={20} color={currentLocationSelected ? ORANGE : '#8a8178'} />
+        </Pressable>
+        {hasQuery ? (
+        <View style={styles.areaGroupNoFrame}>
           <Text style={styles.areaGroupTitle}>{uiText.searchResults}</Text>
-          <View style={styles.areaChipWrap}>
+          <View style={styles.areaChoiceGrid}>
             {searchResults.map((item, index) => {
               const itemValue = getAreaPresetValue(item);
-              const selected = selectedArea === itemValue || selectedArea === item.label;
+              const selected = selectedArea === itemValue || selectedArea === item.label || selectedArea === getAreaPresetSearchValue(item);
               return (
                 <Pressable
                   key={`${getAreaPresetKey(item)}-${index}`}
@@ -5114,22 +5590,71 @@ function AreaPresetPicker({
               );
             })}
           </ScrollView>
-          <View style={styles.areaGroup}>
-            <Text style={styles.areaGroupTitle}>{selectedPrefecture} の市区町村・主要エリア</Text>
-            <View style={styles.areaChipWrap}>
-              {selectedPrefectureAreas.map((item, index) => {
-                const itemValue = getAreaPresetValue(item);
-                const selected = selectedArea === itemValue || selectedArea === item.label;
-                return (
-                  <Pressable key={`${getAreaPresetKey(item)}-${index}`} style={[styles.areaChip, selected && styles.areaChipActive]} onPress={() => onSelect(itemValue)}>
-                    <Text style={[styles.areaChipText, selected && styles.areaChipTextActive]}>{item.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+          <View style={styles.areaModeTabs}>
+            {tabs.map((tab) => {
+              const selected = areaMode === tab.key;
+              return (
+                <Pressable key={tab.key} style={[styles.areaModeTab, selected && styles.areaModeTabActive]} onPress={() => setAreaMode(tab.key)}>
+                  <Ionicons name={tab.icon} size={18} color={selected ? ORANGE : '#8a8178'} />
+                  <Text style={[styles.areaModeTabText, selected && styles.areaModeTabTextActive]}>{tab.label}</Text>
+                </Pressable>
+              );
+            })}
           </View>
+          {popularAreaPresets.length > 0 && (
+            <View style={styles.areaSection}>
+              <View style={styles.areaSectionHeader}>
+                <View style={styles.areaSectionTitleRow}>
+                  <Ionicons name="star" size={20} color={ORANGE} />
+                  <Text style={styles.areaSectionTitle}>{uiText.popularAreasTitle}</Text>
+                </View>
+                {popularAreaPresets.length > 12 && (
+                  <Pressable style={styles.areaSeeAllButton} onPress={() => setShowAllPopularAreas((current) => !current)}>
+                    <Text style={styles.areaSeeAllText}>{showAllPopularAreas ? uiText.hideCities : uiText.showAll}</Text>
+                    <Ionicons name={showAllPopularAreas ? 'chevron-up' : 'chevron-forward'} size={14} color={ORANGE} />
+                  </Pressable>
+                )}
+              </View>
+              <View style={styles.areaChoiceGrid}>
+                {visiblePopularAreas.map(renderAreaChoice)}
+              </View>
+            </View>
+          )}
+          {otherAreaPresets.length > 0 && (
+            <View style={styles.areaSection}>
+              <View style={styles.areaSectionDivider} />
+              <View style={styles.areaSectionHeader}>
+                <View style={styles.areaSectionTitleRow}>
+                  <Ionicons name="grid" size={19} color="#77716b" />
+                  <Text style={styles.areaSectionTitle}>{uiText.otherAreasTitle}</Text>
+                </View>
+                {otherAreaPresets.length > 12 && (
+                  <Pressable style={styles.areaSeeAllButton} onPress={() => setShowAllOtherAreas((current) => !current)}>
+                    <Text style={styles.areaSeeAllText}>{showAllOtherAreas ? uiText.hideCities : uiText.showAll}</Text>
+                    <Ionicons name={showAllOtherAreas ? 'chevron-up' : 'chevron-forward'} size={14} color={ORANGE} />
+                  </Pressable>
+                )}
+              </View>
+              <View style={styles.areaChoiceGrid}>
+                {visibleOtherAreas.map(renderAreaChoice)}
+              </View>
+            </View>
+          )}
         </>
       )}
+      </View>
+      <View style={styles.areaCurrentSettingCard}>
+        <View style={styles.areaCurrentIcon}>
+          <Ionicons name="location" size={18} color={ORANGE} />
+        </View>
+        <View style={styles.areaCurrentBody}>
+          <Text style={styles.areaCurrentLabel}>{uiText.currentSetting}</Text>
+          <Text style={styles.areaCurrentText} numberOfLines={2}>{selectedSettingText}</Text>
+        </View>
+        <Pressable style={styles.areaCurrentButton} onPress={() => setAreaQuery('')}>
+          <Text style={styles.areaCurrentButtonText}>{uiText.changeSetting}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -5192,6 +5717,7 @@ function SegmentedValue({
   onRandom,
   randomActive = false,
   randomLabel = 'ランダム',
+  helperText,
 }: {
   label: string;
   value: string;
@@ -5200,10 +5726,12 @@ function SegmentedValue({
   onRandom?: () => void;
   randomActive?: boolean;
   randomLabel?: string;
+  helperText?: string;
 }) {
   return (
     <View style={styles.segmentWrap}>
       <RandomFieldHeader label={label} onRandom={onRandom} randomActive={randomActive} randomLabel={randomLabel} />
+      {helperText ? <Text style={styles.segmentHelperText}>{helperText}</Text> : null}
       <View style={styles.segmentGroup}>
         {values.map((item) => {
           const selected = !randomActive && value === item;
@@ -5237,6 +5765,7 @@ function SearchTab({
   onBudgetMaxChange,
   onDistanceChange,
   onConditionRandomize,
+  onRequestCurrentLocation,
   onSearch,
   onRandomPress,
   onAllRandomPress,
@@ -5259,6 +5788,7 @@ function SearchTab({
   onBudgetMaxChange: (value: string) => void;
   onDistanceChange: (value: string) => void;
   onConditionRandomize: (field: ConditionRandomField) => void;
+  onRequestCurrentLocation: () => void | Promise<unknown>;
   onSearch: () => void;
   onRandomPress: () => void;
   onAllRandomPress: () => void;
@@ -5285,6 +5815,7 @@ function SearchTab({
         areaPresets={ALL_AREA_PRESETS}
         conditionRandom={conditionRandom}
         uiText={uiText}
+        onUseCurrentLocation={onRequestCurrentLocation}
         onAreaChange={onAreaChange}
         onGenreChange={onGenreChange}
         onBudgetMinChange={onBudgetMinChange}
@@ -5443,12 +5974,6 @@ function RandomTab({
     { label: '7', top: 88, left: 16, color: '#171411' },
     { label: '8', top: 29, left: 46, color: '#f05a28' },
   ];
-  const rouletteLabels = [
-    { text: displayGenre, style: styles.rouletteLabelTop },
-    { text: displayArea, style: styles.rouletteLabelBottom },
-    { text: isEverythingRandom ? '気分' : '近場', style: styles.rouletteLabelRight },
-    { text: isEverythingRandom ? '直感' : '予算内', style: styles.rouletteLabelLeft },
-  ];
   const visibleSelectedRestaurant = isTravelDraw && travelRevealStep !== 'restaurant' ? null : selectedRestaurant;
   const actualTravelGenre = isTravelDraw && selectedRestaurant && !restaurantMatchesSelectedGenre(selectedRestaurant, genre)
     ? selectedRestaurant.genre
@@ -5476,6 +6001,12 @@ function RandomTab({
   const conditionAreaLabel = formatHiddenCondition(areaLabel, displayArea);
   const conditionBudgetLabel = formatHiddenCondition(uiText.budget, displayBudget);
   const conditionDistanceLabel = formatHiddenCondition(uiText.distanceLabel, displayDistance);
+  const rouletteConditionItems = [
+    { label: uiText.genreLabel, value: displayGenre, icon: 'restaurant-outline', active: true },
+    { label: areaLabel, value: displayArea, icon: 'location-outline', active: false },
+    { label: uiText.budget, value: displayBudget, icon: 'wallet-outline', active: false },
+    { label: uiText.distanceLabel, value: displayDistance, icon: 'navigate-outline', active: false },
+  ] as const;
 
   return (
     <View onLayout={(event) => onTabLayout(event.nativeEvent.layout.y)}>
@@ -5513,14 +6044,9 @@ function RandomTab({
             <View style={[styles.mapRoad, styles.mapRoadThree]} />
             <View style={[styles.mapPark, styles.mapParkOne]} />
             <View style={[styles.mapPark, styles.mapParkTwo]} />
-            {roulettePockets.map((pocket) => (
-              <View key={pocket.label} style={[styles.roulettePocket, { top: pocket.top, left: pocket.left, backgroundColor: pocket.color }]}>
+            {roulettePockets.map((pocket, index) => (
+              <View key={`${pocket.label}-${index}`} style={[styles.roulettePocket, { top: pocket.top, left: pocket.left, backgroundColor: pocket.color }]}>
                 <Text style={styles.roulettePocketText}>{pocket.label}</Text>
-              </View>
-            ))}
-            {rouletteLabels.map((label, index) => (
-              <View key={`${index}-${label.text}`} style={[styles.rouletteLabelChip, label.style]}>
-                <Text style={styles.rouletteLabelText} numberOfLines={1}>{label.text}</Text>
               </View>
             ))}
             {mapPins.map((pin, index) => (
@@ -5565,12 +6091,30 @@ function RandomTab({
             <Text style={styles.rouletteHintText}>{drawAnimation.hint}</Text>
             <Text style={styles.rouletteHintAccent}>{drawAnimation.accent}</Text>
           </View>
-          <View style={styles.mapChoiceCard}>
-            <Text style={styles.mapChoiceLabel}>GENRE</Text>
-            <Text style={styles.mapChoiceValue}>{displayGenre}</Text>
-            <View style={styles.mapChoiceDivider} />
-            <Text style={styles.mapChoiceLabel}>AREA</Text>
-            <Text style={styles.mapChoiceValue}>{displayArea}</Text>
+          <View style={styles.rouletteConditionPanel}>
+            <View style={styles.rouletteConditionHeader}>
+              <View>
+                <Text style={styles.rouletteConditionKicker}>DRAW CONDITIONS</Text>
+                <Text style={styles.rouletteConditionTitle}>この条件で抽選</Text>
+              </View>
+              <View style={styles.rouletteConditionLock}>
+                <Ionicons name="lock-closed" size={13} color={ORANGE} />
+                <Text style={styles.rouletteConditionLockText}>固定</Text>
+              </View>
+            </View>
+            <View style={styles.rouletteConditionGrid}>
+              {rouletteConditionItems.map((item, index) => (
+                <View key={`${item.label}-${index}`} style={[styles.rouletteConditionItem, item.active && styles.rouletteConditionItemActive]}>
+                  <View style={[styles.rouletteConditionIcon, item.active && styles.rouletteConditionIconActive]}>
+                    <Ionicons name={item.icon} size={15} color={item.active ? '#ffffff' : '#8f8277'} />
+                  </View>
+                  <View style={styles.rouletteConditionTextBlock}>
+                    <Text style={styles.rouletteConditionLabel}>{item.label}</Text>
+                    <Text style={[styles.rouletteConditionValue, item.active && styles.rouletteConditionValueActive]} numberOfLines={1}>{item.value}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
           </View>
           <View style={[styles.rouletteCta, !ticketAvailable && styles.rouletteCtaLocked]}>
             {isLoading ? (
@@ -5597,8 +6141,8 @@ function RandomTab({
             </View>
           </View>
           <View style={styles.drawRevealGrid}>
-            {revealItems.map((item) => (
-              <View key={item.label} style={[styles.drawRevealItem, item.active && styles.drawRevealItemActive]}>
+            {revealItems.map((item, index) => (
+              <View key={`${item.label}-${index}`} style={[styles.drawRevealItem, item.active && styles.drawRevealItemActive]}>
                 <Text style={styles.drawRevealLabel}>{item.label}</Text>
                 <Text style={styles.drawRevealValue} numberOfLines={1}>{item.value}</Text>
               </View>
@@ -5837,8 +6381,8 @@ function ProFeatureCard({
       <Text style={styles.proFeatureTitle}>{title}</Text>
       <Text style={styles.proFeatureValue} numberOfLines={2}>{isPro ? (value ?? '分析中') : 'Proで表示'}</Text>
       <Text style={styles.proFeatureDescription}>{description}</Text>
-      {isPro && detailLines.map((line) => (
-        <Text key={line} style={styles.proFeatureDetail} numberOfLines={1}>{line}</Text>
+      {isPro && detailLines.map((line, index) => (
+        <Text key={`${line}-${index}`} style={styles.proFeatureDetail} numberOfLines={1}>{line}</Text>
       ))}
       {isPro && children}
     </Pressable>
@@ -5897,8 +6441,8 @@ function ProPaywall({
             {message ?? '過去の抽選・外食費・ジャンル傾向を残して見返せます。'}
           </Text>
           <View style={styles.proPaywallFeatureList}>
-            {features.map((feature) => (
-              <View key={feature} style={styles.proPaywallFeatureRow}>
+            {features.map((feature, index) => (
+              <View key={`${feature}-${index}`} style={styles.proPaywallFeatureRow}>
                 <Ionicons name="checkmark-circle" size={18} color={ORANGE} />
                 <Text style={styles.proPaywallFeatureText}>{feature}</Text>
               </View>
@@ -5959,7 +6503,7 @@ function GenreSpendDonut({
         <View style={[styles.analysisDonutRing, { borderColor: primaryColor }]}>
           {chartItems.slice(1, 4).map((item, index) => (
             <View
-              key={item.label}
+              key={`${item.label}-${index}`}
               style={[
                 styles.analysisDonutAccent,
                 index === 0 && styles.analysisDonutAccentOne,
@@ -6136,8 +6680,8 @@ function AnalyticsTab({
       </View>
 
       <View style={styles.analysisStatsGrid}>
-        {stats.map((item) => (
-          <View key={item.label} style={styles.analysisStatCard}>
+        {stats.map((item, index) => (
+          <View key={`${item.label}-${index}`} style={styles.analysisStatCard}>
             <MaterialCommunityIcons name={item.icon} size={28} color={INK} />
             <Text style={styles.analysisStatLabel}>{item.label}</Text>
             <Text style={styles.analysisStatValue} numberOfLines={1}>{item.value}</Text>
@@ -6212,10 +6756,10 @@ function AnalyticsTab({
             <Text style={styles.analysisHistoryEmptyText}>今月の抽選結果が入ると、ここに推定予算が並びます。</Text>
           </View>
         ) : (
-          currentAnalytics.recentDraws.map((entry) => {
+          currentAnalytics.recentDraws.map((entry, index) => {
             const budget = getEstimatedBudget(entry.restaurant);
             return (
-              <View key={entry.id} style={styles.analysisHistoryRow}>
+              <View key={`${entry.id}-${index}`} style={styles.analysisHistoryRow}>
                 <Text style={styles.analysisHistoryDate}>{formatShortDate(entry.createdAt)}</Text>
                 <View style={styles.analysisHistoryBody}>
                   <Text style={styles.analysisHistoryName} numberOfLines={1}>{entry.restaurant.name}</Text>
@@ -6241,7 +6785,7 @@ function AnalyticsTab({
           ).map((genre, index) => {
             const active = isPro ? index === 0 : index === trendGenres.length - 1;
             return (
-              <Pressable key={genre.label} style={[styles.analysisGenrePill, active && styles.analysisGenrePillActive]} onPress={isPro ? undefined : openGenrePaywall}>
+              <Pressable key={`${genre.label}-${index}`} style={[styles.analysisGenrePill, active && styles.analysisGenrePillActive]} onPress={isPro ? undefined : openGenrePaywall}>
                 <MaterialCommunityIcons name={genre.icon} size={28} color={active ? '#ffffff' : INK} />
                 <Text style={[styles.analysisGenreLabel, active && styles.analysisGenreLabelActive]}>{genre.label}</Text>
               </Pressable>

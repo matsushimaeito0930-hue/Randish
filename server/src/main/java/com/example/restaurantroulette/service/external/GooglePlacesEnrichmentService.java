@@ -74,7 +74,6 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "そば店",
       "カレー店",
       "定食屋",
-      "パン屋",
       "スイーツ店",
       "バー");
   private static final BudgetRange DEFAULT_BUDGET = new BudgetRange(0, 8000);
@@ -86,6 +85,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       Map.entry("カレー", new BudgetRange(800, 1800)),
       Map.entry("うどん", new BudgetRange(600, 1600)),
       Map.entry("そば", new BudgetRange(600, 1800)),
+      Map.entry("粉もの", new BudgetRange(700, 2500)),
       Map.entry("たこ焼き", new BudgetRange(300, 1200)),
       Map.entry("お好み焼き", new BudgetRange(1000, 2500)),
       Map.entry("焼き鳥", new BudgetRange(1800, 4000)),
@@ -106,6 +106,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       Map.entry("スイーツ", new BudgetRange(500, 2200)),
       Map.entry("カフェ", new BudgetRange(500, 2200)),
       Map.entry("パン", new BudgetRange(300, 1600)),
+      Map.entry("郷土料理", new BudgetRange(1000, 4500)),
+      Map.entry("その他", DEFAULT_BUDGET),
       Map.entry("ファストフード", new BudgetRange(0, 1800)),
       Map.entry("お酒・バー", new BudgetRange(2000, 5500)),
       Map.entry("各国料理", new BudgetRange(1000, 4500)));
@@ -117,6 +119,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       Map.entry("カレー", List.of("カレー店", "スパイスカレー", "インドカレー")),
       Map.entry("うどん", List.of("うどん店", "讃岐うどん")),
       Map.entry("そば", List.of("そば店", "蕎麦")),
+      Map.entry("粉もの", List.of("お好み焼き店", "たこ焼き店", "もんじゃ")),
       Map.entry("たこ焼き", List.of("たこ焼き店")),
       Map.entry("お好み焼き", List.of("お好み焼き店", "もんじゃ")),
       Map.entry("焼き鳥", List.of("焼き鳥店", "焼鳥")),
@@ -137,6 +140,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       Map.entry("スイーツ", List.of("スイーツ店", "ケーキ", "パフェ")),
       Map.entry("カフェ", List.of("カフェ", "喫茶店")),
       Map.entry("パン", List.of("パン屋", "ベーカリー")),
+      Map.entry("郷土料理", List.of("郷土料理", "ご当地グルメ", "名物料理")),
+      Map.entry("その他", List.of("飲食店", "レストラン")),
       Map.entry("ファストフード", List.of("マクドナルド", "モスバーガー", "ケンタッキー", "KFC", "ロッテリア", "バーガーキング", "フレッシュネスバーガー", "サブウェイ", "ハンバーガー")),
       Map.entry("お酒・バー", List.of("バー", "ダイニングバー", "ワインバー")),
       Map.entry("各国料理", List.of("エスニック料理", "タイ料理", "ベトナム料理", "メキシコ料理", "スペイン料理")));

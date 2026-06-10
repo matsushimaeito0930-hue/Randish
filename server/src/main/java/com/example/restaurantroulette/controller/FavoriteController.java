@@ -4,6 +4,7 @@ import com.example.restaurantroulette.dto.ApiDtos.FavoriteCheckResponse;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
+import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.FavoriteService;
 import java.util.List;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -21,33 +23,51 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/favorites")
 public class FavoriteController {
   private final FavoriteService favoriteService;
+  private final AuthenticatedUserService authenticatedUserService;
 
-  public FavoriteController(FavoriteService favoriteService) {
+  public FavoriteController(FavoriteService favoriteService, AuthenticatedUserService authenticatedUserService) {
     this.favoriteService = favoriteService;
+    this.authenticatedUserService = authenticatedUserService;
   }
 
   @PostMapping
-  public FavoriteResponse create(@RequestBody FavoriteCreateRequest request) {
+  public FavoriteResponse create(
+      @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+      @RequestBody FavoriteCreateRequest request) {
+    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, request.userId());
     return favoriteService.create(request);
   }
 
   @DeleteMapping("/{id}")
-  public void delete(@PathVariable String id) {
+  public void delete(
+      @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+      @PathVariable String id) {
+    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, favoriteService.findOwnerUserId(id));
     favoriteService.delete(id);
   }
 
   @GetMapping("/user/{userId}")
-  public List<FavoriteResponse> findByUserId(@PathVariable String userId) {
+  public List<FavoriteResponse> findByUserId(
+      @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+      @PathVariable String userId) {
+    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, userId);
     return favoriteService.findByUserId(userId);
   }
 
   @GetMapping("/{id}/restaurant")
-  public RestaurantResponse findRestaurant(@PathVariable String id) {
+  public RestaurantResponse findRestaurant(
+      @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+      @PathVariable String id) {
+    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, favoriteService.findOwnerUserId(id));
     return favoriteService.findRestaurant(id);
   }
 
   @GetMapping("/check")
-  public FavoriteCheckResponse check(@RequestParam String userId, @RequestParam String restaurantId) {
+  public FavoriteCheckResponse check(
+      @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+      @RequestParam String userId,
+      @RequestParam String restaurantId) {
+    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, userId);
     return favoriteService.check(userId, restaurantId);
   }
 }
