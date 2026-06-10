@@ -1826,6 +1826,17 @@ const GENRES: GenreItem[] = [
   { label: 'その他', color: '#8f7f68', image: require('./assets/category/world.png') },
 ];
 
+const hexToRgba = (hex: string, alpha: number) => {
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) {
+    return `rgba(0,0,0,${alpha})`;
+  }
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red},${green},${blue},${alpha})`;
+};
+
 const LEGACY_GENRE_VISUAL_LABELS: Record<string, string> = {
   たこ焼き: '粉もの',
   お好み焼き: '粉もの',
@@ -5377,7 +5388,7 @@ function FilterPanel({
                 style={[
                   styles.genreIconChip,
                   wideGenre && styles.genreIconChipCompact,
-                  { backgroundColor: `${item.color}12`, borderColor: `${item.color}30` },
+                  { backgroundColor: hexToRgba(item.color, 0.07), borderColor: hexToRgba(item.color, 0.18) },
                   selected && { backgroundColor: '#ffffff', borderColor: item.color },
                 ]}
               >
@@ -5386,8 +5397,6 @@ function FilterPanel({
               <Text
                 style={[styles.genreChipText, wideGenre && styles.genreChipTextWide, selected && { color: item.color }]}
                 numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.82}
               >
                 {item.label}
               </Text>
@@ -7029,10 +7038,10 @@ function RestaurantVisual({
       style={[
         large ? styles.restaurantVisualLarge : styles.restaurantVisual,
         styles.restaurantVisualFrame,
-        { backgroundColor: `${genreVisual.color}16` },
+        { backgroundColor: hexToRgba(genreVisual.color, 0.09) },
       ]}
     >
-      <View style={[styles.genreVisualGlow, { backgroundColor: `${genreVisual.color}1f` }]} />
+      <View style={[styles.genreVisualGlow, { backgroundColor: hexToRgba(genreVisual.color, 0.12) }]} />
       <Image
         source={genreVisual.image}
         style={[styles.genreVisualImage, large ? styles.genreVisualImageLarge : styles.genreVisualImageSmall]}
