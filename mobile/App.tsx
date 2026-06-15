@@ -238,8 +238,12 @@ const getConfiguredApiBaseUrl = () => {
 };
 
 const getMetroScriptUrl = () => {
-  const sourceCode = NativeModules.SourceCode as { scriptURL?: string } | undefined;
-  return sourceCode?.scriptURL;
+  try {
+    const sourceCode = NativeModules?.SourceCode as { scriptURL?: string } | undefined;
+    return typeof sourceCode?.scriptURL === 'string' ? sourceCode.scriptURL : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 const getWebLocationUrl = () => {
@@ -1850,7 +1854,7 @@ const LEGACY_GENRE_VISUAL_LABELS: Record<string, string> = {
   スープ: 'その他',
   パン: 'その他',
   ファストフード: 'その他',
-  お酒・バー: '居酒屋',
+  'お酒・バー': '居酒屋',
   各国料理: 'その他',
 };
 
@@ -4401,7 +4405,7 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
                 <View
                   style={[
                     styles.mealTicketIcon,
-                    { borderColor: `${ticket.accent}33`, backgroundColor: `${ticket.accent}12` },
+                    { borderColor: hexToRgba(ticket.accent, 0.2), backgroundColor: hexToRgba(ticket.accent, 0.07) },
                     ticket.available && { backgroundColor: ticket.accent, borderColor: ticket.accent },
                   ]}
                 >
