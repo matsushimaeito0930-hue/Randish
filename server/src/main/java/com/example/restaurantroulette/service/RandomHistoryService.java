@@ -29,16 +29,18 @@ public class RandomHistoryService {
   }
 
   public RandomHistoryResponse create(RandomHistoryCreateRequest request) {
-    validationService.requireUserId(request.userId());
-    validationService.requireRestaurantId(request.restaurantId());
+    String userId = validationService.requirePersistentUserId(request.userId());
+    String restaurantId = validationService.requireRestaurantId(request.restaurantId());
     validationService.validateBudget(request.budgetMin(), request.budgetMax());
-    Restaurant restaurant = restaurantQueryService.getEntityOrThrow(request.restaurantId());
+    String area = validationService.optionalSearchText("area", request.area());
+    String genre = validationService.optionalSearchText("genre", request.genre());
+    Restaurant restaurant = restaurantQueryService.getEntityOrThrow(restaurantId);
     RandomHistory history = new RandomHistory(
         UUID.randomUUID().toString(),
-        request.userId(),
-        request.restaurantId(),
-        request.area(),
-        request.genre(),
+        userId,
+        restaurantId,
+        area,
+        genre,
         request.budgetMin(),
         request.budgetMax(),
         Instant.now());
@@ -46,14 +48,14 @@ public class RandomHistoryService {
   }
 
   public List<RandomHistoryResponse> findByUserId(String userId) {
-    validationService.requireUserId(userId);
-    return randomHistoryRepository.findByUserId(userId).stream()
+    String cleanUserId = validationService.requirePersistentUserId(userId);
+    return randomHistoryRepository.findByUserId(cleanUserId).stream()
         .map(history -> mapper.toRandomHistoryResponse(history, restaurantQueryService.getEntityOrThrow(history.restaurantId())))
         .toList();
   }
 
   public List<RandomHistory> findRecentEntities(String userId, int limit) {
-    validationService.requireUserId(userId);
-    return randomHistoryRepository.findByUserId(userId).stream().limit(limit).toList();
+    String cleanUserId = validationService.requirePersistentUserId(userId);
+    return randomHistoryRepository.findByUserId(cleanUserId).stream().limit(limit).toList();
   }
 }

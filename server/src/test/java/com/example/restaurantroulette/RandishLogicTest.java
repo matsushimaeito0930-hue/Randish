@@ -10,6 +10,7 @@ import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.dto.ApiDtos.VisitCreateRequest;
 import com.example.restaurantroulette.entity.Restaurant;
+import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.exception.ConflictException;
 import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.repository.AppUserRepository;
@@ -338,6 +339,41 @@ class RandishLogicTest {
 
     assertThatThrownBy(() -> guard.requireSameUser("Bearer token", "user-2"))
         .isInstanceOf(UnauthorizedException.class);
+  }
+
+  @Test
+  void guestRandomDoesNotPersistUserHistory() {
+    var selected = randomRestaurantService.choose(new RandomRestaurantRequest(ValidationService.GUEST_USER_ID, null, null, null, null, null, null, null));
+    Long guestRows = jdbcClient.sql("SELECT COUNT(*) FROM random_histories WHERE user_id = 'guest'")
+        .query(Long.class)
+        .single();
+
+    assertThat(selected.id()).isNotBlank();
+    assertThat(guestRows).isZero();
+    assertThatThrownBy(() -> randomHistoryService.findByUserId(ValidationService.GUEST_USER_ID))
+        .isInstanceOf(UnauthorizedException.class);
+  }
+
+  @Test
+  void guestCannotUsePersistedUserDataServices() {
+    assertThatThrownBy(() -> favoriteService.create(new FavoriteCreateRequest(ValidationService.GUEST_USER_ID, "seed-umeda-ramen")))
+        .isInstanceOf(UnauthorizedException.class);
+    assertThatThrownBy(() -> visitCollectionService.findByUserId(ValidationService.GUEST_USER_ID))
+        .isInstanceOf(UnauthorizedException.class);
+    assertThatThrownBy(() -> statisticsService.calculate(ValidationService.GUEST_USER_ID))
+        .isInstanceOf(UnauthorizedException.class);
+  }
+
+  @Test
+  void validationRejectsAbusiveInputBeforeDatabaseErrors() {
+    assertThatThrownBy(() -> restaurantQueryService.search("area\nx", null, null, null))
+        .isInstanceOf(BadRequestException.class);
+    assertThatThrownBy(() -> restaurantQueryService.search(null, null, -1, 1000))
+        .isInstanceOf(BadRequestException.class);
+    assertThatThrownBy(() -> restaurantQueryService.search(null, null, null, null, 91.0, 135.0, 3))
+        .isInstanceOf(BadRequestException.class);
+    assertThatThrownBy(() -> visitCollectionService.create(new VisitCreateRequest("user-rating", "seed-umeda-ramen", null, null, "ok", 6)))
+        .isInstanceOf(BadRequestException.class);
   }
 
   private static class FixedProvider implements ExternalRestaurantProvider {

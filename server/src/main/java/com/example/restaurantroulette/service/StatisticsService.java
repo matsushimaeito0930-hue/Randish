@@ -33,8 +33,8 @@ public class StatisticsService {
   }
 
   public StatisticsResponse calculate(String userId) {
-    validationService.requireUserId(userId);
-    List<VisitCollection> visits = visitCollectionService.findEntitiesByUserId(userId);
+    String cleanUserId = validationService.requirePersistentUserId(userId);
+    List<VisitCollection> visits = visitCollectionService.findEntitiesByUserId(cleanUserId);
     long totalVisits = visits.size();
     Set<String> visitedRestaurantIds = visits.stream()
         .map(VisitCollection::restaurantId)
@@ -59,13 +59,13 @@ public class StatisticsService {
     double newRestaurantRate = totalVisits == 0 ? 0 : (double) firstVisitCount / totalVisits;
 
     return new StatisticsResponse(
-        userId,
+        cleanUserId,
         totalVisits,
         favoriteGenre,
         favoriteArea,
         monthlyVisitCount,
         newRestaurantRate,
-        favoriteService.countByUserId(userId),
+        favoriteService.countByUserId(cleanUserId),
         visitedRestaurantIds.size());
   }
 

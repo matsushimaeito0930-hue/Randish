@@ -6,8 +6,6 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class AuthenticatedUserService {
-  private static final String GUEST_USER_ID = "guest";
-
   private final AuthService authService;
 
   public AuthenticatedUserService(AuthService authService) {
@@ -24,10 +22,14 @@ public class AuthenticatedUserService {
 
   public void requireSameUserOrGuest(String authorizationHeader, String requestedUserId) {
     String cleanRequestedUserId = cleanUserId(requestedUserId);
-    if (GUEST_USER_ID.equals(cleanRequestedUserId)) {
+    if (isGuestUserId(cleanRequestedUserId)) {
       return;
     }
     requireSameUser(authorizationHeader, cleanRequestedUserId);
+  }
+
+  public boolean isGuestUserId(String userId) {
+    return ValidationService.GUEST_USER_ID.equals(userId == null ? null : userId.trim());
   }
 
   private String cleanUserId(String userId) {

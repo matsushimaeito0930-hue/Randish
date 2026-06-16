@@ -33,8 +33,15 @@ public class RandomRestaurantService {
   }
 
   public RestaurantResponse choose(RandomRestaurantRequest request) {
-    validationService.requireUserId(request.userId());
-    validationService.validateBudget(request.budgetMin(), request.budgetMax());
+    String userId = validationService.requireUserId(request.userId());
+    validationService.validateSearchRequest(
+        request.area(),
+        request.genre(),
+        request.budgetMin(),
+        request.budgetMax(),
+        request.latitude(),
+        request.longitude(),
+        request.range());
     List<Restaurant> candidates = restaurantQueryService.searchRandomEntities(
         request.area(),
         request.genre(),
@@ -48,9 +55,11 @@ public class RandomRestaurantService {
       throw new NotFoundException("No restaurants match the requested conditions.");
     }
 
-    Set<String> recentRestaurantIds = randomHistoryService.findRecentEntities(request.userId(), RECENT_HISTORY_LIMIT).stream()
-        .map(history -> history.restaurantId())
-        .collect(Collectors.toSet());
+    Set<String> recentRestaurantIds = validationService.isGuestUserId(userId)
+        ? Set.of()
+        : randomHistoryService.findRecentEntities(userId, RECENT_HISTORY_LIMIT).stream()
+            .map(history -> history.restaurantId())
+            .collect(Collectors.toSet());
     List<Restaurant> preferredCandidates = candidates.stream()
         .filter(restaurant -> !recentRestaurantIds.contains(restaurant.id()))
         .toList();
@@ -58,13 +67,15 @@ public class RandomRestaurantService {
     Restaurant selected = lotteryPool.get(ThreadLocalRandom.current().nextInt(lotteryPool.size()));
 
     restaurantQueryService.cacheForUserAction(selected);
-    randomHistoryService.create(new RandomHistoryCreateRequest(
-        request.userId(),
-        selected.id(),
-        request.area(),
-        request.genre(),
-        request.budgetMin(),
-        request.budgetMax()));
+    if (!validationService.isGuestUserId(userId)) {
+      randomHistoryService.create(new RandomHistoryCreateRequest(
+          userId,
+          selected.id(),
+          request.area(),
+          request.genre(),
+          request.budgetMin(),
+          request.budgetMax()));
+    }
     return mapper.toRestaurantResponse(selected);
   }
 }

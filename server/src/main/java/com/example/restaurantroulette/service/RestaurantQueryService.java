@@ -66,7 +66,7 @@ public class RestaurantQueryService {
       Double longitude,
       Integer range,
       int maxCandidates) {
-    validationService.validateBudget(budgetMin, budgetMax);
+    validationService.validateSearchRequest(area, genre, budgetMin, budgetMax, latitude, longitude, range);
     Map<String, Restaurant> externalOnlyRestaurants = new LinkedHashMap<>();
     boolean hasAvailableProvider = false;
 
@@ -130,7 +130,7 @@ public class RestaurantQueryService {
       Double latitude,
       Double longitude,
       Integer range) {
-    validationService.validateBudget(budgetMin, budgetMax);
+    validationService.validateSearchRequest(area, genre, budgetMin, budgetMax, latitude, longitude, range);
     Map<String, Restaurant> externalOnlyRestaurants = new LinkedHashMap<>();
     boolean hasAvailableProvider = false;
 
@@ -319,8 +319,9 @@ public class RestaurantQueryService {
   }
 
   public Restaurant getEntityOrThrow(String id) {
-    return restaurantRepository.findById(id)
-        .orElseThrow(() -> new NotFoundException("Restaurant not found: " + id));
+    String cleanId = validationService.requireRestaurantId(id);
+    return restaurantRepository.findById(cleanId)
+        .orElseThrow(() -> new NotFoundException("Restaurant not found: " + cleanId));
   }
 
   public RestaurantResponse findById(String id) {

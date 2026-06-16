@@ -195,13 +195,8 @@ type DrawAnimationProfile = {
 
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
-const DEV_DISABLE_MEAL_TICKET_LIMIT = true;
-const DEV_LAN_API_BASE_URLS = [
-  'http://10.230.36.13:8080',
-  'http://10.230.36.4:8080',
-  'http://10.230.36.45:8080',
-  'http://10.230.36.34:8080',
-];
+const DEV_DISABLE_MEAL_TICKET_LIMIT = false;
+const DEV_LAN_API_BASE_URLS: string[] = [];
 const LOCAL_API_BASE_URLS = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://10.0.2.2:8080'];
 const TETHER_HOST_PATTERN = /^http:\/\/10\.230\.36\.\d+(?::8080)?$/;
 const LOCAL_NETWORK_HOST_PATTERN = /^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/;
@@ -292,7 +287,7 @@ const getRuntimeApiBaseUrls = () =>
   ].filter((value): value is string => Boolean(value)));
 
 const getRuntimeApiBaseUrl = () =>
-  getRuntimeApiBaseUrls()[0] ?? DEV_LAN_API_BASE_URLS[0];
+  getRuntimeApiBaseUrls()[0] ?? LOCAL_API_BASE_URLS[0];
 
 const uniqueApiBaseUrls = (baseUrls: string[]) => {
   const seen = new Set<string>();
@@ -5260,7 +5255,8 @@ function FilterPanel({
   const [showAllGenres, setShowAllGenres] = useState(false);
   const randomState = conditionRandom ?? { area: false, budget: false, distance: false, genre: false };
   const selectableGenres = compact ? genres.slice(1) : genres;
-  const mainGenres = selectableGenres;
+  const collapsedGenreCount = compact ? 9 : 12;
+  const mainGenres = selectableGenres.slice(0, collapsedGenreCount);
   const selectedHiddenGenre = selectableGenres.find((item) => item.label === genre && !mainGenres.some((mainGenre) => mainGenre.label === item.label));
   const sortGenresForDisplay = useCallback((items: GenreItem[]) => {
     return [...items].sort((a, b) => {
@@ -5408,7 +5404,7 @@ function FilterPanel({
           );
         })}
       </View>
-      {selectableGenres.length > 12 && (
+      {selectableGenres.length > collapsedGenreCount && (
         <Pressable style={styles.showAllGenresButton} onPress={() => setShowAllGenres((current) => !current)}>
           <Text style={styles.showAllGenresText}>{showAllGenres ? uiText.showLessGenres : `${uiText.showAll}（${selectableGenres.length}件）`}</Text>
         </Pressable>
@@ -5951,10 +5947,6 @@ function RandomTab({
       : isTravelDraw
         ? '旅ルーレット START'
       : 'PRESS START';
-  const rotate = spinValue.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '1440deg'] });
-  const dartDrop = spinValue.interpolate({ inputRange: [0, 0.72, 1], outputRange: [-18, -18, 0] });
-  const dartWiggle = spinValue.interpolate({ inputRange: [0, 0.74, 0.88, 1], outputRange: ['-8deg', '-8deg', '6deg', '0deg'] });
-  const wheelScale = spinValue.interpolate({ inputRange: [0, 0.18, 0.52, 0.82, 1], outputRange: [1, 0.98, 1.03, 0.995, 1] });
   const ticketOpacity = spinValue.interpolate({ inputRange: [0, 0.08, 0.9, 1], outputRange: [0, 1, 1, 0.96] });
   const ticketLift = spinValue.interpolate({ inputRange: [0, 0.28, 0.68, 1], outputRange: [46, 22, -10, 0] });
   const ticketRotate = spinValue.interpolate({ inputRange: [0, 0.52, 1], outputRange: ['-8deg', '7deg', '0deg'] });
@@ -5968,25 +5960,6 @@ function RandomTab({
   const radarPulseOpacity = spinValue.interpolate({ inputRange: [0, 0.42, 1], outputRange: [0.14, 0.58, 0.18] });
   const resultScale = resultRevealValue.interpolate({ inputRange: [0, 0.7, 1], outputRange: [0.92, 1.03, 1] });
   const resultTranslateY = resultRevealValue.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
-  const mapPins = [
-    { top: 22, left: 91, color: '#ea4335' },
-    { top: 51, left: 153, color: '#f0b43c' },
-    { top: 122, left: 166, color: '#4f7f58' },
-    { top: 160, left: 72, color: '#9b6b43' },
-    { top: 90, left: 27, color: '#f05a28' },
-    { top: 36, left: 50, color: '#171411' },
-    { top: 153, left: 132, color: '#b26a35' },
-  ];
-  const roulettePockets = [
-    { label: '1', top: 8, left: 101, color: ORANGE },
-    { label: '2', top: 27, left: 155, color: '#9b6b43' },
-    { label: '3', top: 80, left: 181, color: '#34a853' },
-    { label: '4', top: 136, left: 166, color: '#fbbc04' },
-    { label: '5', top: 171, left: 105, color: '#ea4335' },
-    { label: '6', top: 150, left: 43, color: '#00a884' },
-    { label: '7', top: 88, left: 16, color: '#171411' },
-    { label: '8', top: 29, left: 46, color: '#f05a28' },
-  ];
   const visibleSelectedRestaurant = isTravelDraw && travelRevealStep !== 'restaurant' ? null : selectedRestaurant;
   const actualTravelGenre = isTravelDraw && selectedRestaurant && !restaurantMatchesSelectedGenre(selectedRestaurant, genre)
     ? selectedRestaurant.genre
@@ -6020,6 +5993,14 @@ function RandomTab({
     { label: uiText.budget, value: displayBudget, icon: 'wallet-outline', active: false },
     { label: uiText.distanceLabel, value: displayDistance, icon: 'navigate-outline', active: false },
   ] as const;
+  const rouletteMapBubbles = [
+    { label: displayGenre === '？' ? 'ジャンル？' : displayGenre, icon: 'restaurant-outline', color: '#5aa86f', style: styles.rouletteMapBubbleTop },
+    { label: displayArea === '？' ? 'エリア？' : displayArea, icon: 'location-outline', color: '#e9a420', style: styles.rouletteMapBubbleRight },
+    { label: displayDistance === '？' ? '近場？' : displayDistance, icon: 'navigate-outline', color: '#ef6a35', style: styles.rouletteMapBubbleLeft },
+    { label: '居酒屋', icon: 'wine-outline', color: '#8c63d8', style: styles.rouletteMapBubbleUpperLeft },
+    { label: '和食', icon: 'restaurant-outline', color: '#d94b42', style: styles.rouletteMapBubbleLowerRight },
+    { label: 'カフェ', icon: 'cafe-outline', color: '#55a8d6', style: styles.rouletteMapBubbleBottom },
+  ] as const;
 
   return (
     <View onLayout={(event) => onTabLayout(event.nativeEvent.layout.y)}>
@@ -6031,75 +6012,97 @@ function RandomTab({
           <ConditionPill label={conditionDistanceLabel} />
       </View>
       <Pressable style={[styles.drawStage, isLoading && styles.drawStageLoading]} onPress={onRandomPress} disabled={isLoading}>
-        <View style={styles.rouletteStatusPill}>
-          <Text style={styles.rouletteStatusText}>{statusText}</Text>
-        </View>
         <View style={styles.rouletteButton}>
-          <Animated.View style={[styles.dart, { transform: [{ translateY: dartDrop }, { rotate: dartWiggle }] }]}>
-            <View style={styles.dartNeedle} />
-            <View style={styles.dartTail} />
-          </Animated.View>
-          <View style={styles.rouletteHalo} />
-          {drawAnimationKey === 'radar' && (
-            <Animated.View style={[styles.radarMotionLayer, { opacity: radarPulseOpacity, transform: [{ scale: radarPulseScale }] }]}>
-              <View style={styles.radarRingOuter} />
-              <View style={styles.radarRingInner} />
-            </Animated.View>
-          )}
-          <Animated.View style={[styles.rouletteWheel, { transform: [{ rotate }, { scale: wheelScale }] }]}>
-            <View style={styles.rouletteMapTint} />
-            <View style={[styles.rouletteDivider, styles.rouletteDividerVertical]} />
-            <View style={[styles.rouletteDivider, styles.rouletteDividerHorizontal]} />
-            <View style={[styles.rouletteDivider, styles.rouletteDividerDiagonalOne]} />
-            <View style={[styles.rouletteDivider, styles.rouletteDividerDiagonalTwo]} />
-            <View style={[styles.mapRoad, styles.mapRoadOne]} />
-            <View style={[styles.mapRoad, styles.mapRoadTwo]} />
-            <View style={[styles.mapRoad, styles.mapRoadThree]} />
-            <View style={[styles.mapPark, styles.mapParkOne]} />
-            <View style={[styles.mapPark, styles.mapParkTwo]} />
-            {roulettePockets.map((pocket, index) => (
-              <View key={`${pocket.label}-${index}`} style={[styles.roulettePocket, { top: pocket.top, left: pocket.left, backgroundColor: pocket.color }]}>
-                <Text style={styles.roulettePocketText}>{pocket.label}</Text>
+          <View style={styles.rouletteMapHeader}>
+            <View style={styles.rouletteMapHeaderCopy}>
+              <Text style={styles.rouletteMapKicker}>RANDISH MAP DRAW</Text>
+              <Text style={styles.rouletteMapTitle}>{isLoading ? '地図の上から候補を探しています' : '地図の上から一店を選びます'}</Text>
+              <Text style={styles.rouletteMapSub}>{isLoading ? drawAnimation.loadingMessage : 'STARTで候補が動き出します'}</Text>
+            </View>
+            <View style={styles.rouletteStatusPill}>
+              <Text style={styles.rouletteStatusText}>{statusText}</Text>
+            </View>
+          </View>
+          <View style={styles.rouletteMapCanvas}>
+            <View style={[styles.rouletteMapCanvasPark, styles.rouletteMapCanvasParkOne]} />
+            <View style={[styles.rouletteMapCanvasPark, styles.rouletteMapCanvasParkTwo]} />
+            <View style={[styles.rouletteMapCanvasRiver, styles.rouletteMapCanvasRiverOne]} />
+            <View style={[styles.rouletteMapCanvasRiver, styles.rouletteMapCanvasRiverTwo]} />
+            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadOne]} />
+            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadTwo]} />
+            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadThree]} />
+            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadFour]} />
+            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadFive]} />
+            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadSix]} />
+            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadSeven]} />
+            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadEight]} />
+            <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadOne]} />
+            <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadTwo]} />
+            <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadThree]} />
+            <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadFour]} />
+            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockOne]} />
+            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockTwo]} />
+            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockThree]} />
+            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockFour]} />
+            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockFive]} />
+            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockSix]} />
+            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockSeven]} />
+            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockEight]} />
+            <View style={[styles.rouletteRouteSegment, styles.rouletteRouteSegmentOne]} />
+            <View style={[styles.rouletteRouteSegment, styles.rouletteRouteSegmentTwo]} />
+            <View style={[styles.rouletteRouteSegment, styles.rouletteRouteSegmentThree]} />
+            <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotOne]} />
+            <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotTwo]} />
+            <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotThree]} />
+            <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotFour]} />
+            <Animated.View style={[styles.rouletteMapPulse, { opacity: radarPulseOpacity, transform: [{ scale: radarPulseScale }] }]} />
+            <View style={styles.rouletteMapPin}>
+              <Ionicons name="location" size={44} color={ORANGE} />
+              <View style={styles.rouletteMapPinDot} />
+            </View>
+            {rouletteMapBubbles.map((bubble) => (
+              <View
+                key={`${bubble.label}-${bubble.icon}`}
+                style={[styles.rouletteMapBubble, bubble.style, { borderColor: hexToRgba(bubble.color, 0.2) }]}
+              >
+                <Ionicons name={bubble.icon} size={17} color={bubble.color} />
+                <Text style={[styles.rouletteMapBubbleText, { color: bubble.color }]} numberOfLines={1}>{bubble.label}</Text>
               </View>
             ))}
-            {mapPins.map((pin, index) => (
-              <View key={`${pin.color}-${index}`} style={[styles.mapPin, { top: pin.top, left: pin.left, backgroundColor: pin.color }]} />
-            ))}
-            <View style={styles.wheelCore}>
-              <Image source={RANDISH_LOGO} style={styles.wheelLogo} resizeMode="contain" />
-              <Text style={styles.wheelCoreTitle}>RANDISH</Text>
-              <Text style={styles.wheelCoreSub}>MAP</Text>
-            </View>
-          </Animated.View>
-          {drawAnimationKey === 'radar' && (
-            <Animated.View style={[styles.radarSweep, { transform: [{ rotate: radarRotate }] }]} />
-          )}
-          {drawAnimationKey === 'lottery' && (
-            <Animated.View style={[styles.lotteryMotionLayer, { opacity: ticketOpacity, transform: [{ translateY: ticketLift }, { rotate: ticketRotate }] }]}>
-              <View style={[styles.lotteryTicket, styles.lotteryTicketBackLeft]} />
-              <View style={[styles.lotteryTicket, styles.lotteryTicketBackRight]} />
-              <View style={styles.lotteryTicketFront}>
-                <Text style={styles.lotteryTicketLabel}>RANDISH</Text>
-                <Text style={styles.lotteryTicketTitle}>今日の一店</Text>
+            {drawAnimationKey === 'radar' && (
+              <Animated.View style={[styles.rouletteMapRadarSweep, { transform: [{ rotate: radarRotate }] }]} />
+            )}
+            {drawAnimationKey === 'lottery' && (
+              <Animated.View style={[styles.lotteryMotionLayer, { opacity: ticketOpacity, transform: [{ translateY: ticketLift }, { rotate: ticketRotate }] }]}>
+                <View style={[styles.lotteryTicket, styles.lotteryTicketBackLeft]} />
+                <View style={[styles.lotteryTicket, styles.lotteryTicketBackRight]} />
+                <View style={styles.lotteryTicketFront}>
+                  <Text style={styles.lotteryTicketLabel}>RANDISH</Text>
+                  <Text style={styles.lotteryTicketTitle}>今日の一店</Text>
+                </View>
+              </Animated.View>
+            )}
+            {drawAnimationKey === 'shuffle' && (
+              <View style={styles.shuffleMotionLayer}>
+                <Animated.View style={[styles.shuffleCard, styles.shuffleCardOne, { transform: [{ translateX: shuffleOneX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '-8deg' }] }]}>
+                  <Text style={styles.shuffleCardLabel}>AREA</Text>
+                  <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayArea}</Text>
+                </Animated.View>
+                <Animated.View style={[styles.shuffleCard, styles.shuffleCardTwo, { transform: [{ translateX: shuffleTwoX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '5deg' }] }]}>
+                  <Text style={styles.shuffleCardLabel}>GENRE</Text>
+                  <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayGenre}</Text>
+                </Animated.View>
+                <Animated.View style={[styles.shuffleCard, styles.shuffleCardThree, { transform: [{ translateX: shuffleThreeX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '10deg' }] }]}>
+                  <Text style={styles.shuffleCardLabel}>PRICE</Text>
+                  <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayBudget}</Text>
+                </Animated.View>
               </View>
-            </Animated.View>
-          )}
-          {drawAnimationKey === 'shuffle' && (
-            <View style={styles.shuffleMotionLayer}>
-              <Animated.View style={[styles.shuffleCard, styles.shuffleCardOne, { transform: [{ translateX: shuffleOneX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '-8deg' }] }]}>
-                <Text style={styles.shuffleCardLabel}>AREA</Text>
-                <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayArea}</Text>
-              </Animated.View>
-              <Animated.View style={[styles.shuffleCard, styles.shuffleCardTwo, { transform: [{ translateX: shuffleTwoX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '5deg' }] }]}>
-                <Text style={styles.shuffleCardLabel}>GENRE</Text>
-                <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayGenre}</Text>
-              </Animated.View>
-              <Animated.View style={[styles.shuffleCard, styles.shuffleCardThree, { transform: [{ translateX: shuffleThreeX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '10deg' }] }]}>
-                <Text style={styles.shuffleCardLabel}>PRICE</Text>
-                <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayBudget}</Text>
-              </Animated.View>
+            )}
+            <View style={styles.rouletteMapLoadingPill}>
+              {isLoading ? <ActivityIndicator size="small" color={ORANGE} /> : <Ionicons name="map-outline" size={18} color={ORANGE} />}
+              <Text style={styles.rouletteMapLoadingText}>{isLoading ? 'いま抽選中...' : '地図から候補を探す'}</Text>
             </View>
-          )}
+          </View>
           <View style={styles.rouletteHintRow}>
             <Text style={styles.rouletteHintText}>{drawAnimation.hint}</Text>
             <Text style={styles.rouletteHintAccent}>{drawAnimation.accent}</Text>

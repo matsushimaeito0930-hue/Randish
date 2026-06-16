@@ -5,7 +5,6 @@ import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryResponse;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.RandomHistoryService;
 import java.util.List;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -14,7 +13,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@CrossOrigin
 @RestController
 @RequestMapping("/api/random-histories")
 public class RandomHistoryController {
@@ -30,7 +28,7 @@ public class RandomHistoryController {
   public RandomHistoryResponse create(
       @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
       @RequestBody RandomHistoryCreateRequest request) {
-    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, request.userId());
+    authenticatedUserService.requireSameUser(authorizationHeader, request.userId());
     return randomHistoryService.create(request);
   }
 
@@ -38,7 +36,7 @@ public class RandomHistoryController {
   public List<RandomHistoryResponse> findByUserId(
       @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
       @PathVariable String userId) {
-    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, userId);
+    authenticatedUserService.requireSameUser(authorizationHeader, userId);
     return randomHistoryService.findByUserId(userId);
   }
 }

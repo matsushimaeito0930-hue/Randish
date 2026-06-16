@@ -4,14 +4,12 @@ import com.example.restaurantroulette.dto.ApiDtos.StampResponse;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.StampService;
 import java.util.List;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@CrossOrigin
 @RestController
 @RequestMapping("/api/stamps")
 public class StampController {
@@ -27,7 +25,7 @@ public class StampController {
   public List<StampResponse> findByUserId(
       @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
       @PathVariable String userId) {
-    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, userId);
+    authenticatedUserService.requireSameUser(authorizationHeader, userId);
     return stampService.findByUserId(userId);
   }
 }

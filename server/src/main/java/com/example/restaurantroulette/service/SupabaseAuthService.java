@@ -48,7 +48,7 @@ public class SupabaseAuthService {
           .body(SupabaseAuthApiResponse.class);
       return toResult(response);
     } catch (RestClientResponseException exception) {
-      throw new BadRequestException("Supabase signup failed: " + exception.getResponseBodyAsString());
+      throw new BadRequestException("Supabase signup failed.");
     }
   }
 

@@ -6,7 +6,6 @@ import com.example.restaurantroulette.dto.ApiDtos.VisitResponse;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.VisitCollectionService;
 import java.util.List;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,7 +15,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@CrossOrigin
 @RestController
 @RequestMapping("/api/visits")
 public class VisitCollectionController {
@@ -32,7 +30,7 @@ public class VisitCollectionController {
   public VisitResponse create(
       @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
       @RequestBody VisitCreateRequest request) {
-    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, request.userId());
+    authenticatedUserService.requireSameUser(authorizationHeader, request.userId());
     return visitCollectionService.create(request);
   }
 
@@ -40,7 +38,7 @@ public class VisitCollectionController {
   public List<VisitResponse> findByUserId(
       @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
       @PathVariable String userId) {
-    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, userId);
+    authenticatedUserService.requireSameUser(authorizationHeader, userId);
     return visitCollectionService.findByUserId(userId);
   }
 
@@ -49,7 +47,7 @@ public class VisitCollectionController {
       @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
       @RequestParam String userId,
       @RequestParam String restaurantId) {
-    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, userId);
+    authenticatedUserService.requireSameUser(authorizationHeader, userId);
     return visitCollectionService.check(userId, restaurantId);
   }
 }

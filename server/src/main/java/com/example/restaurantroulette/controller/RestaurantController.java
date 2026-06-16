@@ -3,10 +3,10 @@ package com.example.restaurantroulette.controller;
 import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
+import com.example.restaurantroulette.service.ValidationService;
 import com.example.restaurantroulette.service.RandomRestaurantService;
 import com.example.restaurantroulette.service.RestaurantQueryService;
 import java.util.List;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
-@CrossOrigin
 @RestController
 @RequestMapping("/api/restaurants")
 public class RestaurantController {
@@ -54,8 +53,10 @@ public class RestaurantController {
       @RequestParam(required = false) Double latitude,
       @RequestParam(required = false) Double longitude,
       @RequestParam(required = false) Integer range) {
-    String effectiveUserId = userId == null || userId.isBlank() ? "guest" : userId;
-    authenticatedUserService.requireSameUserOrGuest(authorizationHeader, effectiveUserId);
+    String effectiveUserId = userId == null || userId.isBlank() ? ValidationService.GUEST_USER_ID : userId.trim();
+    if (!authenticatedUserService.isGuestUserId(effectiveUserId)) {
+      authenticatedUserService.requireSameUser(authorizationHeader, effectiveUserId);
+    }
     return randomRestaurantService.choose(new RandomRestaurantRequest(
         effectiveUserId,
         area,
