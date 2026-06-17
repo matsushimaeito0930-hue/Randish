@@ -10,6 +10,7 @@ import {
   Linking,
   Modal,
   NativeModules,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -19,7 +20,7 @@ import {
   View,
 } from 'react-native';
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
-import type { Favorite as ApiFavorite, RandomHistory as ApiRandomHistory } from './services/randishApi';
+import type { Favorite as ApiFavorite, OAuthProvider, RandomHistory as ApiRandomHistory } from './services/randishApi';
 import { JAPAN_MUNICIPALITY_PRESETS } from './data/japanMunicipalities';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -95,7 +96,35 @@ type SavedRestaurant = {
   userMemo: string | null;
   userTags: string | null;
   createdAt: string;
+  photoUri?: string | null;
+  photoTakenAt?: string | null;
   snapshot?: Restaurant | null;
+};
+
+type AlbumPhotoEntry = {
+  id: string;
+  photoUri: string;
+  createdAt: string;
+  title: string;
+  subtitle: string;
+};
+
+type AlbumPhotoPreview = {
+  photoUri: string;
+  title: string;
+  subtitle: string;
+  dateLabel: string;
+};
+
+type AlbumDiaryItem = {
+  id: string;
+  photoUri: string;
+  createdAt: string;
+  title: string;
+  subtitle: string;
+  source: 'album' | 'saved';
+  onRetake?: () => void;
+  onOpenSaved?: () => void;
 };
 
 type SubscriptionState = {
@@ -196,15 +225,58 @@ type DrawAnimationProfile = {
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
 const DEV_DISABLE_MEAL_TICKET_LIMIT = false;
-const DEV_LAN_API_BASE_URLS: string[] = [];
-const LOCAL_API_BASE_URLS = ['http://localhost:8080', 'http://127.0.0.1:8080', 'http://10.0.2.2:8080'];
+const DEV_LAN_API_BASE_URLS = ['http://10.230.36.27:8080'];
+const LOCAL_API_BASE_URLS = Platform.select({
+  android: ['http://10.0.2.2:8080', 'http://localhost:8080', 'http://127.0.0.1:8080'],
+  web: ['http://localhost:8080', 'http://127.0.0.1:8080'],
+  default: [],
+}) ?? [];
 const TETHER_HOST_PATTERN = /^http:\/\/10\.230\.36\.\d+(?::8080)?$/;
 const LOCAL_NETWORK_HOST_PATTERN = /^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/;
 const LOCAL_NETWORK_HOST_IN_TEXT_PATTERN = /(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)/g;
 const RANDISH_LOGO = require('./assets/randish-logo-square1.png');
 const HOME_HEADER_MAP = require('./assets/home-map/homeHeader.png');
+const ALBUM_FOOD_ICON = require('./assets/album-food-icon.png');
+const ALBUM_FOOTER_ICON = require('./assets/album-footer-traced.png');
 const HOTPEPPER_CREDIT_URL = 'https://webservice.recruit.co.jp/';
 const HOTPEPPER_CREDIT_IMAGE_URL = 'https://webservice.recruit.co.jp/banner/hotpepper-m.gif';
+const OAUTH_REDIRECT_URI = 'randish://auth/callback';
+
+const OAUTH_PROVIDER_NAMES: Record<OAuthProvider, string> = {
+  google: 'Google',
+  apple: 'Apple',
+};
+
+const isOAuthCallbackUrl = (url: string) =>
+  url.startsWith(OAUTH_REDIRECT_URI) || url.includes('/auth/callback');
+
+const decodeOAuthValue = (value: string) => {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, ' '));
+  } catch {
+    return value;
+  }
+};
+
+const parseOAuthCallbackParams = (url: string) => {
+  const [, hash = ''] = url.split('#');
+  const queryPart = url.includes('?') ? url.slice(url.indexOf('?') + 1).split('#')[0] : '';
+  const pairs = [...queryPart.split('&'), ...hash.split('&')].filter(Boolean);
+  return pairs.reduce<Record<string, string>>((params, pair) => {
+    const separatorIndex = pair.indexOf('=');
+    const rawKey = separatorIndex >= 0 ? pair.slice(0, separatorIndex) : pair;
+    const rawValue = separatorIndex >= 0 ? pair.slice(separatorIndex + 1) : '';
+    if (rawKey) {
+      params[decodeOAuthValue(rawKey)] = decodeOAuthValue(rawValue);
+    }
+    return params;
+  }, {});
+};
+
+const getDefaultDisplayName = (email: string) => {
+  const localPart = email.trim().split('@')[0]?.trim();
+  return localPart ? localPart.slice(0, 120) : 'RANDISHユーザー';
+};
 
 const normalizeApiBaseUrl = (value: string) =>
   value.trim().replace(/\/+$/, '').replace(/\/api\/restaurants$/, '');
@@ -286,8 +358,11 @@ const getRuntimeApiBaseUrls = () =>
     ...getApiBaseUrlsFromRuntimeUrl(getWebLocationUrl()),
   ].filter((value): value is string => Boolean(value)));
 
+const isDevFallbackApiBaseUrl = (baseUrl: string) =>
+  DEV_LAN_API_BASE_URLS.includes(baseUrl) || LOCAL_API_BASE_URLS.includes(baseUrl) || TETHER_HOST_PATTERN.test(baseUrl);
+
 const getRuntimeApiBaseUrl = () =>
-  getRuntimeApiBaseUrls()[0] ?? LOCAL_API_BASE_URLS[0];
+  getRuntimeApiBaseUrls()[0] ?? DEV_LAN_API_BASE_URLS[0] ?? LOCAL_API_BASE_URLS[0];
 
 const uniqueApiBaseUrls = (baseUrls: string[]) => {
   const seen = new Set<string>();
@@ -303,8 +378,18 @@ const uniqueApiBaseUrls = (baseUrls: string[]) => {
     });
 };
 
-const buildApiBaseUrlCandidates = (primaryBaseUrl: string, runtimeBaseUrl: string) =>
-  uniqueApiBaseUrls([primaryBaseUrl, runtimeBaseUrl, ...getRuntimeApiBaseUrls(), ...DEV_LAN_API_BASE_URLS, ...LOCAL_API_BASE_URLS]);
+const buildApiBaseUrlCandidates = (primaryBaseUrl: string, runtimeBaseUrl: string) => {
+  const primary = normalizeApiBaseUrl(primaryBaseUrl);
+  const primaryIsFallback = isDevFallbackApiBaseUrl(primary);
+  return uniqueApiBaseUrls([
+    ...(!primaryIsFallback ? [primary] : []),
+    runtimeBaseUrl,
+    ...getRuntimeApiBaseUrls(),
+    ...DEV_LAN_API_BASE_URLS,
+    ...(primaryIsFallback ? [primary] : []),
+    ...LOCAL_API_BASE_URLS,
+  ]);
+};
 
 const toAbsoluteApiAssetUrl = (value?: string | null) => {
   if (!value || !value.startsWith('/')) {
@@ -313,9 +398,6 @@ const toAbsoluteApiAssetUrl = (value?: string | null) => {
   const baseUrl = normalizeApiBaseUrl(randishApi.getLastSuccessfulBaseUrl() ?? getRuntimeApiBaseUrl());
   return `${baseUrl}${value}`;
 };
-
-const isDevFallbackApiBaseUrl = (baseUrl: string) =>
-  DEV_LAN_API_BASE_URLS.includes(baseUrl) || TETHER_HOST_PATTERN.test(baseUrl);
 
 const shouldReplaceWithRuntimeApiBaseUrl = (currentBaseUrl: string, runtimeBaseUrl: string) => {
   const current = normalizeApiBaseUrl(currentBaseUrl);
@@ -496,7 +578,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     footerHome: 'ホーム',
     footerSearch: '条件',
     footerRandom: '抽選',
-    footerSave: '保存',
+    footerSave: 'アルバム',
     footerAnalytics: '分析',
     pageConditionsTitle: '条件を整える',
     pageConditionsLead: '探し込みすぎず、決めるために必要な条件だけを残しました。',
@@ -542,19 +624,22 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     recentHistory: '最近引いた店',
     noHistory: '履歴なし',
     historyEmpty: '抽選すると、ここに履歴が残ります。',
-    savedTitle: '保存したお店',
-    savedLead: 'また行きたい候補をここに残しておけます。',
+    savedTitle: '食のアルバム',
+    savedLead: 'また行きたい店を、あとで見返せるように残しておけます。',
     savedEmptyTitle: '保存はまだありません',
     savedEmptyText: '結果カードの「保存する」から追加できます。',
     analyticsTitle: '分析',
     analyticsLead: '今月の食の傾向を、あとから見返せます。Proなら過去月も残せます。',
     registerTitle: '会員登録',
     registerDesc: 'アカウントを作成して、RANDISHをもっと便利に使いましょう。',
+    loginTitle: 'ログイン',
+    loginDesc: '保存したお店や履歴を引き継いでRANDISHを使います。',
     emailLabel: 'メールアドレス',
     passwordLabel: 'パスワード',
     passwordConfirmLabel: 'パスワード（確認）',
     nicknameLabel: 'ニックネーム',
     required: '必須',
+    optional: '任意',
     registerButton: '登録する',
     guestStart: 'ゲストではじめる',
     guestNote: '登録なしでRANDISHを試せます',
@@ -562,8 +647,13 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     googleRegister: 'Googleで登録',
     appleRegister: 'Appleで登録',
     lineRegister: 'LINEで登録',
+    googleLogin: 'Googleでログイン',
+    appleLogin: 'Appleでログイン',
+    lineLogin: 'LINEでログイン',
     loginQuestion: 'すでにアカウントをお持ちですか？',
     login: 'ログイン',
+    createAccountQuestion: 'はじめてですか？',
+    createAccount: '会員登録',
   },
   en: {
     accountSettings: 'Account Settings',
@@ -656,7 +746,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     footerHome: 'Home',
     footerSearch: 'Filters',
     footerRandom: 'Draw',
-    footerSave: 'Saved',
+    footerSave: 'Album',
     footerAnalytics: 'Stats',
     pageConditionsTitle: 'Set Filters',
     pageConditionsLead: 'Keep only the filters that help you decide.',
@@ -702,7 +792,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     recentHistory: 'Recent Draws',
     noHistory: 'No history',
     historyEmpty: 'Your draw history will appear here.',
-    savedTitle: 'Saved Places',
+    savedTitle: 'Food Album',
     savedLead: 'Keep places you may want to visit again.',
     savedEmptyTitle: 'No saved places yet',
     savedEmptyText: 'Save a place from the result card.',
@@ -710,11 +800,14 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     analyticsLead: 'View this month for free. Pro keeps past months and deeper trends.',
     registerTitle: 'Create Account',
     registerDesc: 'Create an account to make RANDISH more useful.',
+    loginTitle: 'Log In',
+    loginDesc: 'Continue with your saved places and draw history.',
     emailLabel: 'Email',
     passwordLabel: 'Password',
     passwordConfirmLabel: 'Confirm Password',
     nicknameLabel: 'Nickname',
     required: 'Required',
+    optional: 'Optional',
     registerButton: 'Sign Up',
     guestStart: 'Continue as Guest',
     guestNote: 'Try RANDISH without registering',
@@ -722,8 +815,13 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     googleRegister: 'Sign up with Google',
     appleRegister: 'Sign up with Apple',
     lineRegister: 'Sign up with LINE',
+    googleLogin: 'Log in with Google',
+    appleLogin: 'Log in with Apple',
+    lineLogin: 'Log in with LINE',
     loginQuestion: 'Already have an account?',
     login: 'Log In',
+    createAccountQuestion: 'New here?',
+    createAccount: 'Create Account',
   },
   zh: {
     accountSettings: '账户设置',
@@ -816,7 +914,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     footerHome: '首页',
     footerSearch: '条件',
     footerRandom: '抽选',
-    footerSave: '保存',
+    footerSave: '相册',
     footerAnalytics: '分析',
     pageConditionsTitle: '调整条件',
     pageConditionsLead: '只保留帮助你决定的必要条件。',
@@ -862,19 +960,22 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     recentHistory: '最近抽到的店',
     noHistory: '没有历史',
     historyEmpty: '抽选后历史会显示在这里。',
-    savedTitle: '保存的店铺',
-    savedLead: '想再去的候选可以保存在这里。',
+    savedTitle: '美食相册',
+    savedLead: '想再去的店铺可以保存在这里。',
     savedEmptyTitle: '还没有保存',
     savedEmptyText: '可从结果卡片的“保存”添加。',
     analyticsTitle: '分析',
     analyticsLead: '将饮食倾向可视化的高级功能。',
     registerTitle: '会员注册',
     registerDesc: '创建账号，让RANDISH更好用。',
+    loginTitle: '登录',
+    loginDesc: '继续使用已保存的店铺和抽选历史。',
     emailLabel: '邮箱地址',
     passwordLabel: '密码',
     passwordConfirmLabel: '确认密码',
     nicknameLabel: '昵称',
     required: '必填',
+    optional: '可选',
     registerButton: '注册',
     guestStart: '以游客开始',
     guestNote: '无需注册即可试用RANDISH',
@@ -882,8 +983,13 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     googleRegister: '使用 Google 注册',
     appleRegister: '使用 Apple 注册',
     lineRegister: '使用 LINE 注册',
+    googleLogin: '使用 Google 登录',
+    appleLogin: '使用 Apple 登录',
+    lineLogin: '使用 LINE 登录',
     loginQuestion: '已经有账号了吗？',
     login: '登录',
+    createAccountQuestion: '第一次使用吗？',
+    createAccount: '注册',
   },
   ko: {
     accountSettings: '계정 설정',
@@ -976,7 +1082,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     footerHome: '홈',
     footerSearch: '조건',
     footerRandom: '추첨',
-    footerSave: '저장',
+    footerSave: '앨범',
     footerAnalytics: '분석',
     pageConditionsTitle: '조건 정리',
     pageConditionsLead: '결정에 필요한 조건만 남겼습니다.',
@@ -1022,19 +1128,22 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     recentHistory: '최근 뽑은 가게',
     noHistory: '기록 없음',
     historyEmpty: '추첨하면 여기에 기록이 남습니다.',
-    savedTitle: '저장한 가게',
-    savedLead: '다시 가고 싶은 후보를 여기에 남겨둘 수 있습니다.',
+    savedTitle: '음식 앨범',
+    savedLead: '다시 가고 싶은 가게를 여기에 남겨둘 수 있습니다.',
     savedEmptyTitle: '아직 저장한 곳이 없습니다',
     savedEmptyText: '결과 카드의 “저장”에서 추가할 수 있습니다.',
     analyticsTitle: '분석',
     analyticsLead: '식사 취향을 시각화하는 프리미엄 기능입니다.',
     registerTitle: '회원가입',
     registerDesc: '계정을 만들고 RANDISH를 더 편리하게 사용하세요.',
+    loginTitle: '로그인',
+    loginDesc: '저장한 가게와 추첨 기록을 이어서 사용합니다.',
     emailLabel: '이메일',
     passwordLabel: '비밀번호',
     passwordConfirmLabel: '비밀번호 확인',
     nicknameLabel: '닉네임',
     required: '필수',
+    optional: '선택',
     registerButton: '가입하기',
     guestStart: '게스트로 시작',
     guestNote: '가입 없이 RANDISH를 체험할 수 있습니다',
@@ -1042,8 +1151,13 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     googleRegister: 'Google로 가입',
     appleRegister: 'Apple로 가입',
     lineRegister: 'LINE으로 가입',
+    googleLogin: 'Google로 로그인',
+    appleLogin: 'Apple로 로그인',
+    lineLogin: 'LINE으로 로그인',
     loginQuestion: '이미 계정이 있나요?',
     login: '로그인',
+    createAccountQuestion: '처음이신가요?',
+    createAccount: '회원가입',
   },
 };
 
@@ -1796,7 +1910,7 @@ const FOOTER_ITEMS: FooterItem[] = [
   { key: 'home', label: 'ホーム', icon: 'home' },
   { key: 'search', label: '条件', icon: 'search' },
   { key: 'random', label: '抽選', icon: 'restaurant' },
-  { key: 'save', label: '保存', icon: 'bookmark-outline' },
+  { key: 'save', label: 'アルバム', icon: 'albums-outline' },
   { key: 'analytics', label: '分析', icon: 'bar-chart-outline' },
 ];
 
@@ -2152,6 +2266,8 @@ const toSavedRestaurantFromApi = (favorite: ApiFavorite): SavedRestaurant => ({
   userMemo: favorite.userMemo,
   userTags: favorite.userTags,
   createdAt: favorite.createdAt,
+  photoUri: null,
+  photoTakenAt: null,
   snapshot: favorite.restaurant ? normalizeRestaurant(favorite.restaurant) : null,
 });
 
@@ -2185,6 +2301,8 @@ const toSavedRestaurantFromSelection = ({
     userMemo: null,
     userTags: null,
     createdAt,
+    photoUri: null,
+    photoTakenAt: null,
     snapshot: restaurant,
   };
 };
@@ -2221,6 +2339,36 @@ const toDebugErrorMessage = (error: unknown) => {
   return typeof error === 'string' ? error : 'unknown error';
 };
 
+const toAuthErrorMessage = (error: unknown, fallback: string) => {
+  const rawMessage = error instanceof Error ? error.message : fallback;
+  const message = rawMessage.replace(/\s*\(https?:\/\/[^)]+\)\s*$/i, '').trim();
+  if (isApiConnectivityError(error) || /API timeout|API connection failed/i.test(message)) {
+    return 'APIに接続できませんでした。サーバーを再起動して、スマホとPCが同じWi-Fiにつながっているか確認してください。';
+  }
+  if (!message) {
+    return fallback;
+  }
+  if (/Email is already registered/i.test(message)) {
+    return 'このメールアドレスは登録済みです。ログインしてください。';
+  }
+  if (/Email or password is incorrect|Invalid login credentials/i.test(message)) {
+    return 'メールアドレスまたはパスワードが違います。';
+  }
+  if (/email format is invalid/i.test(message)) {
+    return 'メールアドレスの形式を確認してください。';
+  }
+  if (/password must be at least 8 characters/i.test(message)) {
+    return 'パスワードは8文字以上で入力してください。';
+  }
+  if (/Supabase Auth is not configured/i.test(message)) {
+    return '認証サーバーの設定が未反映です。Spring Bootを再起動するとメールログインを使えます。Google / Appleログインはまだ認証設定が必要です。';
+  }
+  if (/Please use the social login used for this account/i.test(message)) {
+    return 'このアカウントはGoogle / Appleログインで作られています。同じ方法でログインしてください。';
+  }
+  return message;
+};
+
 const logApiUiError = (context: string, error: unknown, baseUrls: readonly string[]) => {
   console.warn(`[RANDISH] ${context}`, {
     baseUrls,
@@ -2244,6 +2392,43 @@ const formatShortDate = (dateText: string) => {
     return '';
   }
   return `${date.getMonth() + 1}/${date.getDate()}`;
+};
+
+const formatShortDateTime = (dateText: string) => {
+  const date = new Date(dateText);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${date.getMonth() + 1}/${date.getDate()} ${hours}:${minutes}`;
+};
+
+const getAlbumMonthKey = (dateText: string) => {
+  const date = new Date(dateText);
+  if (Number.isNaN(date.getTime())) {
+    return 'unknown';
+  }
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const formatAlbumMonthLabel = (monthKey: string) => {
+  const [year, month] = monthKey.split('-');
+  if (!year || !month || monthKey === 'all') {
+    return 'すべて';
+  }
+  return `${year}年${Number(month)}月`;
+};
+
+const getFreeAlbumCutoffDate = (baseDate = new Date()) =>
+  new Date(baseDate.getFullYear(), baseDate.getMonth() - 2, 1);
+
+const isInFreeAlbumWindow = (dateText: string, baseDate = new Date()) => {
+  const date = new Date(dateText);
+  if (Number.isNaN(date.getTime())) {
+    return false;
+  }
+  return date >= getFreeAlbumCutoffDate(baseDate);
 };
 
 const getMonthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
@@ -2527,7 +2712,14 @@ const getAreaPresetSearchText = (preset: AreaPreset) =>
 
 const getAreaPresetKey = (preset: AreaPreset) => `${preset.group}-${getAreaPresetValue(preset)}`;
 
-const formatAreaPresetStatus = (preset: AreaPreset) => `${preset.group} 周辺から探します`;
+const formatAreaPresetStatus = (preset: AreaPreset) => {
+  const prefecture = getPresetPrefecture(preset);
+  const region = getPrefectureRegion(prefecture);
+  if (region && prefecture && preset.label !== prefecture) {
+    return `${region} / ${prefecture} / ${preset.label} 周辺から探します`;
+  }
+  return `${preset.group} 周辺から探します`;
+};
 
 const NON_STATION_AREA_LABELS = new Set([
   '現在地',
@@ -2616,7 +2808,7 @@ const getRegionGroupForPrefecture = (prefecture?: string | null) =>
 const formatLocationStatus = (prefecture: string | undefined, areaLabel: string) => {
   const region = getPrefectureRegion(prefecture);
   if (prefecture && region) {
-    return `${prefecture} / ${region} / ${areaLabel} 周辺から探します`;
+    return `${region} / ${prefecture} / ${areaLabel} 周辺から探します`;
   }
   if (prefecture) {
     return `${prefecture} / ${areaLabel} 周辺から探します`;
@@ -2670,6 +2862,50 @@ const sortAreaPresetsForPicker = (items: AreaPreset[], prefecture: string) => {
 
 const getWalkingMinutesFromKm = (km: number) => Math.max(1, Math.round(km * 12.5));
 
+const getStationCandidateItem = (preset: AreaPreset, restaurant: Restaurant) => ({
+  preset,
+  distance: getDistanceKm(
+    { latitude: preset.latitude, longitude: preset.longitude, label: preset.label },
+    restaurant,
+  ) ?? Number.POSITIVE_INFINITY,
+});
+
+const toStationAccessItem = ({ preset, distance }: { preset: AreaPreset; distance: number }): StationAccessItem => {
+  const stationName = formatStationName(preset.label);
+  return {
+    stationName,
+    lineLabel: STATION_LINE_LABELS[preset.label],
+    walkingMinutes: getWalkingMinutesFromKm(distance),
+    distanceKm: distance,
+    location: {
+      latitude: preset.latitude,
+      longitude: preset.longitude,
+      label: preset.label,
+    },
+  };
+};
+
+const getPreferredStationAccessItem = (restaurant: Restaurant, preferredArea?: string | null): StationAccessItem | null => {
+  if (restaurant.latitude == null || restaurant.longitude == null) {
+    return null;
+  }
+
+  const prefecture = getPrefectureFromText(`${restaurant.area} ${restaurant.address}`);
+  const preferredPreset = preferredArea ? getCoordinatePresetForArea(preferredArea)?.preset : null;
+  if (!preferredPreset || !isStationLikePreset(preferredPreset)) {
+    return null;
+  }
+  if (prefecture && getPresetPrefecture(preferredPreset) !== prefecture) {
+    return null;
+  }
+
+  const item = getStationCandidateItem(preferredPreset, restaurant);
+  if (!Number.isFinite(item.distance) || item.distance > MAX_TRUSTED_STATION_DISTANCE_KM) {
+    return null;
+  }
+  return toStationAccessItem(item);
+};
+
 const getNearestStationAccessItems = (restaurant: Restaurant): StationAccessItem[] => {
   if (restaurant.latitude == null || restaurant.longitude == null) {
     return [];
@@ -2681,30 +2917,11 @@ const getNearestStationAccessItems = (restaurant: Restaurant): StationAccessItem
     .filter((preset) => !prefecture || getPresetPrefecture(preset) === prefecture);
 
   return candidates
-    .map((preset) => ({
-      preset,
-      distance: getDistanceKm(
-        { latitude: preset.latitude, longitude: preset.longitude, label: preset.label },
-        restaurant,
-      ) ?? Number.POSITIVE_INFINITY,
-    }))
+    .map((preset) => getStationCandidateItem(preset, restaurant))
     .filter((item) => Number.isFinite(item.distance) && item.distance <= MAX_TRUSTED_STATION_DISTANCE_KM)
     .sort((a, b) => a.distance - b.distance)
     .slice(0, MAX_STATION_ACCESS_ITEMS)
-    .map(({ preset, distance }) => {
-      const stationName = formatStationName(preset.label);
-      return {
-        stationName,
-        lineLabel: STATION_LINE_LABELS[preset.label],
-        walkingMinutes: getWalkingMinutesFromKm(distance),
-        distanceKm: distance,
-        location: {
-          latitude: preset.latitude,
-          longitude: preset.longitude,
-          label: preset.label,
-        },
-      };
-    });
+    .map(toStationAccessItem);
 };
 
 const getCoordinatePresetForArea = (area: string) => {
@@ -3040,13 +3257,14 @@ export default function App() {
   const [area, setArea] = useState('現在地');
   const [genre, setGenre] = useState('ラーメン');
   const [budgetMin, setBudgetMin] = useState('0');
-  const [budgetMax, setBudgetMax] = useState('3000');
+  const [budgetMax, setBudgetMax] = useState('1500');
   const [distance, setDistance] = useState('1.5km');
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [randomHistory, setRandomHistory] = useState<Restaurant[]>([]);
   const [drawHistories, setDrawHistories] = useState<DrawHistoryEntry[]>([]);
   const [savedRestaurants, setSavedRestaurants] = useState<SavedRestaurant[]>([]);
+  const [albumPhotos, setAlbumPhotos] = useState<AlbumPhotoEntry[]>([]);
   const [savedDetail, setSavedDetail] = useState<{ favorite: SavedRestaurant; restaurant: Restaurant } | null>(null);
   const [savedDetailLoadingId, setSavedDetailLoadingId] = useState<string | null>(null);
   const [savedDetailError, setSavedDetailError] = useState<string | null>(null);
@@ -3691,11 +3909,11 @@ export default function App() {
     const currentTicket = mealTicketState.current;
     if (!currentTicket.available) {
       if (currentTicket.proOnly && !mealTicketState.isProUser) {
-        setMessage(`深夜の食券はPro限定です。${mealTicketState.nextUnlockLabel}で朝の一枚が開きます。`);
+        setMessage(`深夜の抽選はPro限定です。${mealTicketState.nextUnlockLabel}で朝の一回が使えます。`);
       } else if (currentTicket.used) {
-        setMessage(`${currentTicket.label}の食券は使用済みです。${mealTicketState.nextUnlockLabel}で次の一枚が開きます。`);
+        setMessage(`${currentTicket.label}の抽選枠は使用済みです。${mealTicketState.nextUnlockLabel}で次の一回が使えます。`);
       } else {
-        setMessage(`${currentTicket.label}の食券は${currentTicket.timeLabel}です。${currentTicket.countdownLabel}で使えます。`);
+        setMessage(`${currentTicket.label}の抽選枠は${currentTicket.timeLabel}です。${currentTicket.countdownLabel}で使えます。`);
       }
       scrollToContentTop();
       return;
@@ -3768,13 +3986,28 @@ export default function App() {
       };
       savedDetailCacheRef.current.delete(localFavorite.id);
       savedDetailCacheRef.current.set(syncedFavorite.id, localFavorite.snapshot ?? selectedRestaurant);
-      setSavedRestaurants((current) => [
-        syncedFavorite,
-        ...current.filter((item) => !isSameSavedRestaurant(item, syncedFavorite)),
-      ]);
+      setSavedRestaurants((current) => {
+        const existing = current.find((item) => isSameSavedRestaurant(item, syncedFavorite));
+        const mergedFavorite = {
+          ...syncedFavorite,
+          photoUri: existing?.photoUri ?? localFavorite.photoUri ?? null,
+          photoTakenAt: existing?.photoTakenAt ?? localFavorite.photoTakenAt ?? null,
+        };
+        return [
+          mergedFavorite,
+          ...current.filter((item) => !isSameSavedRestaurant(item, mergedFavorite)),
+        ];
+      });
       setSavedDetail((current) => (
         current?.favorite.id === localFavorite.id
-          ? { favorite: syncedFavorite, restaurant: localFavorite.snapshot ?? selectedRestaurant }
+          ? {
+            favorite: {
+              ...syncedFavorite,
+              photoUri: current.favorite.photoUri ?? localFavorite.photoUri ?? null,
+              photoTakenAt: current.favorite.photoTakenAt ?? localFavorite.photoTakenAt ?? null,
+            },
+            restaurant: localFavorite.snapshot ?? selectedRestaurant,
+          }
           : current
       ));
       setMessage('保存しました。保存タブに追加しました。');
@@ -3801,6 +4034,117 @@ export default function App() {
     const query = encodeURIComponent(`${restaurant.name} ${restaurant.address}`);
     Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
   }, []);
+
+  const updateSavedFoodPhoto = useCallback((favoriteId: string, photoUri: string) => {
+    const photoTakenAt = new Date().toISOString();
+    setSavedRestaurants((current) => current.map((item) => (
+      item.id === favoriteId ? { ...item, photoUri, photoTakenAt } : item
+    )));
+    setSavedDetail((current) => (
+      current?.favorite.id === favoriteId
+        ? { ...current, favorite: { ...current.favorite, photoUri, photoTakenAt } }
+        : current
+    ));
+    setMessage('ごはん写真をアルバムに追加しました。');
+  }, []);
+
+  const requestFoodPhotoUri = useCallback(async (): Promise<string | null> => {
+    const pickFromLibrary = async (): Promise<string | null> => {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('写真を選べません', 'アルバムに残すには、写真へのアクセスを許可してください。');
+        return null;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.85,
+      });
+
+      if (result.canceled || !result.assets?.[0]?.uri) {
+        return null;
+      }
+
+      return result.assets[0].uri;
+    };
+
+    try {
+      const currentPermission = await ImagePicker.getCameraPermissionsAsync();
+      const permission = currentPermission.granted
+        ? currentPermission
+        : await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        return await new Promise<string | null>((resolve) => {
+          Alert.alert(
+            'カメラを使えません',
+            'ごはん写真を撮るには、カメラの使用を許可してください。写真から選ぶこともできます。',
+            [
+              { text: '写真から選ぶ', onPress: () => { void pickFromLibrary().then(resolve); } },
+              { text: '設定を開く', onPress: () => { void Linking.openSettings(); resolve(null); } },
+              { text: '閉じる', style: 'cancel', onPress: () => resolve(null) },
+            ],
+            { onDismiss: () => resolve(null) },
+          );
+        });
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.85,
+      });
+
+      if (result.canceled || !result.assets?.[0]?.uri) {
+        return null;
+      }
+
+      return result.assets[0].uri;
+    } catch {
+      return await new Promise<string | null>((resolve) => {
+        Alert.alert(
+          'カメラを起動できませんでした',
+          '開発ビルドの権限が未反映か、端末側でカメラを開けない状態です。写真から選ぶこともできます。',
+          [
+            { text: '写真から選ぶ', onPress: () => { void pickFromLibrary().then(resolve); } },
+            { text: '閉じる', style: 'cancel', onPress: () => resolve(null) },
+          ],
+          { onDismiss: () => resolve(null) },
+        );
+      });
+    }
+  }, []);
+
+  const attachSavedFoodPhoto = useCallback(async (favoriteId: string) => {
+    const photoUri = await requestFoodPhotoUri();
+    if (!photoUri) {
+      return;
+    }
+    updateSavedFoodPhoto(favoriteId, photoUri);
+  }, [requestFoodPhotoUri, updateSavedFoodPhoto]);
+
+  const captureAlbumPhoto = useCallback(async () => {
+    const photoUri = await requestFoodPhotoUri();
+    if (!photoUri) {
+      return;
+    }
+
+    const createdAt = new Date().toISOString();
+    setAlbumPhotos((current) => {
+      const next = [
+        {
+          id: `album-photo-${createdAt}`,
+          photoUri,
+          createdAt,
+          title: '今日の一枚',
+          subtitle: 'RANDISHアルバム',
+        },
+        ...current,
+      ];
+      return (subscription.isPro ? next : next.filter((item) => isInFreeAlbumWindow(item.createdAt))).slice(0, subscription.isPro ? 360 : 90);
+    });
+    setMessage('今日の一枚をアルバムに追加しました。');
+  }, [requestFoodPhotoUri, subscription.isPro]);
 
   const openSavedRestaurant = useCallback(async (favorite: SavedRestaurant) => {
     setSavedDetailError(null);
@@ -4072,14 +4416,20 @@ export default function App() {
         {activeTab === 'save' && (
           <SaveTab
             savedRestaurants={savedRestaurants}
+            albumPhotos={albumPhotos}
             history={randomHistory}
             uiText={UI_TEXT[appLanguage]}
             savedDetail={savedDetail}
             savedDetailLoadingId={savedDetailLoadingId}
             savedDetailError={savedDetailError}
             userLocation={userLocation}
+            isRegisteredUser={isRegisteredUser}
+            isPro={subscription.isPro}
             onSavedPress={openSavedRestaurant}
             onSavedMapPress={openSavedMap}
+            onAttachPhoto={attachSavedFoodPhoto}
+            onCaptureAlbumPhoto={captureAlbumPhoto}
+            onRequireRegistration={() => setStage('login')}
           />
         )}
         {activeTab === 'analytics' && (
@@ -4146,6 +4496,56 @@ function LoginScreen({
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [authNotice, setAuthNotice] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
+  const handledOAuthUrlRef = useRef<string | null>(null);
+  const isLoginMode = authMode === 'login';
+
+  const switchAuthMode = (mode: 'register' | 'login') => {
+    setAuthMode(mode);
+    setAuthNotice('');
+    Keyboard.dismiss();
+  };
+
+  const completeOAuthSession = useCallback(async (url: string | null) => {
+    if (!url || !isOAuthCallbackUrl(url) || handledOAuthUrlRef.current === url) {
+      return;
+    }
+    handledOAuthUrlRef.current = url;
+    const params = parseOAuthCallbackParams(url);
+    if (params.error || params.error_description) {
+      setAuthNotice(`外部ログインを完了できませんでした。${params.error_description || params.error}`);
+      return;
+    }
+    const accessToken = params.access_token || params.accessToken;
+    if (!accessToken) {
+      setAuthNotice('外部ログインから認証トークンを受け取れませんでした。SupabaseのRedirect URL設定を確認してください。');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setAuthNotice('');
+    try {
+      const auth = await randishApi.loginWithOAuthSession(apiBaseUrlCandidates, { accessToken });
+      randishApi.setAuthToken(auth.accessToken);
+      onApiConnected();
+      onStart(auth.user.id, auth.user.displayName);
+    } catch (error) {
+      const reason = toAuthErrorMessage(error, '外部ログインに失敗しました。');
+      setAuthNotice(`外部ログインを完了できませんでした。${reason}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [apiBaseUrlCandidates, onApiConnected, onStart]);
+
+  useEffect(() => {
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      completeOAuthSession(url);
+    });
+    Linking.getInitialURL()
+      .then(completeOAuthSession)
+      .catch(() => {});
+    return () => subscription.remove();
+  }, [completeOAuthSession]);
 
   const handleRegister = async () => {
     if (isSubmitting) {
@@ -4155,8 +4555,10 @@ function LoginScreen({
       setAuthNotice('利用規約とプライバシーポリシーへの同意が必要です。');
       return;
     }
-    if (!email.trim() || !displayName.trim()) {
-      setAuthNotice('メールアドレスとニックネームを入力してください。');
+    const cleanEmail = email.trim();
+    const cleanDisplayName = displayName.trim() || getDefaultDisplayName(cleanEmail);
+    if (!cleanEmail) {
+      setAuthNotice('メールアドレスを入力してください。');
       return;
     }
     if (password.length < 8) {
@@ -4172,19 +4574,25 @@ function LoginScreen({
     setAuthNotice('');
     try {
       const auth = await randishApi.registerUser(apiBaseUrlCandidates, {
-        email,
+        email: cleanEmail,
         password,
-        displayName,
+        displayName: cleanDisplayName,
       });
       randishApi.setAuthToken(auth.accessToken);
       onApiConnected();
       if (!auth.accessToken && auth.user.authProvider === 'SUPABASE') {
-        setAuthNotice('登録しました。メール確認が有効な場合は、確認後にこの画面でログインしてください。');
+        setPassword('');
+        setPasswordConfirm('');
+        switchAuthMode('login');
+        setAuthNotice('登録は完了しました。確認メールが届いている場合は、承認してからログインしてください。');
         return;
       }
       onStart(auth.user.id, auth.user.displayName);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : '登録に失敗しました。';
+      if (error instanceof RandishApiError && error.status === 409) {
+        switchAuthMode('login');
+      }
+      const reason = toAuthErrorMessage(error, '登録に失敗しました。');
       setAuthNotice(`登録できませんでした。${reason}`);
     } finally {
       setIsSubmitting(false);
@@ -4208,15 +4616,35 @@ function LoginScreen({
       onApiConnected();
       onStart(auth.user.id, auth.user.displayName);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'ログインに失敗しました。';
+      const reason = toAuthErrorMessage(error, 'ログインに失敗しました。');
       setAuthNotice(`ログインできませんでした。${reason}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleSocialPress = (provider: string) => {
-    setAuthNotice(`${provider}ログインは認証設定を追加すると有効化できます。今はUIだけ用意しています。`);
+  const handleSocialPress = async (provider: OAuthProvider) => {
+    if (isSubmitting) {
+      return;
+    }
+    if (!isLoginMode && !acceptedTerms) {
+      setAuthNotice('利用規約とプライバシーポリシーへの同意が必要です。');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setAuthNotice('');
+    try {
+      const authUrl = await randishApi.getOAuthAuthorizeUrl(apiBaseUrlCandidates, provider, OAUTH_REDIRECT_URI);
+      onApiConnected();
+      await Linking.openURL(authUrl.authorizationUrl);
+      setAuthNotice(`${OAUTH_PROVIDER_NAMES[provider]}の認証画面を開きました。完了後にRANDISHへ戻ります。`);
+    } catch (error) {
+      const reason = toAuthErrorMessage(error, '外部ログインを開始できませんでした。');
+      setAuthNotice(`${OAUTH_PROVIDER_NAMES[provider]}ログインを開始できませんでした。${reason}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -4236,8 +4664,8 @@ function LoginScreen({
           <Image source={RANDISH_LOGO} style={styles.registerHeaderLogo} resizeMode="contain" />
         </View>
 
-        <Text style={styles.registerTitle}>{uiText.registerTitle}</Text>
-        <Text style={styles.registerDesc}>{uiText.registerDesc}</Text>
+        <Text style={styles.registerTitle}>{isLoginMode ? uiText.loginTitle : uiText.registerTitle}</Text>
+        <Text style={styles.registerDesc}>{isLoginMode ? uiText.loginDesc : uiText.registerDesc}</Text>
 
         <View style={styles.registerCard}>
           <RegisterLabel text={uiText.emailLabel} requiredText={uiText.required} />
@@ -4261,7 +4689,7 @@ function LoginScreen({
             placeholder="8文字以上の半角英数字"
             placeholderTextColor="#aaa"
             secureTextEntry
-            textContentType="newPassword"
+            textContentType={isLoginMode ? 'password' : 'newPassword'}
             value={password}
             onChangeText={setPassword}
             returnKeyType="done"
@@ -4269,52 +4697,56 @@ function LoginScreen({
             onSubmitEditing={Keyboard.dismiss}
           />
 
-          <RegisterLabel text={uiText.passwordConfirmLabel} requiredText={uiText.required} />
-          <TextInput
-            style={styles.registerInput}
-            placeholder="もう一度入力してください"
-            placeholderTextColor="#aaa"
-            secureTextEntry
-            textContentType="newPassword"
-            value={passwordConfirm}
-            onChangeText={setPasswordConfirm}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={Keyboard.dismiss}
-          />
+          {!isLoginMode && (
+            <>
+              <RegisterLabel text={uiText.passwordConfirmLabel} requiredText={uiText.required} />
+              <TextInput
+                style={styles.registerInput}
+                placeholder="もう一度入力してください"
+                placeholderTextColor="#aaa"
+                secureTextEntry
+                textContentType="newPassword"
+                value={passwordConfirm}
+                onChangeText={setPasswordConfirm}
+                returnKeyType="done"
+                blurOnSubmit
+                onSubmitEditing={Keyboard.dismiss}
+              />
 
-          <RegisterLabel text={uiText.nicknameLabel} requiredText={uiText.required} />
-          <TextInput
-            style={styles.registerInput}
-            placeholder="例）ランディッシュ太郎"
-            placeholderTextColor="#aaa"
-            value={displayName}
-            onChangeText={setDisplayName}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={Keyboard.dismiss}
-          />
+              <RegisterLabel text={uiText.nicknameLabel} requiredText={uiText.optional} />
+              <TextInput
+                style={styles.registerInput}
+                placeholder="例）ランディッシュ太郎"
+                placeholderTextColor="#aaa"
+                value={displayName}
+                onChangeText={setDisplayName}
+                returnKeyType="done"
+                blurOnSubmit
+                onSubmitEditing={Keyboard.dismiss}
+              />
 
-          <Pressable style={styles.registerCheckRow} onPress={() => setAcceptedTerms((value) => !value)}>
-            <View style={[styles.registerCheckbox, acceptedTerms && styles.registerCheckboxActive]}>
-              {acceptedTerms && <Ionicons name="checkmark" size={16} color="#ffffff" />}
-            </View>
-            <Text style={styles.registerTerms}>
-              <Text style={styles.registerLink}>利用規約</Text> と <Text style={styles.registerLink}>プライバシーポリシー</Text> に同意します
-            </Text>
-          </Pressable>
+              <Pressable style={styles.registerCheckRow} onPress={() => setAcceptedTerms((value) => !value)}>
+                <View style={[styles.registerCheckbox, acceptedTerms && styles.registerCheckboxActive]}>
+                  {acceptedTerms && <Ionicons name="checkmark" size={16} color="#ffffff" />}
+                </View>
+                <Text style={styles.registerTerms}>
+                  <Text style={styles.registerLink}>利用規約</Text> と <Text style={styles.registerLink}>プライバシーポリシー</Text> に同意します
+                </Text>
+              </Pressable>
+            </>
+          )}
 
           {!!authNotice && <Text style={styles.registerNotice}>{authNotice}</Text>}
 
           <Pressable
             style={[styles.registerMainButton, isSubmitting && styles.registerButtonDisabled]}
-            onPress={handleRegister}
+            onPress={isLoginMode ? handleLogin : handleRegister}
             disabled={isSubmitting}
           >
             {isSubmitting ? (
               <ActivityIndicator color="#ffffff" />
             ) : (
-              <Text style={styles.registerMainButtonText}>{uiText.registerButton}</Text>
+              <Text style={styles.registerMainButtonText}>{isLoginMode ? uiText.login : uiText.registerButton}</Text>
             )}
           </Pressable>
 
@@ -4327,13 +4759,19 @@ function LoginScreen({
 
         <Text style={styles.registerOr}>{uiText.or}</Text>
 
-        <RegisterSocialButton text={uiText.googleRegister} onPress={() => handleSocialPress('Google')} />
-        <RegisterSocialButton text={uiText.appleRegister} onPress={() => handleSocialPress('Apple')} />
-        <RegisterSocialButton text={uiText.lineRegister} onPress={() => handleSocialPress('LINE')} />
+        <RegisterSocialButton text={isLoginMode ? uiText.googleLogin : uiText.googleRegister} icon="logo-google" accent="#4285f4" onPress={() => handleSocialPress('google')} disabled={isSubmitting} />
+        <RegisterSocialButton text={isLoginMode ? uiText.appleLogin : uiText.appleRegister} icon="logo-apple" accent="#15120f" onPress={() => handleSocialPress('apple')} disabled={isSubmitting} />
+        <RegisterSocialButton
+          text={isLoginMode ? uiText.lineLogin : uiText.lineRegister}
+          icon="chatbubble-ellipses-outline"
+          accent="#06c755"
+          onPress={() => setAuthNotice('LINEログインは次の候補です。まずはGoogle / Appleを接続します。')}
+          disabled={isSubmitting}
+        />
 
-        <Pressable style={styles.registerLoginBox} onPress={handleLogin}>
-          <Text style={styles.registerLoginText}>{uiText.loginQuestion}</Text>
-          <Text style={styles.registerLoginLink}>{uiText.login}</Text>
+        <Pressable style={styles.registerLoginBox} onPress={() => switchAuthMode(isLoginMode ? 'register' : 'login')}>
+          <Text style={styles.registerLoginText}>{isLoginMode ? uiText.createAccountQuestion : uiText.loginQuestion}</Text>
+          <Text style={styles.registerLoginLink}>{isLoginMode ? uiText.createAccount : uiText.login}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -4349,9 +4787,28 @@ function RegisterLabel({ text, requiredText = '必須' }: { text: string; requir
   );
 }
 
-function RegisterSocialButton({ text, onPress }: { text: string; onPress: () => void }) {
+function RegisterSocialButton({
+  text,
+  icon,
+  accent,
+  onPress,
+  disabled = false,
+}: {
+  text: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  accent: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <Pressable style={styles.registerSocialButton} onPress={onPress}>
+    <Pressable
+      style={[styles.registerSocialButton, disabled && styles.registerSocialButtonDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <View style={[styles.registerSocialIcon, { borderColor: accent }]}>
+        <Ionicons name={icon} size={19} color={accent} />
+      </View>
       <Text style={styles.registerSocialText}>{text}</Text>
     </Pressable>
   );
@@ -5930,7 +6387,7 @@ function RandomTab({
   const currentTicket = mealTicketState.current;
   const ticketAvailable = currentTicket.available;
   const statusText = !ticketAvailable
-    ? 'TICKET LOCKED'
+    ? 'NEXT DRAW LOCKED'
     : isLoading
     ? drawAnimation.activeStatus
     : isEverythingRandom
@@ -5940,8 +6397,8 @@ function RandomTab({
       : 'READY TO DRAW';
   const startText = !ticketAvailable
     ? currentTicket.proOnly && !mealTicketState.isProUser
-      ? 'Pro深夜チケット'
-      : '次の食券を待つ'
+      ? '深夜はPro限定'
+      : '次の抽選を待つ'
     : isEverythingRandom
       ? '完全ランダム START'
       : isTravelDraw
@@ -6004,7 +6461,6 @@ function RandomTab({
 
   return (
     <View onLayout={(event) => onTabLayout(event.nativeEvent.layout.y)}>
-      <MealTicketPanel state={mealTicketState} compact uiText={uiText} />
       <View style={styles.drawConditionRow}>
           <ConditionPill label={conditionGenreLabel} active />
           <ConditionPill label={conditionAreaLabel} />
@@ -6028,6 +6484,20 @@ function RandomTab({
             <View style={[styles.rouletteMapCanvasPark, styles.rouletteMapCanvasParkTwo]} />
             <View style={[styles.rouletteMapCanvasRiver, styles.rouletteMapCanvasRiverOne]} />
             <View style={[styles.rouletteMapCanvasRiver, styles.rouletteMapCanvasRiverTwo]} />
+            <View style={[styles.rouletteMapDistrictLabel, styles.rouletteMapDistrictLabelOne]}>
+              <Text style={styles.rouletteMapDistrictText}>駅前</Text>
+            </View>
+            <View style={[styles.rouletteMapDistrictLabel, styles.rouletteMapDistrictLabelTwo]}>
+              <Text style={styles.rouletteMapDistrictText}>商店街</Text>
+            </View>
+            <View style={[styles.rouletteMapRailLine, styles.rouletteMapRailLineOne]} />
+            <View style={[styles.rouletteMapRailLine, styles.rouletteMapRailLineTwo]} />
+            <View style={[styles.rouletteMapStationDot, styles.rouletteMapStationDotOne]}>
+              <Ionicons name="train-outline" size={13} color="#6f7f8a" />
+            </View>
+            <View style={[styles.rouletteMapStationDot, styles.rouletteMapStationDotTwo]}>
+              <Ionicons name="business-outline" size={12} color="#6f7f8a" />
+            </View>
             <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadOne]} />
             <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadTwo]} />
             <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadThree]} />
@@ -6036,10 +6506,14 @@ function RandomTab({
             <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadSix]} />
             <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadSeven]} />
             <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadEight]} />
+            <View style={[styles.rouletteMapArterialRoad, styles.rouletteMapArterialRoadOne]} />
+            <View style={[styles.rouletteMapArterialRoad, styles.rouletteMapArterialRoadTwo]} />
             <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadOne]} />
             <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadTwo]} />
             <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadThree]} />
             <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadFour]} />
+            <View style={[styles.rouletteMapBridge, styles.rouletteMapBridgeOne]} />
+            <View style={[styles.rouletteMapBridge, styles.rouletteMapBridgeTwo]} />
             <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockOne]} />
             <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockTwo]} />
             <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockThree]} />
@@ -6055,6 +6529,18 @@ function RandomTab({
             <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotTwo]} />
             <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotThree]} />
             <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotFour]} />
+            <View style={[styles.rouletteMapCandidatePin, styles.rouletteMapCandidatePinOne]}>
+              <Text style={styles.rouletteMapCandidatePinText}>1</Text>
+            </View>
+            <View style={[styles.rouletteMapCandidatePin, styles.rouletteMapCandidatePinTwo]}>
+              <Text style={styles.rouletteMapCandidatePinText}>2</Text>
+            </View>
+            <View style={[styles.rouletteMapCandidatePin, styles.rouletteMapCandidatePinThree]}>
+              <Text style={styles.rouletteMapCandidatePinText}>3</Text>
+            </View>
+            <View style={[styles.rouletteMapCandidatePin, styles.rouletteMapCandidatePinFour]}>
+              <Text style={styles.rouletteMapCandidatePinText}>4</Text>
+            </View>
             <Animated.View style={[styles.rouletteMapPulse, { opacity: radarPulseOpacity, transform: [{ scale: radarPulseScale }] }]} />
             <View style={styles.rouletteMapPin}>
               <Ionicons name="location" size={44} color={ORANGE} />
@@ -6172,7 +6658,13 @@ function RandomTab({
           onLayout={(event) => onResultLayout(event.nativeEvent.layout.y)}
         >
           <Text style={styles.resultKicker}>{uiText.resultKicker}</Text>
-          <ResultCard restaurant={visibleSelectedRestaurant} userLocation={userLocation} uiText={uiText} onMapPress={onGoPress} />
+          <ResultCard
+            restaurant={visibleSelectedRestaurant}
+            userLocation={userLocation}
+            preferredArea={displayAreaBase}
+            uiText={uiText}
+            onMapPress={onGoPress}
+          />
           <View style={styles.resultActions}>
             <Pressable style={styles.secondaryAction} onPress={onRandomPress}>
               <Text style={styles.secondaryActionText}>{uiText.drawAgain}</Text>
@@ -6199,48 +6691,248 @@ function RandomTab({
 
 function SaveTab({
   savedRestaurants,
+  albumPhotos,
   history,
   uiText,
   savedDetail,
   savedDetailLoadingId,
   savedDetailError,
   userLocation,
+  isRegisteredUser,
+  isPro,
   onSavedPress,
   onSavedMapPress,
+  onAttachPhoto,
+  onCaptureAlbumPhoto,
+  onRequireRegistration,
 }: {
   savedRestaurants: SavedRestaurant[];
+  albumPhotos: AlbumPhotoEntry[];
   history: Restaurant[];
   uiText: Record<string, string>;
   savedDetail: { favorite: SavedRestaurant; restaurant: Restaurant } | null;
   savedDetailLoadingId: string | null;
   savedDetailError: string | null;
   userLocation: UserLocation | null;
+  isRegisteredUser: boolean;
+  isPro: boolean;
   onSavedPress: (favorite: SavedRestaurant) => void;
   onSavedMapPress: (restaurant: Restaurant) => void;
+  onAttachPhoto: (favoriteId: string) => void;
+  onCaptureAlbumPhoto: () => void;
+  onRequireRegistration: () => void;
 }) {
+  const [previewPhoto, setPreviewPhoto] = useState<AlbumPhotoPreview | null>(null);
+  const [selectedAlbumMonth, setSelectedAlbumMonth] = useState('all');
   const showHotPepperCredit =
     history.some((restaurant) => restaurant.externalProvider === 'HOTPEPPER') ||
     savedRestaurants.some((favorite) => favorite.provider === 'HOTPEPPER' || favorite.snapshot?.externalProvider === 'HOTPEPPER');
+  const savedPhotoEntries = useMemo(
+    () => savedRestaurants.filter((favorite) => Boolean(favorite.photoUri)),
+    [savedRestaurants],
+  );
+  const rawDiaryItems = useMemo<AlbumDiaryItem[]>(() => {
+    const capturedPhotos: AlbumDiaryItem[] = albumPhotos.map((photo) => ({
+      id: photo.id,
+      photoUri: photo.photoUri,
+      createdAt: photo.createdAt,
+      title: photo.title,
+      subtitle: photo.subtitle,
+      source: 'album',
+    }));
+    const savedPhotos: AlbumDiaryItem[] = savedPhotoEntries.map((favorite) => {
+      const snapshot = favorite.snapshot ?? null;
+      return {
+        id: `saved-photo-${favorite.id}`,
+        photoUri: favorite.photoUri ?? '',
+        createdAt: favorite.photoTakenAt ?? favorite.createdAt,
+        title: snapshot?.name ?? '保存したお店',
+        subtitle: favorite.savedGenre ?? snapshot?.genre ?? 'ジャンルおまかせ',
+        source: 'saved',
+        onRetake: () => onAttachPhoto(favorite.id),
+        onOpenSaved: () => onSavedPress(favorite),
+      };
+    });
+    return [...capturedPhotos, ...savedPhotos].sort((a, b) => {
+      const aTime = new Date(a.createdAt).getTime();
+      const bTime = new Date(b.createdAt).getTime();
+      return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+    });
+  }, [albumPhotos, onAttachPhoto, onSavedPress, savedPhotoEntries]);
+  const diaryItems = useMemo(
+    () => rawDiaryItems.filter((item) => isPro || isInFreeAlbumWindow(item.createdAt)),
+    [isPro, rawDiaryItems],
+  );
+  const hiddenByPlanCount = rawDiaryItems.length - diaryItems.length;
+  const monthKeys = useMemo(
+    () => Array.from(new Set(diaryItems.map((item) => getAlbumMonthKey(item.createdAt)))).filter((key) => key !== 'unknown'),
+    [diaryItems],
+  );
+  const visibleMonthKeys = selectedAlbumMonth === 'all'
+    ? monthKeys
+    : monthKeys.filter((key) => key === selectedAlbumMonth);
+  const diaryCount = diaryItems.length;
+
+  useEffect(() => {
+    if (selectedAlbumMonth !== 'all' && !monthKeys.includes(selectedAlbumMonth)) {
+      setSelectedAlbumMonth('all');
+    }
+  }, [monthKeys, selectedAlbumMonth]);
+
+  if (!isRegisteredUser) {
+    return (
+      <View>
+        <PageIntro title={uiText.savedTitle} lead={uiText.savedLead} />
+        <View style={styles.albumLockedCard}>
+          <View style={styles.albumLockedIcon}>
+            <Image source={ALBUM_FOOTER_ICON} style={styles.albumLockedImage} resizeMode="contain" />
+          </View>
+          <View style={styles.albumLockedBody}>
+            <Text style={styles.albumLockedKicker}>FOOD LOG</Text>
+            <Text style={styles.albumLockedTitle}>アルバムは会員限定です</Text>
+            <Text style={styles.albumLockedText}>
+              写真を残す機能はアカウントに紐づけて保存します。登録するとフードログを使えます。
+            </Text>
+          </View>
+          <Pressable style={styles.albumLockedButton} onPress={onRequireRegistration}>
+            <Text style={styles.albumLockedButtonText}>会員登録へ</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View>
       <PageIntro title={uiText.savedTitle} lead={uiText.savedLead} />
+      <View style={styles.albumCameraCard}>
+        <View style={styles.albumCameraIconFrame}>
+          <Image source={ALBUM_FOOTER_ICON} style={styles.albumCameraIcon} resizeMode="contain" />
+        </View>
+        <View style={styles.albumCameraBody}>
+          <Text style={styles.albumCameraKicker}>FOOD LOG</Text>
+          <Text style={styles.albumCameraTitle}>今日の一枚を残す</Text>
+          <Text style={styles.albumCameraText} numberOfLines={2}>
+            撮った一枚をフードログにそのまま追加できます。
+          </Text>
+          <View style={styles.albumCameraStatsRow}>
+            <View style={styles.albumCameraStatChip}>
+              <Ionicons name="images-outline" size={14} color={ORANGE} />
+              <Text style={styles.albumCameraStatText}>{diaryCount}枚</Text>
+            </View>
+            <View style={styles.albumCameraStatChip}>
+              <Ionicons name="bookmark-outline" size={14} color="#81776b" />
+              <Text style={styles.albumCameraStatText}>{savedRestaurants.length}件</Text>
+            </View>
+          </View>
+        </View>
+        <Pressable
+          style={styles.albumCameraButton}
+          onPress={onCaptureAlbumPhoto}
+        >
+          <Ionicons name="camera" size={25} color="#ffffff" />
+          <Text style={styles.albumCameraButtonText}>撮る</Text>
+        </Pressable>
+      </View>
+      {hiddenByPlanCount > 0 && (
+        <View style={styles.albumRetentionNote}>
+          <Ionicons name="time-outline" size={16} color={ORANGE} />
+          <Text style={styles.albumRetentionText}>
+            Freeプランでは直近3か月分を表示します。古い写真 {hiddenByPlanCount} 枚はProで見返せます。
+          </Text>
+        </View>
+      )}
+      {diaryCount > 0 && (
+        <View style={styles.albumDiarySection}>
+          <SectionHeader title="フードログ" action={`${diaryCount}枚`} />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.albumMonthChipRow}
+          >
+            <Pressable
+              style={[styles.albumMonthChip, selectedAlbumMonth === 'all' && styles.albumMonthChipActive]}
+              onPress={() => setSelectedAlbumMonth('all')}
+            >
+              <Text style={[styles.albumMonthChipTitle, selectedAlbumMonth === 'all' && styles.albumMonthChipTitleActive]}>
+                すべて表示
+              </Text>
+              <Text style={[styles.albumMonthChipCount, selectedAlbumMonth === 'all' && styles.albumMonthChipCountActive]}>
+                {diaryCount}枚
+              </Text>
+            </Pressable>
+            {monthKeys.map((monthKey) => {
+              const monthCount = diaryItems.filter((item) => getAlbumMonthKey(item.createdAt) === monthKey).length;
+              const active = selectedAlbumMonth === monthKey;
+              return (
+                <Pressable
+                  key={monthKey}
+                  style={[styles.albumMonthChip, active && styles.albumMonthChipActive]}
+                  onPress={() => setSelectedAlbumMonth(monthKey)}
+                >
+                  <Text style={[styles.albumMonthChipTitle, active && styles.albumMonthChipTitleActive]}>
+                    {formatAlbumMonthLabel(monthKey)}のアルバム
+                  </Text>
+                  <Text style={[styles.albumMonthChipCount, active && styles.albumMonthChipCountActive]}>
+                    {monthCount}枚
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          {visibleMonthKeys.map((monthKey) => {
+            const monthItems = diaryItems.filter((item) => getAlbumMonthKey(item.createdAt) === monthKey);
+            return (
+              <View key={monthKey} style={styles.albumMonthSection}>
+                <View style={styles.albumMonthHeader}>
+                  <Text style={styles.albumMonthTitle}>{formatAlbumMonthLabel(monthKey)}</Text>
+                  <Text style={styles.albumMonthCount}>{monthItems.length}枚</Text>
+                </View>
+                <View style={styles.albumDiaryGrid}>
+                  {monthItems.map((item) => (
+                    <AlbumMemoryCard
+                      key={item.id}
+                      item={item}
+                      onPress={() => setPreviewPhoto({
+                        photoUri: item.photoUri,
+                        title: item.title,
+                        subtitle: item.subtitle,
+                        dateLabel: formatShortDateTime(item.createdAt) || '今日',
+                      })}
+                    />
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+          {visibleMonthKeys.length === 0 && (
+            <View style={styles.albumEmptyMonthCard}>
+              <Text style={styles.albumEmptyMonthTitle}>この月の写真はまだありません</Text>
+              <Text style={styles.albumEmptyMonthText}>撮った写真はここに4列のアルバムで並びます。</Text>
+            </View>
+          )}
+        </View>
+      )}
       {savedRestaurants.length === 0 ? (
         <View style={styles.emptyPanel}>
           <Text style={styles.emptyTitle}>{uiText.savedEmptyTitle}</Text>
           <Text style={styles.emptyText}>{uiText.savedEmptyText}</Text>
         </View>
       ) : (
-        <View style={styles.savedList}>
-          {savedRestaurants.map((favorite) => (
-            <SavedPlaceCard
-              key={`${favorite.id}-saved`}
-              favorite={favorite}
-              loading={savedDetailLoadingId === favorite.id}
-              selected={savedDetail?.favorite.id === favorite.id}
-              onPress={() => onSavedPress(favorite)}
-            />
-          ))}
+        <View style={styles.savedListBlock}>
+          <SectionHeader title="保存したお店" action={`${savedRestaurants.length}件`} />
+          <View style={styles.savedList}>
+            {savedRestaurants.map((favorite) => (
+              <SavedPlaceCard
+                key={`${favorite.id}-saved`}
+                favorite={favorite}
+                loading={savedDetailLoadingId === favorite.id}
+                selected={savedDetail?.favorite.id === favorite.id}
+                onPress={() => onSavedPress(favorite)}
+                onPhotoPress={() => onAttachPhoto(favorite.id)}
+              />
+            ))}
+          </View>
         </View>
       )}
       {savedDetailError && (
@@ -6251,10 +6943,31 @@ function SaveTab({
       )}
       {savedDetail && (
         <View style={styles.savedDetailBlock}>
+          <SectionHeader title="アルバム詳細" action={savedDetail.favorite.photoUri ? '写真あり' : '写真なし'} />
+          {savedDetail.favorite.photoUri ? (
+            <View style={styles.savedPhotoHero}>
+              <Image source={{ uri: savedDetail.favorite.photoUri }} style={styles.savedPhotoHeroImage} />
+              <View style={styles.savedPhotoHeroBadge}>
+                <Ionicons name="camera" size={14} color="#ffffff" />
+                <Text style={styles.savedPhotoHeroBadgeText}>ごはん写真</Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.savedPhotoEmpty}>
+              <Image source={ALBUM_FOOD_ICON} style={styles.savedPhotoEmptyIcon} />
+              <Text style={styles.savedPhotoEmptyTitle}>この店の一枚を残せます</Text>
+              <Text style={styles.savedPhotoEmptyText}>行ったときのごはん写真を撮ると、アルバムらしく見返せます。</Text>
+            </View>
+          )}
+          <Pressable style={styles.savedPhotoButton} onPress={() => onAttachPhoto(savedDetail.favorite.id)}>
+            <Ionicons name="camera-outline" size={19} color={ORANGE} />
+            <Text style={styles.savedPhotoButtonText}>{savedDetail.favorite.photoUri ? '写真を撮り直す' : 'ごはん写真を撮る'}</Text>
+          </Pressable>
           <SectionHeader title="最新情報" action="APIから取得" />
           <ResultCard
             restaurant={savedDetail.restaurant}
             userLocation={userLocation}
+            preferredArea={savedDetail.favorite.savedArea}
             uiText={uiText}
             onMapPress={() => onSavedMapPress(savedDetail.restaurant)}
           />
@@ -6262,7 +6975,62 @@ function SaveTab({
       )}
       <HistorySection history={history} uiText={uiText} />
       {showHotPepperCredit && <HotPepperCredit />}
+      <Modal
+        visible={Boolean(previewPhoto)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewPhoto(null)}
+      >
+        <View style={styles.albumPreviewBackdrop}>
+          <Pressable style={styles.albumPreviewDismissLayer} onPress={() => setPreviewPhoto(null)} />
+          {previewPhoto && (
+            <View style={styles.albumPreviewSheet}>
+              <View style={styles.albumPreviewTopRow}>
+                <View>
+                  <Text style={styles.albumPreviewKicker}>{previewPhoto.dateLabel}</Text>
+                  <Text style={styles.albumPreviewTitle} numberOfLines={1}>{previewPhoto.title}</Text>
+                </View>
+                <Pressable style={styles.albumPreviewCloseButton} onPress={() => setPreviewPhoto(null)}>
+                  <Ionicons name="close" size={20} color={INK} />
+                </Pressable>
+              </View>
+              <Image source={{ uri: previewPhoto.photoUri }} style={styles.albumPreviewImage} resizeMode="cover" />
+              <Text style={styles.albumPreviewSubtitle} numberOfLines={2}>{previewPhoto.subtitle}</Text>
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
+  );
+}
+
+function AlbumMemoryCard({ item, onPress }: { item: AlbumDiaryItem; onPress: () => void }) {
+  const savedDate = formatShortDateTime(item.createdAt) || '今日';
+
+  return (
+    <Pressable style={styles.albumDiaryCard} onPress={onPress}>
+      <Image source={{ uri: item.photoUri }} style={styles.albumDiaryImage} resizeMode="cover" />
+      <View style={styles.albumDiaryScrim} />
+      <View style={styles.albumDiaryDateBadge}>
+        <Ionicons name="calendar-clear-outline" size={9} color="#ffffff" />
+        <Text style={styles.albumDiaryDateText}>{savedDate}</Text>
+      </View>
+      {item.source === 'saved' && item.onRetake && (
+        <Pressable
+          style={styles.albumDiaryCameraButton}
+          onPress={(event) => {
+            event.stopPropagation();
+            item.onRetake?.();
+          }}
+        >
+          <Ionicons name="camera" size={12} color="#ffffff" />
+        </Pressable>
+      )}
+      <View style={styles.albumDiaryBody}>
+        <Text style={styles.albumDiaryTitle} numberOfLines={1}>{item.title}</Text>
+        <Text style={styles.albumDiaryMeta} numberOfLines={1}>{item.subtitle}</Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -6271,29 +7039,35 @@ function SavedPlaceCard({
   loading,
   selected,
   onPress,
+  onPhotoPress,
 }: {
   favorite: SavedRestaurant;
   loading: boolean;
   selected: boolean;
   onPress: () => void;
+  onPhotoPress: () => void;
 }) {
   const savedDate = formatShortDate(favorite.createdAt);
   const providerLabel = getProviderLabel(favorite.provider);
   const snapshot = favorite.snapshot ?? null;
   return (
     <Pressable style={[styles.savedPlaceCard, selected && styles.savedPlaceCardActive]} onPress={onPress}>
-      {snapshot ? (
+      {favorite.photoUri ? (
+        <View style={styles.savedPlaceThumb}>
+          <Image source={{ uri: favorite.photoUri }} style={styles.savedPlacePhoto} />
+        </View>
+      ) : snapshot ? (
         <View style={styles.savedPlaceThumb}>
           <RestaurantVisual restaurant={snapshot} />
         </View>
       ) : (
         <View style={styles.savedPlaceIcon}>
-          <Ionicons name={favorite.provider === 'GOOGLE_PLACES' ? 'map-outline' : 'bookmark-outline'} size={22} color={ORANGE} />
+          <Image source={ALBUM_FOOD_ICON} style={styles.savedPlaceAlbumIcon} />
         </View>
       )}
       <View style={styles.savedPlaceBody}>
         <View style={styles.savedPlaceTopRow}>
-          <Text style={styles.savedPlaceKicker}>保存したお店</Text>
+          <Text style={styles.savedPlaceKicker}>{favorite.photoUri ? 'ごはん写真あり' : 'アルバム保存'}</Text>
           <Text style={styles.savedPlaceProvider}>{providerLabel}</Text>
         </View>
         <Text style={styles.savedPlaceTitle} numberOfLines={1}>{snapshot?.name ?? '保存したお店'}</Text>
@@ -6304,7 +7078,15 @@ function SavedPlaceCard({
         {loading ? (
           <ActivityIndicator size="small" color={ORANGE} />
         ) : (
-          <Ionicons name="chevron-forward" size={20} color={selected ? ORANGE : '#9b9185'} />
+          <Pressable
+            style={styles.savedPlacePhotoButton}
+            onPress={(event) => {
+              event.stopPropagation();
+              onPhotoPress();
+            }}
+          >
+            <Ionicons name={favorite.photoUri ? 'camera' : 'camera-outline'} size={18} color={selected ? ORANGE : '#9b9185'} />
+          </Pressable>
         )}
       </View>
     </Pressable>
@@ -6560,6 +7342,78 @@ function GenreSpendDonut({
   );
 }
 
+function AnalysisSectionHeader({ kicker, title, lead }: { kicker: string; title: string; lead?: string }) {
+  return (
+    <View style={styles.analysisSectionHeader}>
+      <Text style={styles.analysisSectionKicker}>{kicker}</Text>
+      <Text style={styles.analysisSectionTitle}>{title}</Text>
+      {lead && <Text style={styles.analysisSectionLead}>{lead}</Text>}
+    </View>
+  );
+}
+
+function AnalysisDigestCard({
+  analytics,
+  totalLabel,
+  averageBudgetLabel,
+  savedCount,
+  onSpendPress,
+}: {
+  analytics: MonthlyAnalytics;
+  totalLabel: string;
+  averageBudgetLabel: string;
+  savedCount: number;
+  onSpendPress: () => void;
+}) {
+  const sampleLabel = analytics.budgetSampleCount ? `${analytics.budgetSampleCount}件から推定` : '推定データなし';
+  const metrics = [
+    { label: '抽選', value: `${analytics.drawCount}回` },
+    { label: '保存', value: `${savedCount}件` },
+    { label: '多いジャンル', value: analytics.topGenre },
+    { label: '平均単価', value: averageBudgetLabel },
+  ];
+
+  return (
+    <View style={styles.analysisDigestCard}>
+      <View pointerEvents="none" style={styles.analysisDigestMapArt}>
+        <View style={[styles.analysisDigestRoad, styles.analysisDigestRoadOne]} />
+        <View style={[styles.analysisDigestRoad, styles.analysisDigestRoadTwo]} />
+        <View style={styles.analysisDigestPin}>
+          <View style={styles.analysisDigestPinCore} />
+        </View>
+        <View style={styles.analysisDigestBars}>
+          <View style={[styles.analysisDigestBar, styles.analysisDigestBarOne]} />
+          <View style={[styles.analysisDigestBar, styles.analysisDigestBarTwo]} />
+          <View style={[styles.analysisDigestBar, styles.analysisDigestBarThree]} />
+        </View>
+      </View>
+      <View style={styles.analysisDigestTopRow}>
+        <View>
+          <Text style={styles.analysisDigestKicker}>MONTHLY DIGEST</Text>
+          <Text style={styles.analysisDigestTitle}>今月の外食ログ</Text>
+        </View>
+        <View style={styles.analysisDigestMonth}>
+          <Text style={styles.analysisDigestMonthText}>{analytics.monthLabel}</Text>
+        </View>
+      </View>
+      <Text style={styles.analysisDigestAmount} numberOfLines={1}>{totalLabel}</Text>
+      <Text style={styles.analysisDigestLead}>{sampleLabel}。抽選した店の平均予算をざっくり見返せます。</Text>
+      <View style={styles.analysisDigestMetricGrid}>
+        {metrics.map((item) => (
+          <View key={item.label} style={styles.analysisDigestMetric}>
+            <Text style={styles.analysisDigestMetricLabel}>{item.label}</Text>
+            <Text style={styles.analysisDigestMetricValue} numberOfLines={1}>{item.value}</Text>
+          </View>
+        ))}
+      </View>
+      <Pressable style={styles.analysisDigestButton} onPress={onSpendPress}>
+        <Text style={styles.analysisDigestButtonText}>内訳を見る</Text>
+        <Ionicons name="chevron-down" size={16} color={ORANGE} />
+      </Pressable>
+    </View>
+  );
+}
+
 function AnalyticsTab({
   uiText,
   area,
@@ -6624,18 +7478,6 @@ function AnalyticsTab({
     );
   }, [openPaywall]);
 
-  const stats: Array<{
-    label: string;
-    value: string;
-    sub: string;
-    icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  }> = [
-    { label: '今月の抽選', value: `${currentAnalytics.drawCount}回`, sub: `${currentAnalytics.monthLabel}だけ表示`, icon: 'dice-5-outline' },
-    { label: '保存した店', value: `${savedRestaurants.length}件`, sub: '無料で確認', icon: 'bookmark-outline' },
-    { label: 'よく出るジャンル', value: currentAnalytics.topGenre, sub: `${currentAnalytics.monthLabel}の傾向`, icon: 'silverware-fork-knife' },
-    { label: '平均単価', value: averageBudgetLabel, sub: '店の平均予算', icon: 'currency-jpy' },
-  ];
-
   const trendGenres: Array<{ label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }> = [
     { label: 'ラーメン', icon: 'noodles' },
     { label: 'カフェ', icon: 'coffee-outline' },
@@ -6655,7 +7497,21 @@ function AnalyticsTab({
         <Text style={styles.analysisLead}>{uiText.analyticsLead}</Text>
       </View>
 
+      <AnalysisDigestCard
+        analytics={currentAnalytics}
+        totalLabel={monthlyTotalLabel}
+        averageBudgetLabel={averageBudgetLabel}
+        savedCount={savedRestaurants.length}
+        onSpendPress={() => setSpendOpen(true)}
+      />
+
       <ProTeaserCard isPro={isPro} onPress={isPro ? () => undefined : () => openPaywall()} />
+
+      <AnalysisSectionHeader
+        kicker="FREE ANALYTICS"
+        title="今月の支出をざっくり見る"
+        lead="手入力なし。抽選結果の平均予算から、外食費の目安だけを軽く見返せます。"
+      />
 
       <View style={styles.analysisFreeCard}>
         <View style={styles.analysisFreeTopRow}>
@@ -6695,16 +7551,11 @@ function AnalyticsTab({
         )}
       </View>
 
-      <View style={styles.analysisStatsGrid}>
-        {stats.map((item, index) => (
-          <View key={`${item.label}-${index}`} style={styles.analysisStatCard}>
-            <MaterialCommunityIcons name={item.icon} size={28} color={INK} />
-            <Text style={styles.analysisStatLabel}>{item.label}</Text>
-            <Text style={styles.analysisStatValue} numberOfLines={1}>{item.value}</Text>
-            <Text style={styles.analysisStatSub}>{item.sub}</Text>
-          </View>
-        ))}
-      </View>
+      <AnalysisSectionHeader
+        kicker="RANDISH PRO"
+        title="あとから見返す分析"
+        lead={isPro ? '過去月の流れまで表示中です。' : '過去月・比較・保存店の傾向はProで開けます。'}
+      />
 
       <View style={styles.proFeatureGrid}>
         <ProFeatureCard
@@ -6755,6 +7606,12 @@ function AnalyticsTab({
         />
       </View>
 
+      <AnalysisSectionHeader
+        kicker="THIS MONTH"
+        title="最近引いた店"
+        lead="今月の抽選結果だけはFreeでも残ります。"
+      />
+
       <View style={styles.analysisHistoryCard}>
         <View style={styles.analysisHistoryHeader}>
           <Text style={styles.analysisHistoryTitle}>今月の抽選結果</Text>
@@ -6787,6 +7644,12 @@ function AnalyticsTab({
           })
         )}
       </View>
+
+      <AnalysisSectionHeader
+        kicker="TREND"
+        title="ジャンルの傾向"
+        lead="出やすいジャンルを、見た目で分かるようにしています。"
+      />
 
       <View style={styles.analysisGenreCard}>
         <View style={styles.analysisGenreHeader}>
@@ -6851,16 +7714,19 @@ function AnalyticsMetric({ icon, label, value }: { icon: string; label: string; 
 function ResultCard({
   restaurant,
   userLocation,
+  preferredArea,
   uiText = UI_TEXT.ja,
   onMapPress,
 }: {
   restaurant: Restaurant;
   userLocation: UserLocation | null;
+  preferredArea?: string | null;
   uiText?: Record<string, string>;
   onMapPress: () => void;
 }) {
   const stationAccessItems = getNearestStationAccessItems(restaurant);
-  const primaryStation = stationAccessItems[0] ?? null;
+  const preferredStation = getPreferredStationAccessItem(restaurant, preferredArea);
+  const primaryStation = preferredStation ?? stationAccessItems[0] ?? null;
   const stationLocation = primaryStation?.location ?? null;
   const stationDistanceLabel = primaryStation ? `徒歩${primaryStation.walkingMinutes}分` : uiText.mapCheck;
   const currentDistanceLabel = userLocation ? getDistanceLabel(userLocation, restaurant, uiText) : uiText.loading;
@@ -7148,12 +8014,24 @@ function AppFooter({ activeTab, onPress, uiText }: { activeTab: TabKey; onPress:
         return (
           <Pressable key={item.key} style={styles.footerItem} onPress={() => onPress(item.key)}>
             <View style={[styles.footerIconWrap, active && styles.footerIconWrapActive]}>
-              <Ionicons name={item.icon} size={26} color={active ? '#ffffff' : '#777777'} />
+              {item.key === 'save' ? (
+                <FooterAlbumIcon active={active} />
+              ) : (
+                <Ionicons name={item.icon} size={26} color={active ? '#ffffff' : '#777777'} />
+              )}
             </View>
             <Text style={[styles.footerLabel, active && styles.footerLabelActive]}>{labels[item.key]}</Text>
           </Pressable>
         );
       })}
+    </View>
+  );
+}
+
+function FooterAlbumIcon({ active }: { active: boolean }) {
+  return (
+    <View style={[styles.footerAlbumImageCrop, active ? styles.footerAlbumImageActive : styles.footerAlbumImageInactive]}>
+      <Image source={ALBUM_FOOTER_ICON} style={styles.footerAlbumImage} resizeMode="contain" />
     </View>
   );
 }

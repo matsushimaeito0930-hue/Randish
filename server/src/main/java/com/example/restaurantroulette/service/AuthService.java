@@ -1,6 +1,8 @@
 package com.example.restaurantroulette.service;
 
 import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
+import com.example.restaurantroulette.dto.ApiDtos.OAuthAuthorizeResponse;
+import com.example.restaurantroulette.dto.ApiDtos.OAuthSessionRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
@@ -24,7 +26,7 @@ public class AuthService {
     }
 
     String email = normalizeEmail(request.email());
-    String displayName = normalizeDisplayName(request.displayName());
+    String displayName = normalizeDisplayName(request.displayName(), email);
     validatePassword(request.password());
 
     SupabaseAuthService.SupabaseAuthResult authResult = supabaseAuthService.signUp(email, request.password(), displayName);
@@ -34,7 +36,7 @@ public class AuthService {
 
   public AuthResponse login(UserLoginRequest request) {
     if (!supabaseAuthService.isConfigured()) {
-      throw new BadRequestException("Supabase Auth is not configured.");
+      return new AuthResponse(userService.authenticate(request.email(), request.password()), null);
     }
 
     String email = normalizeEmail(request.email());
@@ -43,6 +45,21 @@ public class AuthService {
     SupabaseAuthService.SupabaseAuthResult authResult = supabaseAuthService.signInWithPassword(email, request.password());
     UserResponse user = userService.syncSupabaseUser(authResult.user(), null);
     return new AuthResponse(user, authResult.accessToken());
+  }
+
+  public OAuthAuthorizeResponse createOAuthAuthorizeUrl(String provider, String redirectTo) {
+    String authorizationUrl = supabaseAuthService.createOAuthAuthorizeUrl(provider, redirectTo);
+    return new OAuthAuthorizeResponse(provider.trim().toLowerCase(Locale.ROOT), authorizationUrl, redirectTo);
+  }
+
+  public AuthResponse loginWithOAuthSession(OAuthSessionRequest request) {
+    if (request == null || request.accessToken() == null || request.accessToken().isBlank()) {
+      throw new BadRequestException("accessToken is required.");
+    }
+    String accessToken = request.accessToken().trim();
+    SupabaseAuthService.SupabaseAuthUser authUser = supabaseAuthService.getUser("Bearer " + accessToken);
+    UserResponse user = userService.syncSupabaseUser(authUser, null);
+    return new AuthResponse(user, accessToken);
   }
 
   public AuthResponse me(String authorizationHeader) {
@@ -62,11 +79,10 @@ public class AuthService {
     return normalized;
   }
 
-  private String normalizeDisplayName(String displayName) {
-    if (displayName == null || displayName.isBlank()) {
-      throw new BadRequestException("displayName is required.");
-    }
-    String normalized = displayName.trim();
+  private String normalizeDisplayName(String displayName, String email) {
+    String normalized = displayName == null || displayName.isBlank()
+        ? email.substring(0, email.indexOf('@'))
+        : displayName.trim();
     if (normalized.length() > 120) {
       throw new BadRequestException("displayName must be 120 characters or less.");
     }

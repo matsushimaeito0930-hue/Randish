@@ -28,6 +28,7 @@ import com.example.restaurantroulette.service.RandomRestaurantService;
 import com.example.restaurantroulette.service.RestaurantQueryService;
 import com.example.restaurantroulette.service.StampService;
 import com.example.restaurantroulette.service.StatisticsService;
+import com.example.restaurantroulette.service.SupabaseAuthService;
 import com.example.restaurantroulette.service.UserService;
 import com.example.restaurantroulette.service.ValidationService;
 import com.example.restaurantroulette.service.VisitCollectionService;
@@ -118,11 +119,68 @@ class RandishLogicTest {
   }
 
   @Test
+  void registerUserFallsBackToEmailNameWhenDisplayNameIsBlank() {
+    var user = userService.register(new UserCreateRequest("fallback.name@example.com", "password123", " "));
+
+    assertThat(user.displayName()).isEqualTo("fallback.name");
+  }
+
+  @Test
   void registerUserPreventsDuplicateEmail() {
     userService.register(new UserCreateRequest("duplicate@example.com", "password123", "First"));
 
     assertThatThrownBy(() -> userService.register(new UserCreateRequest("DUPLICATE@example.com", "password123", "Second")))
         .isInstanceOf(ConflictException.class);
+  }
+
+  @Test
+  void localAuthCanLoginWhenSupabaseIsNotConfigured() {
+    UserResponse registered = userService.register(new UserCreateRequest("local-login@example.com", "password123", "Local User"));
+    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()));
+
+    AuthResponse loggedIn = authService.login(new com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest(
+        "LOCAL-LOGIN@example.com",
+        "password123"));
+
+    assertThat(loggedIn.user().id()).isEqualTo(registered.id());
+    assertThat(loggedIn.user().email()).isEqualTo("local-login@example.com");
+    assertThat(loggedIn.accessToken()).isNull();
+  }
+
+  @Test
+  void localAuthRejectsWrongPassword() {
+    userService.register(new UserCreateRequest("wrong-password@example.com", "password123", "Local User"));
+    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()));
+
+    assertThatThrownBy(() -> authService.login(new com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest(
+        "wrong-password@example.com",
+        "password124")))
+        .isInstanceOf(UnauthorizedException.class);
+  }
+
+  @Test
+  void supabaseOAuthAuthorizeUrlUsesSupportedProviderAndRedirect() {
+    System.setProperty("SUPABASE_URL", "https://randish-test.supabase.co");
+    System.setProperty("SUPABASE_ANON_KEY", "anon-test-key");
+    try {
+      var auth = new SupabaseAuthService(RestClient.builder());
+      String url = auth.createOAuthAuthorizeUrl("Google", "randish://auth/callback");
+
+      assertThat(url).startsWith("https://randish-test.supabase.co/auth/v1/authorize?");
+      assertThat(url).contains("provider=google");
+      assertThat(url).contains("redirect_to=randish://auth/callback");
+    } finally {
+      System.clearProperty("SUPABASE_URL");
+      System.clearProperty("SUPABASE_ANON_KEY");
+    }
+  }
+
+  @Test
+  void supabaseOAuthAuthorizeUrlRejectsUnsupportedProvider() {
+    var auth = new SupabaseAuthService(RestClient.builder());
+
+    assertThatThrownBy(() -> auth.createOAuthAuthorizeUrl("line", "randish://auth/callback"))
+        .isInstanceOf(BadRequestException.class);
   }
 
   @Test
@@ -374,6 +432,57 @@ class RandishLogicTest {
         .isInstanceOf(BadRequestException.class);
     assertThatThrownBy(() -> visitCollectionService.create(new VisitCreateRequest("user-rating", "seed-umeda-ramen", null, null, "ok", 6)))
         .isInstanceOf(BadRequestException.class);
+  }
+
+  @Test
+  void coordinateSearchRetriesPrimaryProviderWithoutDistanceWhenNearbyIsEmpty() {
+    var provider = new CoordinateFallbackProvider();
+    var service = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(provider),
+        mapper,
+        validationService);
+
+    var restaurants = service.search("joetsu", "ramen", 0, 1500, 37.1479, 138.236, 4);
+
+    assertThat(provider.coordinateSearchCalls).isEqualTo(1);
+    assertThat(provider.keywordSearchCalls).isEqualTo(1);
+    assertThat(restaurants).extracting("id").containsExactly("keyword-joetsu-ramen");
+  }
+
+  private static class CoordinateFallbackProvider implements ExternalRestaurantProvider {
+    private int coordinateSearchCalls;
+    private int keywordSearchCalls;
+
+    @Override
+    public boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    public List<Restaurant> search(String area, String genre, Integer budgetMin, Integer budgetMax, Double latitude, Double longitude, Integer range) {
+      if (latitude != null && longitude != null) {
+        coordinateSearchCalls++;
+        return List.of();
+      }
+      keywordSearchCalls++;
+      return List.of(new Restaurant(
+          "keyword-joetsu-ramen",
+          "HOTPEPPER",
+          "keyword-joetsu-ramen",
+          "Joetsu Ramen",
+          area,
+          genre,
+          1001,
+          1500,
+          0,
+          0,
+          "Niigata Joetsu",
+          null,
+          "test",
+          null,
+          null));
+    }
   }
 
   private static class FixedProvider implements ExternalRestaurantProvider {

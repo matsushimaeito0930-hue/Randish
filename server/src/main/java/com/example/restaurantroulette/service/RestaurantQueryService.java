@@ -83,6 +83,20 @@ public class RestaurantQueryService {
         desiredCandidateCount,
         externalOnlyRestaurants);
 
+    if (externalOnlyRestaurants.isEmpty() && hasCoordinates(latitude, longitude)) {
+      hasAvailableProvider = queryRandomProviders(
+          primaryProviders(),
+          area,
+          genre,
+          budgetMin,
+          budgetMax,
+          null,
+          null,
+          null,
+          desiredCandidateCount,
+          externalOnlyRestaurants) || hasAvailableProvider;
+    }
+
     int fallbackLimit = fallbackCandidateLimit(desiredCandidateCount, externalOnlyRestaurants.size());
     if (fallbackLimit > 0) {
       hasAvailableProvider = queryRandomProviders(
@@ -144,6 +158,19 @@ public class RestaurantQueryService {
         longitude,
         range,
         externalOnlyRestaurants);
+
+    if (externalOnlyRestaurants.isEmpty() && hasCoordinates(latitude, longitude)) {
+      hasAvailableProvider = queryProviders(
+          primaryProviders(),
+          area,
+          genre,
+          budgetMin,
+          budgetMax,
+          null,
+          null,
+          null,
+          externalOnlyRestaurants) || hasAvailableProvider;
+    }
 
     int fallbackLimit = fallbackCandidateLimit(HYBRID_TARGET_RESULT_COUNT, externalOnlyRestaurants.size());
     if (fallbackLimit > 0) {
@@ -276,6 +303,10 @@ public class RestaurantQueryService {
       return 0;
     }
     return Math.min(missingCount, MAX_FALLBACK_FILL_COUNT);
+  }
+
+  private boolean hasCoordinates(Double latitude, Double longitude) {
+    return latitude != null && longitude != null;
   }
 
   private List<Restaurant> limitedCandidates(Map<String, Restaurant> restaurants, int maxCandidates) {

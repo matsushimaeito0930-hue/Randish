@@ -61,6 +61,18 @@ export type AuthResponse = {
   accessToken: string | null;
 };
 
+export type OAuthProvider = 'google' | 'apple';
+
+export type OAuthAuthorizeResponse = {
+  provider: OAuthProvider;
+  authorizationUrl: string;
+  redirectTo: string;
+};
+
+export type OAuthSessionParams = {
+  accessToken: string;
+};
+
 export type RandomHistory = {
   id: string;
   userId: string;
@@ -293,6 +305,15 @@ export const randishApi = {
 
   login: (baseUrl: ApiBaseUrlInput, params: UserLoginParams) =>
     request<AuthResponse>(baseUrl, 'api/auth/login', undefined, {
+      method: 'POST',
+      body: params,
+    }),
+
+  getOAuthAuthorizeUrl: (baseUrl: ApiBaseUrlInput, provider: OAuthProvider, redirectTo: string) =>
+    request<OAuthAuthorizeResponse>(baseUrl, `api/auth/oauth/${provider}/authorize`, { redirectTo }),
+
+  loginWithOAuthSession: (baseUrl: ApiBaseUrlInput, params: OAuthSessionParams) =>
+    request<AuthResponse>(baseUrl, 'api/auth/oauth/session', undefined, {
       method: 'POST',
       body: params,
     }),

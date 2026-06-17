@@ -43,10 +43,10 @@ When using Expo Go on a physical phone, set the API URL in the app to the PC's L
 http://192.168.1.23:8080
 ```
 
-The API binds to `127.0.0.1` by default. For physical-phone LAN testing, set this in `.env.local` before starting the server:
+The API binds to `0.0.0.0` in development by default so a physical phone can reach it over the same Wi-Fi. If you want to allow only local PC access, set this in `.env.local` before starting the server:
 
 ```env
-RANDISH_SERVER_ADDRESS=0.0.0.0
+RANDISH_SERVER_ADDRESS=127.0.0.1
 ```
 
 ## Environment Variables
@@ -90,9 +90,18 @@ For Supabase Auth, add the project URL and anon public key to the same `.env.loc
 ```env
 SUPABASE_URL=https://project-ref.supabase.co
 SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_PUBLIC_KEY
+RANDISH_OAUTH_REDIRECT_URI=randish://auth/callback
 ```
 
 When these are present, registration and login go through Supabase Auth first, then the authenticated user is synced into `app_users`.
+
+For Google / Apple sign-in, enable each provider in Supabase Authentication settings and add this redirect URL:
+
+```text
+randish://auth/callback
+```
+
+The mobile app opens Supabase OAuth, receives the callback token, and asks the Spring Boot API to verify that token before syncing the user.
 
 ## Database
 
