@@ -14,15 +14,21 @@ import org.springframework.stereotype.Service;
 public class AuthService {
   private final UserService userService;
   private final SupabaseAuthService supabaseAuthService;
+  private final LocalSessionService localSessionService;
 
-  public AuthService(UserService userService, SupabaseAuthService supabaseAuthService) {
+  public AuthService(
+      UserService userService,
+      SupabaseAuthService supabaseAuthService,
+      LocalSessionService localSessionService) {
     this.userService = userService;
     this.supabaseAuthService = supabaseAuthService;
+    this.localSessionService = localSessionService;
   }
 
   public AuthResponse register(UserCreateRequest request) {
     if (!supabaseAuthService.isConfigured()) {
-      return new AuthResponse(userService.register(request), null);
+      UserResponse user = userService.register(request);
+      return new AuthResponse(user, localSessionService.createSession(user));
     }
 
     String email = normalizeEmail(request.email());
@@ -36,7 +42,8 @@ public class AuthService {
 
   public AuthResponse login(UserLoginRequest request) {
     if (!supabaseAuthService.isConfigured()) {
-      return new AuthResponse(userService.authenticate(request.email(), request.password()), null);
+      UserResponse user = userService.authenticate(request.email(), request.password());
+      return new AuthResponse(user, localSessionService.createSession(user));
     }
 
     String email = normalizeEmail(request.email());
@@ -63,6 +70,10 @@ public class AuthService {
   }
 
   public AuthResponse me(String authorizationHeader) {
+    if (!supabaseAuthService.isConfigured()) {
+      String userId = localSessionService.authenticate(authorizationHeader);
+      return new AuthResponse(userService.findById(userId), null);
+    }
     SupabaseAuthService.SupabaseAuthUser authUser = supabaseAuthService.getUser(authorizationHeader);
     UserResponse user = userService.syncSupabaseUser(authUser, null);
     return new AuthResponse(user, null);

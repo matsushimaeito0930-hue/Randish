@@ -23,6 +23,7 @@ import com.example.restaurantroulette.service.AuthService;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.DtoMapper;
 import com.example.restaurantroulette.service.FavoriteService;
+import com.example.restaurantroulette.service.LocalSessionService;
 import com.example.restaurantroulette.service.RandomHistoryService;
 import com.example.restaurantroulette.service.RandomRestaurantService;
 import com.example.restaurantroulette.service.RestaurantQueryService;
@@ -136,7 +137,7 @@ class RandishLogicTest {
   @Test
   void localAuthCanLoginWhenSupabaseIsNotConfigured() {
     UserResponse registered = userService.register(new UserCreateRequest("local-login@example.com", "password123", "Local User"));
-    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()));
+    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
 
     AuthResponse loggedIn = authService.login(new com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest(
         "LOCAL-LOGIN@example.com",
@@ -144,13 +145,14 @@ class RandishLogicTest {
 
     assertThat(loggedIn.user().id()).isEqualTo(registered.id());
     assertThat(loggedIn.user().email()).isEqualTo("local-login@example.com");
-    assertThat(loggedIn.accessToken()).isNull();
+    assertThat(loggedIn.accessToken()).isNotBlank();
+    assertThat(authService.me("Bearer " + loggedIn.accessToken()).user().id()).isEqualTo(registered.id());
   }
 
   @Test
   void localAuthRejectsWrongPassword() {
     userService.register(new UserCreateRequest("wrong-password@example.com", "password123", "Local User"));
-    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()));
+    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
 
     assertThatThrownBy(() -> authService.login(new com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest(
         "wrong-password@example.com",

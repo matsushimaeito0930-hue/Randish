@@ -225,7 +225,7 @@ type DrawAnimationProfile = {
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
 const DEV_DISABLE_MEAL_TICKET_LIMIT = false;
-const DEV_LAN_API_BASE_URLS = ['http://10.230.36.27:8080'];
+const DEV_LAN_API_BASE_URLS = ['http://10.230.36.38:8080', 'http://10.230.36.27:8080'];
 const LOCAL_API_BASE_URLS = Platform.select({
   android: ['http://10.0.2.2:8080', 'http://localhost:8080', 'http://127.0.0.1:8080'],
   web: ['http://localhost:8080', 'http://127.0.0.1:8080'],

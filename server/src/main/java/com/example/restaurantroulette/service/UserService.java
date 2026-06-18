@@ -79,7 +79,7 @@ public class UserService {
     }
 
     String email = normalizeEmail(authUser.email());
-    String displayName = normalizeDisplayName(resolveDisplayName(authUser, fallbackDisplayName, email));
+    String displayName = normalizeDisplayName(resolveDisplayName(authUser, fallbackDisplayName, email), email);
     Instant now = Instant.now();
     AppUser user = new AppUser(userId, email, displayName, "SUPABASE", now, now);
     return mapper.toUserResponse(userRepository.upsertExternalUser(user));
