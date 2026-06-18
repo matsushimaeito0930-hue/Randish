@@ -9,12 +9,14 @@ import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.dto.ApiDtos.VisitCreateRequest;
+import com.example.restaurantroulette.entity.PendingEmailRegistration;
 import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.exception.ConflictException;
 import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.repository.AppUserRepository;
 import com.example.restaurantroulette.repository.FavoriteRestaurantRepository;
+import com.example.restaurantroulette.repository.PendingEmailRegistrationRepository;
 import com.example.restaurantroulette.repository.RandomHistoryRepository;
 import com.example.restaurantroulette.repository.RestaurantRepository;
 import com.example.restaurantroulette.repository.StampRepository;
@@ -22,6 +24,7 @@ import com.example.restaurantroulette.repository.VisitCollectionRepository;
 import com.example.restaurantroulette.service.AuthService;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.DtoMapper;
+import com.example.restaurantroulette.service.EmailRegistrationService;
 import com.example.restaurantroulette.service.FavoriteService;
 import com.example.restaurantroulette.service.LocalSessionService;
 import com.example.restaurantroulette.service.PasswordHashService;
@@ -38,10 +41,13 @@ import com.example.restaurantroulette.service.external.ExternalRestaurantProvide
 import com.example.restaurantroulette.service.external.HotPepperRestaurantProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.security.MessageDigest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -186,6 +192,38 @@ class RandishLogicTest {
       System.clearProperty("SUPABASE_URL");
       System.clearProperty("SUPABASE_ANON_KEY");
     }
+  }
+
+  @Test
+  void emailVerificationCreatesUserAndSessionFromMagicLink() throws Exception {
+    String token = "magic-link-token";
+    PasswordHashService.PasswordSecret secret = passwordHashService.hash("unused-secret");
+    PendingEmailRegistrationRepository pendingRepository = new PendingEmailRegistrationRepository(jdbcClient);
+    LocalSessionService localSessionService = new LocalSessionService();
+    EmailRegistrationService emailRegistrationService = new EmailRegistrationService(
+        pendingRepository,
+        userService,
+        passwordHashService,
+        localSessionService,
+        RestClient.builder());
+    Instant now = Instant.now();
+    pendingRepository.save(new PendingEmailRegistration(
+        "pending-magic-link",
+        "magic-link@example.com",
+        "Magic Link",
+        secret.hash(),
+        secret.salt(),
+        sha256Base64Url(token),
+        now.plusSeconds(600),
+        null,
+        now));
+
+    AuthResponse auth = emailRegistrationService.verifyRegistration(token);
+
+    assertThat(auth.user().email()).isEqualTo("magic-link@example.com");
+    assertThat(auth.accessToken()).isNotBlank();
+    assertThat(localSessionService.authenticate("Bearer " + auth.accessToken())).isEqualTo(auth.user().id());
+    assertThat(userService.findByEmail("MAGIC-LINK@example.com")).isPresent();
   }
 
   @Test
@@ -513,6 +551,12 @@ class RandishLogicTest {
           null,
           null));
     }
+  }
+
+  private static String sha256Base64Url(String value) throws Exception {
+    MessageDigest digest = MessageDigest.getInstance("SHA-256");
+    byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
   }
 
   private static class FixedProvider implements ExternalRestaurantProvider {

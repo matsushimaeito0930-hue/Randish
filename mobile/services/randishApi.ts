@@ -47,8 +47,8 @@ export type User = {
 
 export type UserCreateParams = {
   email: string;
-  password: string;
-  displayName: string;
+  password?: string;
+  displayName?: string;
 };
 
 export type UserLoginParams = {

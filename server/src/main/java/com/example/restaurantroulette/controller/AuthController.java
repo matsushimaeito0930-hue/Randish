@@ -8,6 +8,8 @@ import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
 import com.example.restaurantroulette.service.AuthService;
 import com.example.restaurantroulette.service.EmailRegistrationService;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,8 +44,8 @@ public class AuthController {
   @GetMapping(value = "/register/verify", produces = MediaType.TEXT_HTML_VALUE)
   public ResponseEntity<String> verifyEmailRegistration(@RequestParam String token) {
     try {
-      emailRegistrationService.verifyRegistration(token);
-      return ResponseEntity.ok(successPage());
+      AuthResponse auth = emailRegistrationService.verifyRegistration(token);
+      return ResponseEntity.ok(successPage(auth.accessToken()));
     } catch (RuntimeException exception) {
       return ResponseEntity.badRequest().body(errorPage());
     }
@@ -66,26 +68,32 @@ public class AuthController {
     return authService.loginWithOAuthSession(request);
   }
 
-  private String successPage() {
+  private String successPage(String accessToken) {
+    String appUrl = "randish://auth/callback?provider=local&access_token="
+        + URLEncoder.encode(accessToken, StandardCharsets.UTF_8);
     return """
         <!doctype html>
         <html lang="ja">
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
-            <title>RANDISH 登録完了</title>
+            <title>RANDISH ログイン完了</title>
           </head>
           <body style="margin:0;background:#fbf7ef;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#171310">
             <main style="min-height:100vh;display:grid;place-items:center;padding:24px">
               <section style="max-width:520px;background:#fff;border:1px solid #eadfd2;border-radius:28px;padding:32px;box-shadow:0 18px 48px rgba(45,31,18,.12)">
                 <p style="color:#f4512c;font-weight:800;letter-spacing:.08em;margin:0 0 8px">RANDISH</p>
-                <h1 style="font-size:32px;line-height:1.25;margin:0 0 12px">会員登録が完了しました</h1>
-                <p style="font-size:16px;line-height:1.8;margin:0;color:#6f665e">アプリに戻って、登録したメールアドレスとパスワードでログインしてください。</p>
+                <h1 style="font-size:32px;line-height:1.25;margin:0 0 12px">メール確認が完了しました</h1>
+                <p style="font-size:16px;line-height:1.8;margin:0 0 24px;color:#6f665e">下のボタンからアプリに戻ると、そのままログインできます。</p>
+                <a href="%s" style="display:inline-block;background:#f4512c;color:#fff;text-decoration:none;padding:14px 22px;border-radius:16px;font-weight:800">RANDISHを開く</a>
               </section>
             </main>
+            <script>
+              setTimeout(function () { window.location.href = "%s"; }, 700);
+            </script>
           </body>
         </html>
-        """;
+        """.formatted(appUrl, appUrl);
   }
 
   private String errorPage() {

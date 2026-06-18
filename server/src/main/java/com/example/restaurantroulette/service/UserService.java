@@ -10,6 +10,7 @@ import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.repository.AppUserRepository;
 import java.time.Instant;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
@@ -47,6 +48,11 @@ public class UserService {
     return userRepository.findById(id)
         .map(mapper::toUserResponse)
         .orElseThrow(() -> new NotFoundException("User not found."));
+  }
+
+  public Optional<UserResponse> findByEmail(String email) {
+    return userRepository.findByEmail(normalizeEmail(email))
+        .map(mapper::toUserResponse);
   }
 
   public UserResponse authenticate(String email, String password) {
