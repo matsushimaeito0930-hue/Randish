@@ -225,7 +225,7 @@ type DrawAnimationProfile = {
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
 const DEV_DISABLE_MEAL_TICKET_LIMIT = false;
-const DEV_LAN_API_BASE_URLS = ['http://10.230.36.38:8080', 'http://10.230.36.27:8080'];
+const DEV_LAN_API_BASE_URLS = ['http://10.230.36.47:8080'];
 const LOCAL_API_BASE_URLS = Platform.select({
   android: ['http://10.0.2.2:8080', 'http://localhost:8080', 'http://127.0.0.1:8080'],
   web: ['http://localhost:8080', 'http://127.0.0.1:8080'],
@@ -641,6 +641,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     required: '必須',
     optional: '任意',
     registerButton: '確認メールを送る',
+    loginLinkButton: 'ログインURLを送る',
     guestStart: 'ゲストではじめる',
     guestNote: '登録なしでRANDISHを試せます',
     or: 'または',
@@ -809,6 +810,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     required: 'Required',
     optional: 'Optional',
     registerButton: 'Send Email',
+    loginLinkButton: 'Send Login Link',
     guestStart: 'Continue as Guest',
     guestNote: 'Try RANDISH without registering',
     or: 'or',
@@ -977,6 +979,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     required: '必填',
     optional: '可选',
     registerButton: '发送确认邮件',
+    loginLinkButton: '发送登录链接',
     guestStart: '以游客开始',
     guestNote: '无需注册即可试用RANDISH',
     or: '或者',
@@ -1145,6 +1148,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     required: '필수',
     optional: '선택',
     registerButton: '확인 메일 보내기',
+    loginLinkButton: '로그인 링크 보내기',
     guestStart: '게스트로 시작',
     guestNote: '가입 없이 RANDISH를 체험할 수 있습니다',
     or: '또는',
@@ -2363,14 +2367,23 @@ const toAuthErrorMessage = (error: unknown, fallback: string) => {
   if (/Resend email verification is not configured/i.test(message)) {
     return '確認メールの設定が未反映です。RESEND_API_KEYを設定してSpring Bootを再起動してください。';
   }
+  if (/Resend email send failed/i.test(message) && /own email address|testing emails|verify a domain|domain/i.test(message)) {
+    return 'Resendの開発用送信元は送信先に制限があります。自分のResend登録メール宛てで試すか、ResendのDomainsでドメイン認証をしてください。';
+  }
+  if (/Resend email send failed/i.test(message) && /API key|authentication|unauthorized|forbidden/i.test(message)) {
+    return 'ResendのAPIキーが無効、またはサーバーに未反映です。RESEND_API_KEYを確認してSpring Bootを再起動してください。';
+  }
+  if (/Resend email send failed/i.test(message) && /from|sender/i.test(message)) {
+    return 'Resendの送信元メールが使えません。開発中は RANDISH <onboarding@resend.dev>、本番は認証済みドメインのメールを設定してください。';
+  }
   if (/Resend email send failed/i.test(message)) {
-    return '確認メールを送れませんでした。Resendの送信元メール、APIキー、送信先メールを確認してください。';
+    return '確認メールを送れませんでした。ResendのAPIキー、送信元、送信先制限を確認してください。';
   }
   if (/verification token is invalid or expired/i.test(message)) {
     return '確認URLが無効か期限切れです。もう一度メールを送ってください。';
   }
   if (/password must be at least 8 characters/i.test(message)) {
-    return 'パスワードは8文字以上で入力してください。';
+    return '古いサーバーが動いています。Spring Bootを止めてから再起動してください。';
   }
   if (/Supabase Auth is not configured/i.test(message)) {
     return '認証サーバーの設定が未反映です。Spring Bootを再起動するとメールログインを使えます。Google / Appleログインはまだ認証設定が必要です。';
@@ -4502,9 +4515,6 @@ function LoginScreen({
   onStart: (userId?: string, displayName?: string) => void;
 }) {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [authNotice, setAuthNotice] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -4537,6 +4547,14 @@ function LoginScreen({
     setIsSubmitting(true);
     setAuthNotice('');
     try {
+      if (params.provider === 'local') {
+        randishApi.setAuthToken(accessToken);
+        const auth = await randishApi.getCurrentUser(apiBaseUrlCandidates);
+        onApiConnected();
+        onStart(auth.user.id, auth.user.displayName);
+        return;
+      }
+
       const auth = await randishApi.loginWithOAuthSession(apiBaseUrlCandidates, { accessToken });
       randishApi.setAuthToken(auth.accessToken);
       onApiConnected();
@@ -4568,33 +4586,22 @@ function LoginScreen({
       return;
     }
     const cleanEmail = email.trim();
-    const cleanDisplayName = displayName.trim() || getDefaultDisplayName(cleanEmail);
     if (!cleanEmail) {
       setAuthNotice('メールアドレスを入力してください。');
       return;
     }
-    if (password.length < 8) {
-      setAuthNotice('パスワードは8文字以上で入力してください。');
-      return;
-    }
-    if (password !== passwordConfirm) {
-      setAuthNotice('確認用パスワードが一致していません。');
-      return;
-    }
+    const cleanDisplayName = getDefaultDisplayName(cleanEmail);
 
     setIsSubmitting(true);
     setAuthNotice('');
     try {
       await randishApi.requestEmailRegistration(apiBaseUrlCandidates, {
         email: cleanEmail,
-        password,
         displayName: cleanDisplayName,
       });
       onApiConnected();
-      setPassword('');
-      setPasswordConfirm('');
       switchAuthMode('login');
-      setAuthNotice(`${cleanEmail} に確認メールを送りました。メールのURLを開くと登録が完了します。完了後にログインしてください。`);
+      setAuthNotice(`${cleanEmail} にURLを送りました。メールのURLを開くと登録してそのままログインできます。`);
     } catch (error) {
       if (error instanceof RandishApiError && error.status === 409) {
         switchAuthMode('login');
@@ -4610,21 +4617,24 @@ function LoginScreen({
     if (isSubmitting) {
       return;
     }
-    if (!email.trim() || !password) {
-      setAuthNotice('メールアドレスとパスワードを入力してください。');
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setAuthNotice('メールアドレスを入力してください。');
       return;
     }
 
     setIsSubmitting(true);
     setAuthNotice('');
     try {
-      const auth = await randishApi.login(apiBaseUrlCandidates, { email, password });
-      randishApi.setAuthToken(auth.accessToken);
+      await randishApi.requestEmailRegistration(apiBaseUrlCandidates, {
+        email: cleanEmail,
+        displayName: getDefaultDisplayName(cleanEmail),
+      });
       onApiConnected();
-      onStart(auth.user.id, auth.user.displayName);
+      setAuthNotice(`${cleanEmail} にログインURLを送りました。メールのURLを開くとRANDISHに入れます。`);
     } catch (error) {
       const reason = toAuthErrorMessage(error, 'ログインに失敗しました。');
-      setAuthNotice(`ログインできませんでした。${reason}`);
+      setAuthNotice(`ログインURLを送れませんでした。${reason}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -4690,48 +4700,8 @@ function LoginScreen({
             onSubmitEditing={Keyboard.dismiss}
           />
 
-          <RegisterLabel text={uiText.passwordLabel} requiredText={uiText.required} />
-          <TextInput
-            style={styles.registerInput}
-            placeholder="8文字以上の半角英数字"
-            placeholderTextColor="#aaa"
-            secureTextEntry
-            textContentType={isLoginMode ? 'password' : 'newPassword'}
-            value={password}
-            onChangeText={setPassword}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={Keyboard.dismiss}
-          />
-
           {!isLoginMode && (
             <>
-              <RegisterLabel text={uiText.passwordConfirmLabel} requiredText={uiText.required} />
-              <TextInput
-                style={styles.registerInput}
-                placeholder="もう一度入力してください"
-                placeholderTextColor="#aaa"
-                secureTextEntry
-                textContentType="newPassword"
-                value={passwordConfirm}
-                onChangeText={setPasswordConfirm}
-                returnKeyType="done"
-                blurOnSubmit
-                onSubmitEditing={Keyboard.dismiss}
-              />
-
-              <RegisterLabel text={uiText.nicknameLabel} requiredText={uiText.optional} />
-              <TextInput
-                style={styles.registerInput}
-                placeholder="例）ランディッシュ太郎"
-                placeholderTextColor="#aaa"
-                value={displayName}
-                onChangeText={setDisplayName}
-                returnKeyType="done"
-                blurOnSubmit
-                onSubmitEditing={Keyboard.dismiss}
-              />
-
               <Pressable style={styles.registerCheckRow} onPress={() => setAcceptedTerms((value) => !value)}>
                 <View style={[styles.registerCheckbox, acceptedTerms && styles.registerCheckboxActive]}>
                   {acceptedTerms && <Ionicons name="checkmark" size={16} color="#ffffff" />}
@@ -4753,7 +4723,7 @@ function LoginScreen({
             {isSubmitting ? (
               <ActivityIndicator color="#ffffff" />
             ) : (
-              <Text style={styles.registerMainButtonText}>{isLoginMode ? uiText.login : uiText.registerButton}</Text>
+              <Text style={styles.registerMainButtonText}>{isLoginMode ? uiText.loginLinkButton : uiText.registerButton}</Text>
             )}
           </Pressable>
 

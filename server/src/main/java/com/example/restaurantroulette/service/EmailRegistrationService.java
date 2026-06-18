@@ -1,11 +1,11 @@
 package com.example.restaurantroulette.service;
 
+import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
 import com.example.restaurantroulette.dto.ApiDtos.EmailVerificationResponse;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.entity.PendingEmailRegistration;
 import com.example.restaurantroulette.exception.BadRequestException;
-import com.example.restaurantroulette.exception.ConflictException;
 import com.example.restaurantroulette.repository.PendingEmailRegistrationRepository;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +34,7 @@ public class EmailRegistrationService {
   private final PendingEmailRegistrationRepository pendingRepository;
   private final UserService userService;
   private final PasswordHashService passwordHashService;
+  private final LocalSessionService localSessionService;
   private final RestClient resendClient;
   private final String resendApiKey;
   private final String resendFromEmail;
@@ -43,10 +44,12 @@ public class EmailRegistrationService {
       PendingEmailRegistrationRepository pendingRepository,
       UserService userService,
       PasswordHashService passwordHashService,
+      LocalSessionService localSessionService,
       RestClient.Builder restClientBuilder) {
     this.pendingRepository = pendingRepository;
     this.userService = userService;
     this.passwordHashService = passwordHashService;
+    this.localSessionService = localSessionService;
     this.resendClient = restClientBuilder.baseUrl("https://api.resend.com").build();
     this.resendApiKey = firstPresent(System.getProperty("RESEND_API_KEY"), System.getenv("RESEND_API_KEY"));
     this.resendFromEmail = firstPresent(
@@ -62,17 +65,13 @@ public class EmailRegistrationService {
   public EmailVerificationResponse requestRegistration(UserCreateRequest request) {
     String email = normalizeEmail(request.email());
     String displayName = normalizeDisplayName(request.displayName(), email);
-    validatePassword(request.password());
-    if (userService.emailExists(email)) {
-      throw new ConflictException("Email is already registered.");
-    }
     if (resendApiKey == null || resendApiKey.isBlank()) {
       throw new BadRequestException("Resend email verification is not configured.");
     }
 
     String token = generateToken();
     String tokenHash = hashToken(token);
-    PasswordHashService.PasswordSecret secret = passwordHashService.hash(request.password());
+    PasswordHashService.PasswordSecret secret = passwordHashService.hash(generateToken());
     Instant now = Instant.now();
     Instant expiresAt = now.plus(TOKEN_TTL);
     PendingEmailRegistration registration = new PendingEmailRegistration(
@@ -98,7 +97,7 @@ public class EmailRegistrationService {
     return new EmailVerificationResponse(email, expiresAt);
   }
 
-  public UserResponse verifyRegistration(String token) {
+  public AuthResponse verifyRegistration(String token) {
     if (token == null || token.isBlank()) {
       throw new BadRequestException("verification token is required.");
     }
@@ -108,36 +107,37 @@ public class EmailRegistrationService {
       throw new BadRequestException("verification token is invalid or expired.");
     }
 
-    UserResponse user = userService.registerVerifiedEmail(
-        registration.email(),
-        registration.displayName(),
-        registration.passwordHash(),
-        registration.passwordSalt());
+    UserResponse user = userService.findByEmail(registration.email())
+        .orElseGet(() -> userService.registerVerifiedEmail(
+            registration.email(),
+            registration.displayName(),
+            registration.passwordHash(),
+            registration.passwordSalt()));
     pendingRepository.consume(registration.id(), Instant.now());
-    return user;
+    return new AuthResponse(user, localSessionService.createSession(user));
   }
 
   private void sendVerificationEmail(String email, String displayName, String verificationUrl, Instant expiresAt) {
-    String subject = "RANDISHの会員登録を確認してください";
+    String subject = "RANDISHのログインURLです";
     String safeName = escapeHtml(displayName);
     String html = """
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7;color:#18130f">
           <h1 style="margin:0 0 12px;font-size:28px">RANDISH</h1>
-          <p>%sさん、会員登録を完了するには下のボタンを押してください。</p>
+          <p>%sさん、下のボタンからRANDISHに入れます。</p>
           <p style="margin:24px 0">
-            <a href="%s" style="display:inline-block;background:#f4512c;color:#fff;text-decoration:none;padding:14px 22px;border-radius:16px;font-weight:800">メールを確認して登録する</a>
+            <a href="%s" style="display:inline-block;background:#f4512c;color:#fff;text-decoration:none;padding:14px 22px;border-radius:16px;font-weight:800">RANDISHを開く</a>
           </p>
-          <p>このURLは30分で期限切れになります。</p>
+          <p>このURLは30分で期限切れになります。心当たりがない場合は無視してください。</p>
           <p style="font-size:13px;color:#756d66">有効期限: %s</p>
         </div>
         """.formatted(safeName, verificationUrl, expiresAt);
     String text = """
-        RANDISHの会員登録を確認してください。
+        RANDISHのログインURLです。
 
-        以下のURLを開くと登録が完了します。
+        以下のURLを開くとRANDISHに入れます。
         %s
 
-        このURLは30分で期限切れになります。
+        このURLは30分で期限切れになります。心当たりがない場合は無視してください。
         """.formatted(verificationUrl);
 
     try {
@@ -197,12 +197,6 @@ public class EmailRegistrationService {
       throw new BadRequestException("displayName must be 120 characters or less.");
     }
     return normalized;
-  }
-
-  private void validatePassword(String password) {
-    if (password == null || password.length() < 8) {
-      throw new BadRequestException("password must be at least 8 characters.");
-    }
   }
 
   private String trimTrailingSlash(String value) {

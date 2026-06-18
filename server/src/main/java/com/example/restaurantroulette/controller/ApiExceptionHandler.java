@@ -6,6 +6,8 @@ import com.example.restaurantroulette.exception.ConflictException;
 import com.example.restaurantroulette.exception.NotFoundException;
 import com.example.restaurantroulette.exception.UnauthorizedException;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -15,6 +17,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+  private static final Logger LOGGER = LoggerFactory.getLogger(ApiExceptionHandler.class);
   private static final String INTERNAL_ERROR_MESSAGE = "An unexpected server error occurred.";
 
   @ExceptionHandler(BadRequestException.class)
@@ -50,6 +53,7 @@ public class ApiExceptionHandler {
 
   @ExceptionHandler(Exception.class)
   public ResponseEntity<ErrorResponse> handleUnexpected(Exception exception) {
+    LOGGER.error("Unexpected API error", exception);
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
         .body(new ErrorResponse("INTERNAL_SERVER_ERROR", INTERNAL_ERROR_MESSAGE, List.of()));
   }
