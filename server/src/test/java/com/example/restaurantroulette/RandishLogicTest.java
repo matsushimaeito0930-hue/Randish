@@ -24,6 +24,7 @@ import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.DtoMapper;
 import com.example.restaurantroulette.service.FavoriteService;
 import com.example.restaurantroulette.service.LocalSessionService;
+import com.example.restaurantroulette.service.PasswordHashService;
 import com.example.restaurantroulette.service.RandomHistoryService;
 import com.example.restaurantroulette.service.RandomRestaurantService;
 import com.example.restaurantroulette.service.RestaurantQueryService;
@@ -71,7 +72,8 @@ class RandishLogicTest {
       mapper,
       validationService);
   private final FavoriteService favoriteService = new FavoriteService(new FavoriteRestaurantRepository(jdbcClient), restaurantQueryService, mapper, validationService);
-  private final UserService userService = new UserService(new AppUserRepository(jdbcClient), mapper);
+  private final PasswordHashService passwordHashService = new PasswordHashService();
+  private final UserService userService = new UserService(new AppUserRepository(jdbcClient), mapper, passwordHashService);
   private final StampService stampService = new StampService(new StampRepository(jdbcClient), mapper, validationService);
   private final VisitCollectionService visitCollectionService = new VisitCollectionService(new VisitCollectionRepository(jdbcClient), restaurantQueryService, stampService, mapper, validationService);
   private final StatisticsService statisticsService = new StatisticsService(visitCollectionService, restaurantQueryService, favoriteService, validationService);
@@ -135,6 +137,12 @@ class RandishLogicTest {
   }
 
   @Test
+  void registerUserRejectsInvalidEmailBeforeProviderCall() {
+    assertThatThrownBy(() -> userService.register(new UserCreateRequest("eito@eito", "password123", "Eito")))
+        .isInstanceOf(BadRequestException.class);
+  }
+
+  @Test
   void localAuthCanLoginWhenSupabaseIsNotConfigured() {
     UserResponse registered = userService.register(new UserCreateRequest("local-login@example.com", "password123", "Local User"));
     AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
@@ -158,6 +166,26 @@ class RandishLogicTest {
         "wrong-password@example.com",
         "password124")))
         .isInstanceOf(UnauthorizedException.class);
+  }
+
+  @Test
+  void localAuthCanLoginBeforeSupabaseWhenSupabaseIsConfigured() {
+    System.setProperty("SUPABASE_URL", "https://randish-test.supabase.co");
+    System.setProperty("SUPABASE_ANON_KEY", "anon-test-key");
+    try {
+      UserResponse registered = userService.register(new UserCreateRequest("local-first@example.com", "password123", "Local First"));
+      AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
+
+      AuthResponse loggedIn = authService.login(new com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest(
+          "LOCAL-FIRST@example.com",
+          "password123"));
+
+      assertThat(loggedIn.user().id()).isEqualTo(registered.id());
+      assertThat(loggedIn.accessToken()).isNotBlank();
+    } finally {
+      System.clearProperty("SUPABASE_URL");
+      System.clearProperty("SUPABASE_ANON_KEY");
+    }
   }
 
   @Test

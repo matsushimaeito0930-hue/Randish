@@ -4,11 +4,11 @@ import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -19,6 +19,7 @@ public class SupabaseAuthService {
   private static final String DEFAULT_OAUTH_REDIRECT_URI = "randish://auth/callback";
   private static final Set<String> SUPPORTED_OAUTH_PROVIDERS = Set.of("google", "apple");
   private static final List<String> SUPABASE_ERROR_FIELDS = List.of("msg", "message", "error_description", "error");
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   private final RestClient.Builder restClientBuilder;
   private final String supabaseUrl;
@@ -162,8 +163,9 @@ public class SupabaseAuthService {
     if (body == null || body.isBlank()) {
       return fallbackMessage;
     }
+    JsonNode root = parseJson(body);
     for (String field : SUPABASE_ERROR_FIELDS) {
-      String value = extractJsonString(body, field);
+      String value = extractJsonString(root, field);
       if (value != null && !value.isBlank()) {
         return fallbackMessage + " " + value;
       }
@@ -171,10 +173,20 @@ public class SupabaseAuthService {
     return fallbackMessage;
   }
 
-  private String extractJsonString(String json, String field) {
-    Pattern pattern = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*\"([^\"]+)\"");
-    Matcher matcher = pattern.matcher(json);
-    return matcher.find() ? matcher.group(1) : null;
+  private JsonNode parseJson(String json) {
+    try {
+      return OBJECT_MAPPER.readTree(json);
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
+
+  private String extractJsonString(JsonNode root, String field) {
+    if (root == null || !root.has(field)) {
+      return null;
+    }
+    JsonNode node = root.get(field);
+    return node != null && node.isTextual() ? node.asText() : null;
   }
 
   private String trimTrailingSlash(String value) {

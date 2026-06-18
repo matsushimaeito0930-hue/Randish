@@ -640,7 +640,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     nicknameLabel: 'ニックネーム',
     required: '必須',
     optional: '任意',
-    registerButton: '登録する',
+    registerButton: '確認メールを送る',
     guestStart: 'ゲストではじめる',
     guestNote: '登録なしでRANDISHを試せます',
     or: 'または',
@@ -808,7 +808,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     nicknameLabel: 'Nickname',
     required: 'Required',
     optional: 'Optional',
-    registerButton: 'Sign Up',
+    registerButton: 'Send Email',
     guestStart: 'Continue as Guest',
     guestNote: 'Try RANDISH without registering',
     or: 'or',
@@ -976,7 +976,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     nicknameLabel: '昵称',
     required: '必填',
     optional: '可选',
-    registerButton: '注册',
+    registerButton: '发送确认邮件',
     guestStart: '以游客开始',
     guestNote: '无需注册即可试用RANDISH',
     or: '或者',
@@ -1144,7 +1144,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     nicknameLabel: '닉네임',
     required: '필수',
     optional: '선택',
-    registerButton: '가입하기',
+    registerButton: '확인 메일 보내기',
     guestStart: '게스트로 시작',
     guestNote: '가입 없이 RANDISH를 체험할 수 있습니다',
     or: '또는',
@@ -2354,8 +2354,20 @@ const toAuthErrorMessage = (error: unknown, fallback: string) => {
   if (/Email or password is incorrect|Invalid login credentials/i.test(message)) {
     return 'メールアドレスまたはパスワードが違います。';
   }
-  if (/email format is invalid/i.test(message)) {
-    return 'メールアドレスの形式を確認してください。';
+  if (/email format is invalid|email address.*invalid|invalid email/i.test(message)) {
+    return 'メールアドレスの形式を確認してください。例: name@example.com の形で入力してください。';
+  }
+  if (/Supabase signup failed/i.test(message) && /email/i.test(message)) {
+    return 'メールアドレスを確認してください。実在するメールアドレスで登録する必要があります。';
+  }
+  if (/Resend email verification is not configured/i.test(message)) {
+    return '確認メールの設定が未反映です。RESEND_API_KEYを設定してSpring Bootを再起動してください。';
+  }
+  if (/Resend email send failed/i.test(message)) {
+    return '確認メールを送れませんでした。Resendの送信元メール、APIキー、送信先メールを確認してください。';
+  }
+  if (/verification token is invalid or expired/i.test(message)) {
+    return '確認URLが無効か期限切れです。もう一度メールを送ってください。';
   }
   if (/password must be at least 8 characters/i.test(message)) {
     return 'パスワードは8文字以上で入力してください。';
@@ -4573,21 +4585,16 @@ function LoginScreen({
     setIsSubmitting(true);
     setAuthNotice('');
     try {
-      const auth = await randishApi.registerUser(apiBaseUrlCandidates, {
+      await randishApi.requestEmailRegistration(apiBaseUrlCandidates, {
         email: cleanEmail,
         password,
         displayName: cleanDisplayName,
       });
-      randishApi.setAuthToken(auth.accessToken);
       onApiConnected();
-      if (!auth.accessToken && auth.user.authProvider === 'SUPABASE') {
-        setPassword('');
-        setPasswordConfirm('');
-        switchAuthMode('login');
-        setAuthNotice('登録は完了しました。確認メールが届いている場合は、承認してからログインしてください。');
-        return;
-      }
-      onStart(auth.user.id, auth.user.displayName);
+      setPassword('');
+      setPasswordConfirm('');
+      switchAuthMode('login');
+      setAuthNotice(`${cleanEmail} に確認メールを送りました。メールのURLを開くと登録が完了します。完了後にログインしてください。`);
     } catch (error) {
       if (error instanceof RandishApiError && error.status === 409) {
         switchAuthMode('login');

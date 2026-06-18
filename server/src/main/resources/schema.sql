@@ -9,6 +9,18 @@ CREATE TABLE IF NOT EXISTS app_users (
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS pending_email_registrations (
+  id VARCHAR(120) PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  display_name VARCHAR(120) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  password_salt VARCHAR(120) NOT NULL,
+  token_hash VARCHAR(255) NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  consumed_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS premium_products (
   id VARCHAR(120) PRIMARY KEY,
   entitlement_key VARCHAR(80) NOT NULL DEFAULT 'premium',
@@ -384,6 +396,9 @@ WHERE (provider_place_id IS NULL OR provider_place_id = '') AND restaurant_id IS
 ALTER TABLE visit_collections DROP CONSTRAINT IF EXISTS uk_visit_user_restaurant;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_email_registrations_token ON pending_email_registrations(token_hash);
+CREATE INDEX IF NOT EXISTS idx_pending_email_registrations_email ON pending_email_registrations(email, created_at);
+CREATE INDEX IF NOT EXISTS idx_pending_email_registrations_expires ON pending_email_registrations(expires_at);
 CREATE INDEX IF NOT EXISTS idx_premium_products_provider ON premium_products(provider, active);
 CREATE INDEX IF NOT EXISTS idx_billing_customers_user ON billing_customers(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_entitlement ON subscriptions(user_id, entitlement_key, status, current_period_end);

@@ -7,11 +7,17 @@ import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.exception.BadRequestException;
+import com.example.restaurantroulette.exception.UnauthorizedException;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AuthService {
+  private static final Pattern EMAIL_PATTERN = Pattern.compile(
+      "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$",
+      Pattern.CASE_INSENSITIVE);
+
   private final UserService userService;
   private final SupabaseAuthService supabaseAuthService;
   private final LocalSessionService localSessionService;
@@ -41,17 +47,24 @@ public class AuthService {
   }
 
   public AuthResponse login(UserLoginRequest request) {
-    if (!supabaseAuthService.isConfigured()) {
-      UserResponse user = userService.authenticate(request.email(), request.password());
-      return new AuthResponse(user, localSessionService.createSession(user));
-    }
-
     String email = normalizeEmail(request.email());
     validatePassword(request.password());
 
-    SupabaseAuthService.SupabaseAuthResult authResult = supabaseAuthService.signInWithPassword(email, request.password());
-    UserResponse user = userService.syncSupabaseUser(authResult.user(), null);
-    return new AuthResponse(user, authResult.accessToken());
+    try {
+      UserResponse user = userService.authenticate(email, request.password());
+      return new AuthResponse(user, localSessionService.createSession(user));
+    } catch (UnauthorizedException localException) {
+      if (!supabaseAuthService.isConfigured()) {
+        throw localException;
+      }
+      try {
+        SupabaseAuthService.SupabaseAuthResult authResult = supabaseAuthService.signInWithPassword(email, request.password());
+        UserResponse user = userService.syncSupabaseUser(authResult.user(), null);
+        return new AuthResponse(user, authResult.accessToken());
+      } catch (UnauthorizedException ignored) {
+        throw localException;
+      }
+    }
   }
 
   public OAuthAuthorizeResponse createOAuthAuthorizeUrl(String provider, String redirectTo) {
@@ -70,9 +83,13 @@ public class AuthService {
   }
 
   public AuthResponse me(String authorizationHeader) {
-    if (!supabaseAuthService.isConfigured()) {
+    try {
       String userId = localSessionService.authenticate(authorizationHeader);
       return new AuthResponse(userService.findById(userId), null);
+    } catch (UnauthorizedException localException) {
+      if (!supabaseAuthService.isConfigured()) {
+        throw localException;
+      }
     }
     SupabaseAuthService.SupabaseAuthUser authUser = supabaseAuthService.getUser(authorizationHeader);
     UserResponse user = userService.syncSupabaseUser(authUser, null);
@@ -84,7 +101,7 @@ public class AuthService {
       throw new BadRequestException("email is required.");
     }
     String normalized = email.trim().toLowerCase(Locale.ROOT);
-    if (!normalized.contains("@") || normalized.startsWith("@") || normalized.endsWith("@")) {
+    if (!EMAIL_PATTERN.matcher(normalized).matches()) {
       throw new BadRequestException("email format is invalid.");
     }
     return normalized;
