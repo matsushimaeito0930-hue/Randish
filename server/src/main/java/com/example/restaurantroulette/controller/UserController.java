@@ -5,14 +5,12 @@ import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.AuthService;
 import com.example.restaurantroulette.service.UserService;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
-@CrossOrigin
 @RestController
 @RequestMapping("/api/users")
 public class UserController {

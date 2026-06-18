@@ -10,6 +10,7 @@ import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.dto.ApiDtos.VisitCreateRequest;
 import com.example.restaurantroulette.entity.Restaurant;
+import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.exception.ConflictException;
 import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.repository.AppUserRepository;
@@ -22,11 +23,13 @@ import com.example.restaurantroulette.service.AuthService;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.DtoMapper;
 import com.example.restaurantroulette.service.FavoriteService;
+import com.example.restaurantroulette.service.LocalSessionService;
 import com.example.restaurantroulette.service.RandomHistoryService;
 import com.example.restaurantroulette.service.RandomRestaurantService;
 import com.example.restaurantroulette.service.RestaurantQueryService;
 import com.example.restaurantroulette.service.StampService;
 import com.example.restaurantroulette.service.StatisticsService;
+import com.example.restaurantroulette.service.SupabaseAuthService;
 import com.example.restaurantroulette.service.UserService;
 import com.example.restaurantroulette.service.ValidationService;
 import com.example.restaurantroulette.service.VisitCollectionService;
@@ -117,11 +120,69 @@ class RandishLogicTest {
   }
 
   @Test
+  void registerUserFallsBackToEmailNameWhenDisplayNameIsBlank() {
+    var user = userService.register(new UserCreateRequest("fallback.name@example.com", "password123", " "));
+
+    assertThat(user.displayName()).isEqualTo("fallback.name");
+  }
+
+  @Test
   void registerUserPreventsDuplicateEmail() {
     userService.register(new UserCreateRequest("duplicate@example.com", "password123", "First"));
 
     assertThatThrownBy(() -> userService.register(new UserCreateRequest("DUPLICATE@example.com", "password123", "Second")))
         .isInstanceOf(ConflictException.class);
+  }
+
+  @Test
+  void localAuthCanLoginWhenSupabaseIsNotConfigured() {
+    UserResponse registered = userService.register(new UserCreateRequest("local-login@example.com", "password123", "Local User"));
+    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
+
+    AuthResponse loggedIn = authService.login(new com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest(
+        "LOCAL-LOGIN@example.com",
+        "password123"));
+
+    assertThat(loggedIn.user().id()).isEqualTo(registered.id());
+    assertThat(loggedIn.user().email()).isEqualTo("local-login@example.com");
+    assertThat(loggedIn.accessToken()).isNotBlank();
+    assertThat(authService.me("Bearer " + loggedIn.accessToken()).user().id()).isEqualTo(registered.id());
+  }
+
+  @Test
+  void localAuthRejectsWrongPassword() {
+    userService.register(new UserCreateRequest("wrong-password@example.com", "password123", "Local User"));
+    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
+
+    assertThatThrownBy(() -> authService.login(new com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest(
+        "wrong-password@example.com",
+        "password124")))
+        .isInstanceOf(UnauthorizedException.class);
+  }
+
+  @Test
+  void supabaseOAuthAuthorizeUrlUsesSupportedProviderAndRedirect() {
+    System.setProperty("SUPABASE_URL", "https://randish-test.supabase.co");
+    System.setProperty("SUPABASE_ANON_KEY", "anon-test-key");
+    try {
+      var auth = new SupabaseAuthService(RestClient.builder());
+      String url = auth.createOAuthAuthorizeUrl("Google", "randish://auth/callback");
+
+      assertThat(url).startsWith("https://randish-test.supabase.co/auth/v1/authorize?");
+      assertThat(url).contains("provider=google");
+      assertThat(url).contains("redirect_to=randish://auth/callback");
+    } finally {
+      System.clearProperty("SUPABASE_URL");
+      System.clearProperty("SUPABASE_ANON_KEY");
+    }
+  }
+
+  @Test
+  void supabaseOAuthAuthorizeUrlRejectsUnsupportedProvider() {
+    var auth = new SupabaseAuthService(RestClient.builder());
+
+    assertThatThrownBy(() -> auth.createOAuthAuthorizeUrl("line", "randish://auth/callback"))
+        .isInstanceOf(BadRequestException.class);
   }
 
   @Test
@@ -338,6 +399,92 @@ class RandishLogicTest {
 
     assertThatThrownBy(() -> guard.requireSameUser("Bearer token", "user-2"))
         .isInstanceOf(UnauthorizedException.class);
+  }
+
+  @Test
+  void guestRandomDoesNotPersistUserHistory() {
+    var selected = randomRestaurantService.choose(new RandomRestaurantRequest(ValidationService.GUEST_USER_ID, null, null, null, null, null, null, null));
+    Long guestRows = jdbcClient.sql("SELECT COUNT(*) FROM random_histories WHERE user_id = 'guest'")
+        .query(Long.class)
+        .single();
+
+    assertThat(selected.id()).isNotBlank();
+    assertThat(guestRows).isZero();
+    assertThatThrownBy(() -> randomHistoryService.findByUserId(ValidationService.GUEST_USER_ID))
+        .isInstanceOf(UnauthorizedException.class);
+  }
+
+  @Test
+  void guestCannotUsePersistedUserDataServices() {
+    assertThatThrownBy(() -> favoriteService.create(new FavoriteCreateRequest(ValidationService.GUEST_USER_ID, "seed-umeda-ramen")))
+        .isInstanceOf(UnauthorizedException.class);
+    assertThatThrownBy(() -> visitCollectionService.findByUserId(ValidationService.GUEST_USER_ID))
+        .isInstanceOf(UnauthorizedException.class);
+    assertThatThrownBy(() -> statisticsService.calculate(ValidationService.GUEST_USER_ID))
+        .isInstanceOf(UnauthorizedException.class);
+  }
+
+  @Test
+  void validationRejectsAbusiveInputBeforeDatabaseErrors() {
+    assertThatThrownBy(() -> restaurantQueryService.search("area\nx", null, null, null))
+        .isInstanceOf(BadRequestException.class);
+    assertThatThrownBy(() -> restaurantQueryService.search(null, null, -1, 1000))
+        .isInstanceOf(BadRequestException.class);
+    assertThatThrownBy(() -> restaurantQueryService.search(null, null, null, null, 91.0, 135.0, 3))
+        .isInstanceOf(BadRequestException.class);
+    assertThatThrownBy(() -> visitCollectionService.create(new VisitCreateRequest("user-rating", "seed-umeda-ramen", null, null, "ok", 6)))
+        .isInstanceOf(BadRequestException.class);
+  }
+
+  @Test
+  void coordinateSearchRetriesPrimaryProviderWithoutDistanceWhenNearbyIsEmpty() {
+    var provider = new CoordinateFallbackProvider();
+    var service = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(provider),
+        mapper,
+        validationService);
+
+    var restaurants = service.search("joetsu", "ramen", 0, 1500, 37.1479, 138.236, 4);
+
+    assertThat(provider.coordinateSearchCalls).isEqualTo(1);
+    assertThat(provider.keywordSearchCalls).isEqualTo(1);
+    assertThat(restaurants).extracting("id").containsExactly("keyword-joetsu-ramen");
+  }
+
+  private static class CoordinateFallbackProvider implements ExternalRestaurantProvider {
+    private int coordinateSearchCalls;
+    private int keywordSearchCalls;
+
+    @Override
+    public boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    public List<Restaurant> search(String area, String genre, Integer budgetMin, Integer budgetMax, Double latitude, Double longitude, Integer range) {
+      if (latitude != null && longitude != null) {
+        coordinateSearchCalls++;
+        return List.of();
+      }
+      keywordSearchCalls++;
+      return List.of(new Restaurant(
+          "keyword-joetsu-ramen",
+          "HOTPEPPER",
+          "keyword-joetsu-ramen",
+          "Joetsu Ramen",
+          area,
+          genre,
+          1001,
+          1500,
+          0,
+          0,
+          "Niigata Joetsu",
+          null,
+          "test",
+          null,
+          null));
+    }
   }
 
   private static class FixedProvider implements ExternalRestaurantProvider {

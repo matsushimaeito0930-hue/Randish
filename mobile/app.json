@@ -3,6 +3,7 @@
     "name": "RANDISH",
     "slug": "randish",
     "version": "1.0.0",
+    "scheme": "randish",
     "orientation": "portrait",
     "icon": "./assets/randish-logo-square1.png",
     "userInterfaceStyle": "light",
@@ -18,14 +19,25 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "プロフィール画像を選ぶために写真へのアクセスを使用します。"
+          "photosPermission": "プロフィール画像を選ぶために写真へのアクセスを使用します。",
+          "cameraPermission": "ごはん写真を撮ってアルバムに残すためにカメラを使用します。"
         }
       ]
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "ごはん写真を撮ってアルバムに残すためにカメラを使用します。",
+        "NSPhotoLibraryUsageDescription": "プロフィール画像やごはん写真を選ぶために写真へのアクセスを使用します。",
+        "NSPhotoLibraryAddUsageDescription": "撮影したごはん写真をアルバムに残すために写真ライブラリを使用します。"
+      }
     },
     "android": {
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/randish-logo-square1.png",
         "backgroundColor": "#ffffff"

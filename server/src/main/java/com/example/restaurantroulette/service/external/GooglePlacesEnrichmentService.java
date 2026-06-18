@@ -18,6 +18,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.slf4j.Logger;
@@ -58,6 +59,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
   private static final int RANDOM_ALL_GENRE_KEYWORD_COUNT = 5;
   private static final int RANDOM_GENRE_KEYWORD_COUNT = 3;
   private static final int DEFAULT_SESSION_REQUEST_LIMIT = 30;
+  private static final int MAX_PHOTO_NAME_LENGTH = 500;
+  private static final Pattern GOOGLE_PHOTO_NAME_PATTERN = Pattern.compile("places/[^/?#\\s]+/photos/[^/?#\\s]+");
   private static final List<String> ALL_GENRE_KEYWORDS = List.of(
       "飲食店",
       "レストラン",
@@ -352,21 +355,18 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
     Map<String, Object> result = new LinkedHashMap<>();
     boolean apiKeyConfigured = apiKey != null && !apiKey.isBlank();
     result.put("provider", "GOOGLE_PLACES");
-    result.put("workingDirectory", Path.of("").toAbsolutePath().normalize().toString());
     result.put("enabled", enabled);
     result.put("available", isAvailable());
     result.put("apiKeyConfigured", apiKeyConfigured);
     result.put("apiKeyLoaded", apiKeyConfigured);
-    result.put("apiKeyLength", apiKey == null ? 0 : apiKey.length());
     result.put("sessionRequestLimit", sessionRequestLimit);
     result.put("sessionRequestCount", sessionRequestCount.get());
     result.put("sessionRequestsRemaining", Math.max(0, sessionRequestLimit - sessionRequestCount.get()));
-    result.put("checkedEnvFiles", envFiles.stream().map(this::envFileStatus).toList());
     return result;
   }
 
   public ResponseEntity<byte[]> fetchPhoto(String photoName) {
-    if (!isAvailable() || photoName == null || photoName.isBlank() || !photoName.startsWith("places/")) {
+    if (!isAvailable() || !isSafePhotoName(photoName)) {
       return ResponseEntity.notFound().build();
     }
 
@@ -608,6 +608,13 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
         && !area.equals("迴ｾ蝨ｨ蝨ｰ");
   }
 
+  private boolean isSafePhotoName(String photoName) {
+    if (photoName == null || photoName.isBlank() || photoName.length() > MAX_PHOTO_NAME_LENGTH) {
+      return false;
+    }
+    return GOOGLE_PHOTO_NAME_PATTERN.matcher(photoName).matches();
+  }
+
   private String normalizeAreaForDisplay(String area) {
     return hasExplicitArea(area) ? area.trim() : "現在地";
   }
@@ -721,13 +728,6 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       logger.warn("Failed to read Google Places config from {}", path, exception);
       return Optional.empty();
     }
-  }
-
-  private Map<String, Object> envFileStatus(Path path) {
-    Map<String, Object> status = new LinkedHashMap<>();
-    status.put("path", path.toAbsolutePath().normalize().toString());
-    status.put("exists", Files.exists(path));
-    return status;
   }
 
   private String trimValue(String value) {

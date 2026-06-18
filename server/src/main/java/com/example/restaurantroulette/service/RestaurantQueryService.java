@@ -66,7 +66,7 @@ public class RestaurantQueryService {
       Double longitude,
       Integer range,
       int maxCandidates) {
-    validationService.validateBudget(budgetMin, budgetMax);
+    validationService.validateSearchRequest(area, genre, budgetMin, budgetMax, latitude, longitude, range);
     Map<String, Restaurant> externalOnlyRestaurants = new LinkedHashMap<>();
     boolean hasAvailableProvider = false;
 
@@ -82,6 +82,20 @@ public class RestaurantQueryService {
         range,
         desiredCandidateCount,
         externalOnlyRestaurants);
+
+    if (externalOnlyRestaurants.isEmpty() && hasCoordinates(latitude, longitude)) {
+      hasAvailableProvider = queryRandomProviders(
+          primaryProviders(),
+          area,
+          genre,
+          budgetMin,
+          budgetMax,
+          null,
+          null,
+          null,
+          desiredCandidateCount,
+          externalOnlyRestaurants) || hasAvailableProvider;
+    }
 
     int fallbackLimit = fallbackCandidateLimit(desiredCandidateCount, externalOnlyRestaurants.size());
     if (fallbackLimit > 0) {
@@ -130,7 +144,7 @@ public class RestaurantQueryService {
       Double latitude,
       Double longitude,
       Integer range) {
-    validationService.validateBudget(budgetMin, budgetMax);
+    validationService.validateSearchRequest(area, genre, budgetMin, budgetMax, latitude, longitude, range);
     Map<String, Restaurant> externalOnlyRestaurants = new LinkedHashMap<>();
     boolean hasAvailableProvider = false;
 
@@ -144,6 +158,19 @@ public class RestaurantQueryService {
         longitude,
         range,
         externalOnlyRestaurants);
+
+    if (externalOnlyRestaurants.isEmpty() && hasCoordinates(latitude, longitude)) {
+      hasAvailableProvider = queryProviders(
+          primaryProviders(),
+          area,
+          genre,
+          budgetMin,
+          budgetMax,
+          null,
+          null,
+          null,
+          externalOnlyRestaurants) || hasAvailableProvider;
+    }
 
     int fallbackLimit = fallbackCandidateLimit(HYBRID_TARGET_RESULT_COUNT, externalOnlyRestaurants.size());
     if (fallbackLimit > 0) {
@@ -278,6 +305,10 @@ public class RestaurantQueryService {
     return Math.min(missingCount, MAX_FALLBACK_FILL_COUNT);
   }
 
+  private boolean hasCoordinates(Double latitude, Double longitude) {
+    return latitude != null && longitude != null;
+  }
+
   private List<Restaurant> limitedCandidates(Map<String, Restaurant> restaurants, int maxCandidates) {
     return restaurants.values().stream()
         .limit(Math.max(1, maxCandidates))
@@ -319,8 +350,9 @@ public class RestaurantQueryService {
   }
 
   public Restaurant getEntityOrThrow(String id) {
-    return restaurantRepository.findById(id)
-        .orElseThrow(() -> new NotFoundException("Restaurant not found: " + id));
+    String cleanId = validationService.requireRestaurantId(id);
+    return restaurantRepository.findById(cleanId)
+        .orElseThrow(() -> new NotFoundException("Restaurant not found: " + cleanId));
   }
 
   public RestaurantResponse findById(String id) {

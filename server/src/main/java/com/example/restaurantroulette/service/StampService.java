@@ -22,6 +22,8 @@ public class StampService {
   }
 
   public void awardFirstVisitIfNeeded(String userId, String restaurantId, boolean alreadyVisited) {
+    userId = validationService.requirePersistentUserId(userId);
+    restaurantId = validationService.requireRestaurantId(restaurantId);
     if (alreadyVisited) {
       return;
     }
@@ -32,8 +34,8 @@ public class StampService {
   }
 
   public List<StampResponse> findByUserId(String userId) {
-    validationService.requireUserId(userId);
-    return stampRepository.findByUserId(userId).stream()
+    String cleanUserId = validationService.requirePersistentUserId(userId);
+    return stampRepository.findByUserId(cleanUserId).stream()
         .map(mapper::toStampResponse)
         .toList();
   }

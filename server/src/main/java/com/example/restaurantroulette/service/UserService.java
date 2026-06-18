@@ -6,7 +6,9 @@ import com.example.restaurantroulette.entity.AppUser;
 import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.exception.ConflictException;
 import com.example.restaurantroulette.exception.NotFoundException;
+import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.repository.AppUserRepository;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
@@ -34,7 +36,7 @@ public class UserService {
 
   public UserResponse register(UserCreateRequest request) {
     String email = normalizeEmail(request.email());
-    String displayName = normalizeDisplayName(request.displayName());
+    String displayName = normalizeDisplayName(request.displayName(), email);
     validatePassword(request.password());
 
     userRepository.findByEmail(email).ifPresent(existing -> {
@@ -53,6 +55,23 @@ public class UserService {
         .orElseThrow(() -> new NotFoundException("User not found."));
   }
 
+  public UserResponse authenticate(String email, String password) {
+    String normalizedEmail = normalizeEmail(email);
+    validatePassword(password);
+    AppUserRepository.AppUserCredentials credentials = userRepository.findCredentialsByEmail(normalizedEmail)
+        .orElseThrow(() -> new UnauthorizedException("Email or password is incorrect."));
+    if (!"EMAIL".equalsIgnoreCase(credentials.user().authProvider())) {
+      throw new UnauthorizedException("Please use the social login used for this account.");
+    }
+    if (credentials.passwordHash() == null || credentials.passwordSalt() == null) {
+      throw new UnauthorizedException("Email or password is incorrect.");
+    }
+    if (!verifyPassword(password, credentials.passwordHash(), credentials.passwordSalt())) {
+      throw new UnauthorizedException("Email or password is incorrect.");
+    }
+    return mapper.toUserResponse(credentials.user());
+  }
+
   public UserResponse syncSupabaseUser(SupabaseAuthService.SupabaseAuthUser authUser, String fallbackDisplayName) {
     String userId = authUser.id();
     if (userId == null || userId.isBlank()) {
@@ -60,7 +79,7 @@ public class UserService {
     }
 
     String email = normalizeEmail(authUser.email());
-    String displayName = normalizeDisplayName(resolveDisplayName(authUser, fallbackDisplayName, email));
+    String displayName = normalizeDisplayName(resolveDisplayName(authUser, fallbackDisplayName, email), email);
     Instant now = Instant.now();
     AppUser user = new AppUser(userId, email, displayName, "SUPABASE", now, now);
     return mapper.toUserResponse(userRepository.upsertExternalUser(user));
@@ -88,11 +107,10 @@ public class UserService {
     return normalized;
   }
 
-  private String normalizeDisplayName(String displayName) {
-    if (displayName == null || displayName.isBlank()) {
-      throw new BadRequestException("displayName is required.");
-    }
-    String normalized = displayName.trim();
+  private String normalizeDisplayName(String displayName, String email) {
+    String normalized = displayName == null || displayName.isBlank()
+        ? email.substring(0, email.indexOf('@'))
+        : displayName.trim();
     if (normalized.length() > 120) {
       throw new BadRequestException("displayName must be 120 characters or less.");
     }
@@ -115,6 +133,28 @@ public class UserService {
       return new PasswordSecret(
           Base64.getEncoder().encodeToString(hashBytes),
           Base64.getEncoder().encodeToString(saltBytes));
+    } catch (NoSuchAlgorithmException | InvalidKeySpecException exception) {
+      throw new IllegalStateException("PBKDF2WithHmacSHA256 is not available.", exception);
+    } finally {
+      spec.clearPassword();
+    }
+  }
+
+  private boolean verifyPassword(String password, String expectedHash, String salt) {
+    byte[] saltBytes;
+    byte[] expectedHashBytes;
+    try {
+      saltBytes = Base64.getDecoder().decode(salt);
+      expectedHashBytes = Base64.getDecoder().decode(expectedHash);
+    } catch (IllegalArgumentException exception) {
+      throw new UnauthorizedException("Email or password is incorrect.");
+    }
+
+    PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), saltBytes, PASSWORD_HASH_ITERATIONS, PASSWORD_HASH_BITS);
+    try {
+      SecretKeyFactory keyFactory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+      byte[] actualHashBytes = keyFactory.generateSecret(spec).getEncoded();
+      return MessageDigest.isEqual(expectedHashBytes, actualHashBytes);
     } catch (NoSuchAlgorithmException | InvalidKeySpecException exception) {
       throw new IllegalStateException("PBKDF2WithHmacSHA256 is not available.", exception);
     } finally {

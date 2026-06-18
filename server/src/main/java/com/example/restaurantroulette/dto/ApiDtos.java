@@ -86,6 +86,16 @@ public final class ApiDtos {
       String password) {
   }
 
+  public record OAuthAuthorizeResponse(
+      String provider,
+      String authorizationUrl,
+      String redirectTo) {
+  }
+
+  public record OAuthSessionRequest(
+      String accessToken) {
+  }
+
   public record UserResponse(
       String id,
       String email,

@@ -34,13 +34,15 @@ public class FavoriteService {
   }
 
   public FavoriteResponse create(FavoriteCreateRequest request) {
-    validationService.requireUserId(request.userId());
+    String userId = validationService.requirePersistentUserId(request.userId());
     Restaurant localRestaurant = null;
-    String restaurantId = clean(request.restaurantId());
-    String provider = clean(request.provider());
-    String providerPlaceId = clean(request.providerPlaceId());
+    String restaurantId = validationService.cleanOptionalText("restaurantId", request.restaurantId(), 120);
+    String provider = validationService.optionalProvider(request.provider());
+    String providerPlaceId = validationService.optionalProviderPlaceId(request.providerPlaceId());
+    validationService.validateBudget(request.savedBudgetMin(), request.savedBudgetMax());
 
     if (restaurantId != null) {
+      restaurantId = validationService.requireRestaurantId(restaurantId);
       localRestaurant = restaurantQueryService.getEntityOrThrow(restaurantId);
       if (provider == null) {
         provider = localRestaurant.externalProvider();
@@ -56,22 +58,22 @@ public class FavoriteService {
 
     String normalizedProvider = provider.trim().toUpperCase();
     String normalizedProviderPlaceId = providerPlaceId.trim();
-    favoriteRepository.findByUserIdAndProviderPlaceId(request.userId(), normalizedProvider, normalizedProviderPlaceId)
+    favoriteRepository.findByUserIdAndProviderPlaceId(userId, normalizedProvider, normalizedProviderPlaceId)
         .ifPresent(favorite -> {
           throw new ConflictException("Restaurant is already registered as favorite.");
         });
     FavoriteRestaurant favorite = new FavoriteRestaurant(
         UUID.randomUUID().toString(),
-        request.userId(),
+        userId,
         normalizedProvider,
         normalizedProviderPlaceId,
         shouldPersistRestaurantId(normalizedProvider) ? restaurantId : null,
-        clean(request.savedArea()),
-        clean(request.savedGenre()),
+        validationService.optionalSearchText("savedArea", request.savedArea()),
+        validationService.optionalSearchText("savedGenre", request.savedGenre()),
         request.savedBudgetMin(),
         request.savedBudgetMax(),
-        clean(request.userMemo()),
-        clean(request.userTags()),
+        validationService.optionalNote("userMemo", request.userMemo()),
+        validationService.optionalNote("userTags", request.userTags()),
         Instant.now());
     return mapper.toFavoriteResponse(favoriteRepository.save(favorite), shouldPersistRestaurantId(normalizedProvider) ? localRestaurant : null);
   }
@@ -89,8 +91,8 @@ public class FavoriteService {
   }
 
   public List<FavoriteResponse> findByUserId(String userId) {
-    validationService.requireUserId(userId);
-    return favoriteRepository.findByUserId(userId).stream()
+    String cleanUserId = validationService.requirePersistentUserId(userId);
+    return favoriteRepository.findByUserId(cleanUserId).stream()
         .map(favorite -> mapper.toFavoriteResponse(favorite, findLocalRestaurantForList(favorite)))
         .toList();
   }
@@ -103,17 +105,17 @@ public class FavoriteService {
   }
 
   public FavoriteCheckResponse check(String userId, String restaurantId) {
-    validationService.requireUserId(userId);
-    validationService.requireRestaurantId(restaurantId);
-    restaurantQueryService.getEntityOrThrow(restaurantId);
-    return favoriteRepository.findByUserIdAndRestaurantId(userId, restaurantId)
+    String cleanUserId = validationService.requirePersistentUserId(userId);
+    String cleanRestaurantId = validationService.requireRestaurantId(restaurantId);
+    restaurantQueryService.getEntityOrThrow(cleanRestaurantId);
+    return favoriteRepository.findByUserIdAndRestaurantId(cleanUserId, cleanRestaurantId)
         .map(favorite -> new FavoriteCheckResponse(true, favorite.id()))
         .orElseGet(() -> new FavoriteCheckResponse(false, null));
   }
 
   public long countByUserId(String userId) {
-    validationService.requireUserId(userId);
-    return favoriteRepository.findByUserId(userId).size();
+    String cleanUserId = validationService.requirePersistentUserId(userId);
+    return favoriteRepository.findByUserId(cleanUserId).size();
   }
 
   private Restaurant findLocalRestaurantForList(FavoriteRestaurant favorite) {
@@ -140,13 +142,5 @@ public class FavoriteService {
 
   private boolean shouldPersistRestaurantId(String provider) {
     return provider == null || provider.equalsIgnoreCase("RANDISH_SEED");
-  }
-
-  private String clean(String value) {
-    if (value == null) {
-      return null;
-    }
-    String trimmed = value.trim();
-    return trimmed.isEmpty() ? null : trimmed;
   }
 }

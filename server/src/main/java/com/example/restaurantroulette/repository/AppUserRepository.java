@@ -88,6 +88,17 @@ public class AppUserRepository {
         .optional();
   }
 
+  public Optional<AppUserCredentials> findCredentialsByEmail(String email) {
+    return jdbcClient.sql("""
+        SELECT id, email, display_name, password_hash, password_salt, auth_provider, created_at, updated_at
+        FROM app_users
+        WHERE email = :email
+        """)
+        .param("email", email)
+        .query(this::mapUserCredentials)
+        .optional();
+  }
+
   private AppUser mapUser(ResultSet resultSet, int rowNumber) throws SQLException {
     return new AppUser(
         resultSet.getString("id"),
@@ -96,5 +107,15 @@ public class AppUserRepository {
         resultSet.getString("auth_provider"),
         resultSet.getTimestamp("created_at").toInstant(),
         resultSet.getTimestamp("updated_at").toInstant());
+  }
+
+  private AppUserCredentials mapUserCredentials(ResultSet resultSet, int rowNumber) throws SQLException {
+    return new AppUserCredentials(
+        mapUser(resultSet, rowNumber),
+        resultSet.getString("password_hash"),
+        resultSet.getString("password_salt"));
+  }
+
+  public record AppUserCredentials(AppUser user, String passwordHash, String passwordSalt) {
   }
 }

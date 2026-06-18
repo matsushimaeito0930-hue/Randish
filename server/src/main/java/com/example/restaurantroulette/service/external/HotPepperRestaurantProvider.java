@@ -103,17 +103,10 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   public Map<String, Object> diagnostics(String area, String genre) {
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("provider", PROVIDER);
-    result.put("workingDirectory", Path.of("").toAbsolutePath().toString());
     result.put("apiKeyLoaded", isAvailable());
-    result.put("apiKeyLength", apiKey == null ? 0 : apiKey.length());
     List<SearchPlan> searchPlans = buildSearchPlans(genre);
     result.put("keyword", buildKeyword(area, searchPlans.getFirst().extraKeywords()));
     result.put("searchPlanCount", searchPlans.size());
-    result.put("checkedEnvFiles", List.of(
-        envFileStatus(Path.of(".env.local")),
-        envFileStatus(Path.of("..", ".env.local")),
-        envFileStatus(Path.of(".env")),
-        envFileStatus(Path.of("..", ".env"))));
 
     if (!isAvailable()) {
       result.put("status", "API_KEY_NOT_LOADED");
@@ -127,10 +120,7 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
       result.put("firstRestaurant", restaurants.isEmpty() ? null : restaurants.getFirst());
     } catch (RuntimeException exception) {
       result.put("status", "HOTPEPPER_REQUEST_FAILED");
-      result.put("errorClass", exception.getClass().getName());
-      result.put("errorMessage", exception.getMessage());
-      result.put("causeClass", exception.getCause() == null ? null : exception.getCause().getClass().getName());
-      result.put("causeMessage", exception.getCause() == null ? null : exception.getCause().getMessage());
+      result.put("errorClass", exception.getClass().getSimpleName());
     }
     return result;
   }
@@ -532,14 +522,6 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
     } catch (IOException ignored) {
       return Optional.empty();
     }
-  }
-
-  private Map<String, Object> envFileStatus(Path path) {
-    Map<String, Object> status = new LinkedHashMap<>();
-    Path absolutePath = path.toAbsolutePath().normalize();
-    status.put("path", absolutePath.toString());
-    status.put("exists", Files.exists(path));
-    return status;
   }
 
   private String trimValue(String value) {

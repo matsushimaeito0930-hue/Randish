@@ -15,6 +15,8 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+  private static final String INTERNAL_ERROR_MESSAGE = "An unexpected server error occurred.";
+
   @ExceptionHandler(BadRequestException.class)
   public ResponseEntity<ErrorResponse> handleBadRequest(BadRequestException exception) {
     return ResponseEntity.badRequest().body(new ErrorResponse("BAD_REQUEST", exception.getMessage(), List.of()));
@@ -43,15 +45,12 @@ public class ApiExceptionHandler {
   @ExceptionHandler(NoResourceFoundException.class)
   public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException exception) {
     return ResponseEntity.status(HttpStatus.NOT_FOUND)
-        .body(new ErrorResponse("NOT_FOUND", exception.getMessage(), List.of(exception.getClass().getSimpleName())));
+        .body(new ErrorResponse("NOT_FOUND", "Resource not found.", List.of()));
   }
 
   @ExceptionHandler(Exception.class)
   public ResponseEntity<ErrorResponse> handleUnexpected(Exception exception) {
-    List<String> details = exception.getCause() == null
-        ? List.of(exception.getClass().getSimpleName())
-        : List.of(exception.getClass().getSimpleName(), exception.getCause().getClass().getSimpleName(), String.valueOf(exception.getCause().getMessage()));
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-        .body(new ErrorResponse("INTERNAL_SERVER_ERROR", exception.getMessage(), details));
+        .body(new ErrorResponse("INTERNAL_SERVER_ERROR", INTERNAL_ERROR_MESSAGE, List.of()));
   }
 }

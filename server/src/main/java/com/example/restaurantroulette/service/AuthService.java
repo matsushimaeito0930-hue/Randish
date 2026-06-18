@@ -1,6 +1,8 @@
 package com.example.restaurantroulette.service;
 
 import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
+import com.example.restaurantroulette.dto.ApiDtos.OAuthAuthorizeResponse;
+import com.example.restaurantroulette.dto.ApiDtos.OAuthSessionRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
@@ -12,19 +14,25 @@ import org.springframework.stereotype.Service;
 public class AuthService {
   private final UserService userService;
   private final SupabaseAuthService supabaseAuthService;
+  private final LocalSessionService localSessionService;
 
-  public AuthService(UserService userService, SupabaseAuthService supabaseAuthService) {
+  public AuthService(
+      UserService userService,
+      SupabaseAuthService supabaseAuthService,
+      LocalSessionService localSessionService) {
     this.userService = userService;
     this.supabaseAuthService = supabaseAuthService;
+    this.localSessionService = localSessionService;
   }
 
   public AuthResponse register(UserCreateRequest request) {
     if (!supabaseAuthService.isConfigured()) {
-      return new AuthResponse(userService.register(request), null);
+      UserResponse user = userService.register(request);
+      return new AuthResponse(user, localSessionService.createSession(user));
     }
 
     String email = normalizeEmail(request.email());
-    String displayName = normalizeDisplayName(request.displayName());
+    String displayName = normalizeDisplayName(request.displayName(), email);
     validatePassword(request.password());
 
     SupabaseAuthService.SupabaseAuthResult authResult = supabaseAuthService.signUp(email, request.password(), displayName);
@@ -34,7 +42,8 @@ public class AuthService {
 
   public AuthResponse login(UserLoginRequest request) {
     if (!supabaseAuthService.isConfigured()) {
-      throw new BadRequestException("Supabase Auth is not configured.");
+      UserResponse user = userService.authenticate(request.email(), request.password());
+      return new AuthResponse(user, localSessionService.createSession(user));
     }
 
     String email = normalizeEmail(request.email());
@@ -45,7 +54,26 @@ public class AuthService {
     return new AuthResponse(user, authResult.accessToken());
   }
 
+  public OAuthAuthorizeResponse createOAuthAuthorizeUrl(String provider, String redirectTo) {
+    String authorizationUrl = supabaseAuthService.createOAuthAuthorizeUrl(provider, redirectTo);
+    return new OAuthAuthorizeResponse(provider.trim().toLowerCase(Locale.ROOT), authorizationUrl, redirectTo);
+  }
+
+  public AuthResponse loginWithOAuthSession(OAuthSessionRequest request) {
+    if (request == null || request.accessToken() == null || request.accessToken().isBlank()) {
+      throw new BadRequestException("accessToken is required.");
+    }
+    String accessToken = request.accessToken().trim();
+    SupabaseAuthService.SupabaseAuthUser authUser = supabaseAuthService.getUser("Bearer " + accessToken);
+    UserResponse user = userService.syncSupabaseUser(authUser, null);
+    return new AuthResponse(user, accessToken);
+  }
+
   public AuthResponse me(String authorizationHeader) {
+    if (!supabaseAuthService.isConfigured()) {
+      String userId = localSessionService.authenticate(authorizationHeader);
+      return new AuthResponse(userService.findById(userId), null);
+    }
     SupabaseAuthService.SupabaseAuthUser authUser = supabaseAuthService.getUser(authorizationHeader);
     UserResponse user = userService.syncSupabaseUser(authUser, null);
     return new AuthResponse(user, null);
@@ -62,11 +90,10 @@ public class AuthService {
     return normalized;
   }
 
-  private String normalizeDisplayName(String displayName) {
-    if (displayName == null || displayName.isBlank()) {
-      throw new BadRequestException("displayName is required.");
-    }
-    String normalized = displayName.trim();
+  private String normalizeDisplayName(String displayName, String email) {
+    String normalized = displayName == null || displayName.isBlank()
+        ? email.substring(0, email.indexOf('@'))
+        : displayName.trim();
     if (normalized.length() > 120) {
       throw new BadRequestException("displayName must be 120 characters or less.");
     }

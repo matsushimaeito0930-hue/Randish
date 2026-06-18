@@ -4,16 +4,26 @@ import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.util.UriComponentsBuilder;
 
 @Service
 public class SupabaseAuthService {
+  private static final String DEFAULT_OAUTH_REDIRECT_URI = "randish://auth/callback";
+  private static final Set<String> SUPPORTED_OAUTH_PROVIDERS = Set.of("google", "apple");
+  private static final List<String> SUPABASE_ERROR_FIELDS = List.of("msg", "message", "error_description", "error");
+
   private final RestClient.Builder restClientBuilder;
   private final String supabaseUrl;
   private final String anonKey;
+  private final String defaultOAuthRedirectUri;
 
   public SupabaseAuthService(RestClient.Builder restClientBuilder) {
     this.restClientBuilder = restClientBuilder;
@@ -27,10 +37,28 @@ public class SupabaseAuthService {
         System.getenv("SUPABASE_ANON_KEY"),
         System.getProperty("EXPO_PUBLIC_SUPABASE_ANON_KEY"),
         System.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY"));
+    this.defaultOAuthRedirectUri = firstPresent(
+        System.getProperty("RANDISH_OAUTH_REDIRECT_URI"),
+        System.getenv("RANDISH_OAUTH_REDIRECT_URI"),
+        DEFAULT_OAUTH_REDIRECT_URI);
   }
 
   public boolean isConfigured() {
     return supabaseUrl != null && !supabaseUrl.isBlank() && anonKey != null && !anonKey.isBlank();
+  }
+
+  public String createOAuthAuthorizeUrl(String provider, String redirectTo) {
+    String normalizedProvider = normalizeOAuthProvider(provider);
+    requireConfigured();
+    String resolvedRedirectTo = redirectTo == null || redirectTo.isBlank()
+        ? defaultOAuthRedirectUri
+        : redirectTo.trim();
+    return UriComponentsBuilder.fromHttpUrl(supabaseUrl)
+        .path("/auth/v1/authorize")
+        .queryParam("provider", normalizedProvider)
+        .queryParam("redirect_to", resolvedRedirectTo)
+        .build()
+        .toUriString();
   }
 
   public SupabaseAuthResult signUp(String email, String password, String displayName) {
@@ -48,7 +76,7 @@ public class SupabaseAuthService {
           .body(SupabaseAuthApiResponse.class);
       return toResult(response);
     } catch (RestClientResponseException exception) {
-      throw new BadRequestException("Supabase signup failed: " + exception.getResponseBodyAsString());
+      throw new BadRequestException(supabaseErrorMessage(exception, "Supabase signup failed."));
     }
   }
 
@@ -64,7 +92,7 @@ public class SupabaseAuthService {
           .body(SupabaseAuthApiResponse.class);
       return toResult(response);
     } catch (RestClientResponseException exception) {
-      throw new UnauthorizedException("Supabase login failed.");
+      throw new UnauthorizedException(supabaseErrorMessage(exception, "Supabase login failed."));
     }
   }
 
@@ -116,6 +144,37 @@ public class SupabaseAuthService {
       throw new UnauthorizedException("Authorization bearer token is required.");
     }
     return value.replaceFirst("(?i)^Bearer\\s+", "").trim();
+  }
+
+  private String normalizeOAuthProvider(String provider) {
+    if (provider == null || provider.isBlank()) {
+      throw new BadRequestException("OAuth provider is required.");
+    }
+    String normalized = provider.trim().toLowerCase();
+    if (!SUPPORTED_OAUTH_PROVIDERS.contains(normalized)) {
+      throw new BadRequestException("Unsupported OAuth provider.");
+    }
+    return normalized;
+  }
+
+  private String supabaseErrorMessage(RestClientResponseException exception, String fallbackMessage) {
+    String body = exception.getResponseBodyAsString();
+    if (body == null || body.isBlank()) {
+      return fallbackMessage;
+    }
+    for (String field : SUPABASE_ERROR_FIELDS) {
+      String value = extractJsonString(body, field);
+      if (value != null && !value.isBlank()) {
+        return fallbackMessage + " " + value;
+      }
+    }
+    return fallbackMessage;
+  }
+
+  private String extractJsonString(String json, String field) {
+    Pattern pattern = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*\"([^\"]+)\"");
+    Matcher matcher = pattern.matcher(json);
+    return matcher.find() ? matcher.group(1) : null;
   }
 
   private String trimTrailingSlash(String value) {
