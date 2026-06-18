@@ -61,6 +61,11 @@ export type AuthResponse = {
   accessToken: string | null;
 };
 
+export type EmailVerificationResponse = {
+  email: string;
+  expiresAt: string;
+};
+
 export type OAuthProvider = 'google' | 'apple';
 
 export type OAuthAuthorizeResponse = {
@@ -298,7 +303,13 @@ export const randishApi = {
     request<Restaurant>(baseUrl, `api/restaurants/${restaurantId}`),
 
   registerUser: (baseUrl: ApiBaseUrlInput, params: UserCreateParams) =>
-    request<AuthResponse>(baseUrl, 'api/auth/register', undefined, {
+    request<EmailVerificationResponse>(baseUrl, 'api/auth/register', undefined, {
+      method: 'POST',
+      body: params,
+    }),
+
+  requestEmailRegistration: (baseUrl: ApiBaseUrlInput, params: UserCreateParams) =>
+    request<EmailVerificationResponse>(baseUrl, 'api/auth/register/request', undefined, {
       method: 'POST',
       body: params,
     }),

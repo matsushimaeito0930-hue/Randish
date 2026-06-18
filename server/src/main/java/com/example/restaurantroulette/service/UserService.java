@@ -8,30 +8,26 @@ import com.example.restaurantroulette.exception.ConflictException;
 import com.example.restaurantroulette.exception.NotFoundException;
 import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.repository.AppUserRepository;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
-import java.security.spec.InvalidKeySpecException;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.Locale;
 import java.util.UUID;
-import javax.crypto.SecretKeyFactory;
-import javax.crypto.spec.PBEKeySpec;
+import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 @Service
 public class UserService {
-  private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-  private static final int PASSWORD_HASH_ITERATIONS = 120_000;
-  private static final int PASSWORD_HASH_BITS = 256;
+  private static final Pattern EMAIL_PATTERN = Pattern.compile(
+      "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$",
+      Pattern.CASE_INSENSITIVE);
 
   private final AppUserRepository userRepository;
   private final DtoMapper mapper;
+  private final PasswordHashService passwordHashService;
 
-  public UserService(AppUserRepository userRepository, DtoMapper mapper) {
+  public UserService(AppUserRepository userRepository, DtoMapper mapper, PasswordHashService passwordHashService) {
     this.userRepository = userRepository;
     this.mapper = mapper;
+    this.passwordHashService = passwordHashService;
   }
 
   public UserResponse register(UserCreateRequest request) {
@@ -43,10 +39,8 @@ public class UserService {
       throw new ConflictException("Email is already registered.");
     });
 
-    PasswordSecret secret = hashPassword(request.password());
-    Instant now = Instant.now();
-    AppUser user = new AppUser(UUID.randomUUID().toString(), email, displayName, "EMAIL", now, now);
-    return mapper.toUserResponse(userRepository.save(user, secret.hash(), secret.salt()));
+    PasswordHashService.PasswordSecret secret = passwordHashService.hash(request.password());
+    return registerVerifiedEmail(email, displayName, secret.hash(), secret.salt());
   }
 
   public UserResponse findById(String id) {
@@ -66,10 +60,29 @@ public class UserService {
     if (credentials.passwordHash() == null || credentials.passwordSalt() == null) {
       throw new UnauthorizedException("Email or password is incorrect.");
     }
-    if (!verifyPassword(password, credentials.passwordHash(), credentials.passwordSalt())) {
+    if (!passwordHashService.matches(password, credentials.passwordHash(), credentials.passwordSalt())) {
       throw new UnauthorizedException("Email or password is incorrect.");
     }
     return mapper.toUserResponse(credentials.user());
+  }
+
+  public UserResponse registerVerifiedEmail(String email, String displayName, String passwordHash, String passwordSalt) {
+    String normalizedEmail = normalizeEmail(email);
+    String normalizedDisplayName = normalizeDisplayName(displayName, normalizedEmail);
+    if (passwordHash == null || passwordHash.isBlank() || passwordSalt == null || passwordSalt.isBlank()) {
+      throw new BadRequestException("password secret is required.");
+    }
+    userRepository.findByEmail(normalizedEmail).ifPresent(existing -> {
+      throw new ConflictException("Email is already registered.");
+    });
+
+    Instant now = Instant.now();
+    AppUser user = new AppUser(UUID.randomUUID().toString(), normalizedEmail, normalizedDisplayName, "EMAIL", now, now);
+    return mapper.toUserResponse(userRepository.save(user, passwordHash, passwordSalt));
+  }
+
+  public boolean emailExists(String email) {
+    return userRepository.findByEmail(normalizeEmail(email)).isPresent();
   }
 
   public UserResponse syncSupabaseUser(SupabaseAuthService.SupabaseAuthUser authUser, String fallbackDisplayName) {
@@ -101,7 +114,7 @@ public class UserService {
       throw new BadRequestException("email is required.");
     }
     String normalized = email.trim().toLowerCase(Locale.ROOT);
-    if (!normalized.contains("@") || normalized.startsWith("@") || normalized.endsWith("@")) {
+    if (!EMAIL_PATTERN.matcher(normalized).matches()) {
       throw new BadRequestException("email format is invalid.");
     }
     return normalized;
@@ -123,45 +136,4 @@ public class UserService {
     }
   }
 
-  private PasswordSecret hashPassword(String password) {
-    byte[] saltBytes = new byte[16];
-    SECURE_RANDOM.nextBytes(saltBytes);
-    PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), saltBytes, PASSWORD_HASH_ITERATIONS, PASSWORD_HASH_BITS);
-    try {
-      SecretKeyFactory keyFactory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-      byte[] hashBytes = keyFactory.generateSecret(spec).getEncoded();
-      return new PasswordSecret(
-          Base64.getEncoder().encodeToString(hashBytes),
-          Base64.getEncoder().encodeToString(saltBytes));
-    } catch (NoSuchAlgorithmException | InvalidKeySpecException exception) {
-      throw new IllegalStateException("PBKDF2WithHmacSHA256 is not available.", exception);
-    } finally {
-      spec.clearPassword();
-    }
-  }
-
-  private boolean verifyPassword(String password, String expectedHash, String salt) {
-    byte[] saltBytes;
-    byte[] expectedHashBytes;
-    try {
-      saltBytes = Base64.getDecoder().decode(salt);
-      expectedHashBytes = Base64.getDecoder().decode(expectedHash);
-    } catch (IllegalArgumentException exception) {
-      throw new UnauthorizedException("Email or password is incorrect.");
-    }
-
-    PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), saltBytes, PASSWORD_HASH_ITERATIONS, PASSWORD_HASH_BITS);
-    try {
-      SecretKeyFactory keyFactory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-      byte[] actualHashBytes = keyFactory.generateSecret(spec).getEncoded();
-      return MessageDigest.isEqual(expectedHashBytes, actualHashBytes);
-    } catch (NoSuchAlgorithmException | InvalidKeySpecException exception) {
-      throw new IllegalStateException("PBKDF2WithHmacSHA256 is not available.", exception);
-    } finally {
-      spec.clearPassword();
-    }
-  }
-
-  private record PasswordSecret(String hash, String salt) {
-  }
 }

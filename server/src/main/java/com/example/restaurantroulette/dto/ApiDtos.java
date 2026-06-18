@@ -96,6 +96,11 @@ public final class ApiDtos {
       String accessToken) {
   }
 
+  public record EmailVerificationResponse(
+      String email,
+      Instant expiresAt) {
+  }
+
   public record UserResponse(
       String id,
       String email,
