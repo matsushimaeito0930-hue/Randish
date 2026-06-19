@@ -19,17 +19,20 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "プロフィール画像を選ぶために写真へのアクセスを使用します。",
-          "cameraPermission": "ごはん写真を撮ってアルバムに残すためにカメラを使用します。"
+          "photosPermission": "プロフィール画像やごはん日記の写真を選ぶために写真へのアクセスを使用します。",
+          "cameraPermission": "ごはんの写真を撮ってアルバムに残すためにカメラを使用します。"
         }
-      ]
+      ],
+      "expo-apple-authentication",
+      "expo-web-browser"
     ],
     "ios": {
       "supportsTablet": true,
+      "usesAppleSignIn": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "ごはん写真を撮ってアルバムに残すためにカメラを使用します。",
-        "NSPhotoLibraryUsageDescription": "プロフィール画像やごはん写真を選ぶために写真へのアクセスを使用します。",
-        "NSPhotoLibraryAddUsageDescription": "撮影したごはん写真をアルバムに残すために写真ライブラリを使用します。"
+        "NSCameraUsageDescription": "ごはんの写真を撮ってアルバムに残すためにカメラを使用します。",
+        "NSPhotoLibraryUsageDescription": "プロフィール画像やごはんの写真を選ぶために写真へのアクセスを使用します。",
+        "NSPhotoLibraryAddUsageDescription": "撮影したごはんの写真をアルバムに残すために写真ライブラリを使用します。"
       }
     },
     "android": {

@@ -22,10 +22,15 @@ import {
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
 import type { Favorite as ApiFavorite, OAuthProvider, RandomHistory as ApiRandomHistory } from './services/randishApi';
 import { JAPAN_MUNICIPALITY_PRESETS } from './data/japanMunicipalities';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontAwesome, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
+import Svg, { Path } from 'react-native-svg';
 import { INK, ORANGE } from './constants/theme';
 import { styles } from './styles/appStyles';
+
+WebBrowser.maybeCompleteAuthSession();
 
 type AppStage = 'splash' | 'login' | 'main';
 type TabKey = 'home' | 'search' | 'random' | 'save' | 'analytics';
@@ -645,12 +650,13 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     guestStart: 'ゲストではじめる',
     guestNote: '登録なしでRANDISHを試せます',
     or: 'または',
-    googleRegister: 'Googleで登録',
-    appleRegister: 'Appleで登録',
+    googleRegister: 'Googleで続ける',
+    appleRegister: 'Appleで続ける',
     lineRegister: 'LINEで登録',
-    googleLogin: 'Googleでログイン',
-    appleLogin: 'Appleでログイン',
+    googleLogin: 'Googleで続ける',
+    appleLogin: 'Appleで続ける',
     lineLogin: 'LINEでログイン',
+    appleComingSoon: '準備中',
     loginQuestion: 'すでにアカウントをお持ちですか？',
     login: 'ログイン',
     createAccountQuestion: 'はじめてですか？',
@@ -814,12 +820,13 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     guestStart: 'Continue as Guest',
     guestNote: 'Try RANDISH without registering',
     or: 'or',
-    googleRegister: 'Sign up with Google',
-    appleRegister: 'Sign up with Apple',
+    googleRegister: 'Continue with Google',
+    appleRegister: 'Continue with Apple',
     lineRegister: 'Sign up with LINE',
-    googleLogin: 'Log in with Google',
-    appleLogin: 'Log in with Apple',
+    googleLogin: 'Continue with Google',
+    appleLogin: 'Continue with Apple',
     lineLogin: 'Log in with LINE',
+    appleComingSoon: 'Soon',
     loginQuestion: 'Already have an account?',
     login: 'Log In',
     createAccountQuestion: 'New here?',
@@ -983,12 +990,13 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     guestStart: '以游客开始',
     guestNote: '无需注册即可试用RANDISH',
     or: '或者',
-    googleRegister: '使用 Google 注册',
-    appleRegister: '使用 Apple 注册',
+    googleRegister: '使用 Google 继续',
+    appleRegister: '使用 Apple 继续',
     lineRegister: '使用 LINE 注册',
-    googleLogin: '使用 Google 登录',
-    appleLogin: '使用 Apple 登录',
+    googleLogin: '使用 Google 继续',
+    appleLogin: '使用 Apple 继续',
     lineLogin: '使用 LINE 登录',
+    appleComingSoon: '准备中',
     loginQuestion: '已经有账号了吗？',
     login: '登录',
     createAccountQuestion: '第一次使用吗？',
@@ -1152,12 +1160,13 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     guestStart: '게스트로 시작',
     guestNote: '가입 없이 RANDISH를 체험할 수 있습니다',
     or: '또는',
-    googleRegister: 'Google로 가입',
-    appleRegister: 'Apple로 가입',
+    googleRegister: 'Google로 계속',
+    appleRegister: 'Apple로 계속',
     lineRegister: 'LINE으로 가입',
-    googleLogin: 'Google로 로그인',
-    appleLogin: 'Apple로 로그인',
+    googleLogin: 'Google로 계속',
+    appleLogin: 'Apple로 계속',
     lineLogin: 'LINE으로 로그인',
+    appleComingSoon: '준비 중',
     loginQuestion: '이미 계정이 있나요?',
     login: '로그인',
     createAccountQuestion: '처음이신가요?',
@@ -4654,7 +4663,21 @@ function LoginScreen({
     try {
       const authUrl = await randishApi.getOAuthAuthorizeUrl(apiBaseUrlCandidates, provider, OAUTH_REDIRECT_URI);
       onApiConnected();
-      await Linking.openURL(authUrl.authorizationUrl);
+      const result = await WebBrowser.openAuthSessionAsync(authUrl.authorizationUrl, OAUTH_REDIRECT_URI, {
+        dismissButtonStyle: 'cancel',
+        preferEphemeralSession: false,
+      });
+
+      if (result.type === 'success') {
+        await completeOAuthSession(result.url);
+        return;
+      }
+
+      if (result.type === 'cancel' || result.type === 'dismiss') {
+        setAuthNotice(`${OAUTH_PROVIDER_NAMES[provider]}ログインをキャンセルしました。`);
+        return;
+      }
+
       setAuthNotice(`${OAUTH_PROVIDER_NAMES[provider]}の認証画面を開きました。完了後にRANDISHへ戻ります。`);
     } catch (error) {
       const reason = toAuthErrorMessage(error, '外部ログインを開始できませんでした。');
@@ -4736,14 +4759,16 @@ function LoginScreen({
 
         <Text style={styles.registerOr}>{uiText.or}</Text>
 
-        <RegisterSocialButton text={isLoginMode ? uiText.googleLogin : uiText.googleRegister} icon="logo-google" accent="#4285f4" onPress={() => handleSocialPress('google')} disabled={isSubmitting} />
-        <RegisterSocialButton text={isLoginMode ? uiText.appleLogin : uiText.appleRegister} icon="logo-apple" accent="#15120f" onPress={() => handleSocialPress('apple')} disabled={isSubmitting} />
         <RegisterSocialButton
-          text={isLoginMode ? uiText.lineLogin : uiText.lineRegister}
-          icon="chatbubble-ellipses-outline"
-          accent="#06c755"
-          onPress={() => setAuthNotice('LINEログインは次の候補です。まずはGoogle / Appleを接続します。')}
+          text={isLoginMode ? uiText.googleLogin : uiText.googleRegister}
+          icon="google"
+          accent="#1f1f1f"
+          onPress={() => handleSocialPress('google')}
           disabled={isSubmitting}
+        />
+        <RegisterAppleButton
+          text={isLoginMode ? uiText.appleLogin : uiText.appleRegister}
+          onPress={() => setAuthNotice('AppleログインはApp Store公開前に接続します。いまはGoogleかゲストを使ってください。')}
         />
 
         <Pressable style={styles.registerLoginBox} onPress={() => switchAuthMode(isLoginMode ? 'register' : 'login')}>
@@ -4764,30 +4789,105 @@ function RegisterLabel({ text, requiredText = '必須' }: { text: string; requir
   );
 }
 
+function RegisterAppleButton({ text, onPress }: { text: string; onPress: () => void }) {
+  const [canUseNativeButton, setCanUseNativeButton] = useState(Platform.OS === 'ios');
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (Platform.OS !== 'ios') {
+      setCanUseNativeButton(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    AppleAuthentication.isAvailableAsync()
+      .then((available) => {
+        if (mounted) {
+          setCanUseNativeButton(available);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setCanUseNativeButton(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (canUseNativeButton) {
+    return (
+      <View style={styles.registerAppleButtonShell}>
+        <AppleAuthentication.AppleAuthenticationButton
+          buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
+          cornerRadius={14}
+          style={styles.registerAppleButtonNative}
+          onPress={onPress}
+        />
+      </View>
+    );
+  }
+
+  return <RegisterSocialButton text={text} icon="apple" accent="#15120f" onPress={onPress} />;
+}
+
 function RegisterSocialButton({
   text,
   icon,
   accent,
   onPress,
   disabled = false,
+  badgeText,
 }: {
   text: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: keyof typeof FontAwesome.glyphMap;
   accent: string;
   onPress: () => void;
   disabled?: boolean;
+  badgeText?: string;
 }) {
+  const isGoogle = icon === 'google';
   return (
     <Pressable
       style={[styles.registerSocialButton, disabled && styles.registerSocialButtonDisabled]}
       onPress={onPress}
       disabled={disabled}
     >
-      <View style={[styles.registerSocialIcon, { borderColor: accent }]}>
-        <Ionicons name={icon} size={19} color={accent} />
+      <View style={[styles.registerSocialIcon, isGoogle && styles.registerSocialIconGoogle, { borderColor: accent }]}>
+        {isGoogle ? <GoogleBrandIcon /> : <FontAwesome name={icon} size={18} color={accent} />}
       </View>
       <Text style={styles.registerSocialText}>{text}</Text>
+      {!!badgeText && <Text style={styles.registerSocialBadge}>{badgeText}</Text>}
     </Pressable>
+  );
+}
+
+function GoogleBrandIcon() {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 48 48">
+      <Path
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      />
+      <Path
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+      />
+      <Path
+        fill="#FBBC05"
+        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+      />
+      <Path
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      />
+      <Path fill="none" d="M0 0h48v48H0z" />
+    </Svg>
   );
 }
 

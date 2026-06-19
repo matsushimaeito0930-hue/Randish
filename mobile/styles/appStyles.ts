@@ -223,6 +223,14 @@ export const styles = StyleSheet.create({
   registerSocialButtonDisabled: {
     opacity: 0.55,
   },
+  registerAppleButtonShell: {
+    height: 56,
+    marginBottom: 12,
+  },
+  registerAppleButtonNative: {
+    width: '100%',
+    height: 56,
+  },
   registerSocialIcon: {
     width: 30,
     height: 30,
@@ -232,10 +240,25 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     backgroundColor: '#fffdf9',
   },
+  registerSocialIconGoogle: {
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+  },
   registerSocialText: {
     fontSize: 16,
     fontWeight: '900',
     color: '#2a2622',
+  },
+  registerSocialBadge: {
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: '#f2ece5',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '900',
+    color: '#7b716a',
   },
   registerLoginBox: {
     height: 58,
