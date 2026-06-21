@@ -101,6 +101,15 @@ For Google / Apple sign-in, enable each provider in Supabase Authentication sett
 randish://auth/callback
 ```
 
+During local development, the app chooses the callback for the current runtime:
+
+```text
+Expo Go: exp://YOUR_METRO_HOST:YOUR_METRO_PORT/--/auth/callback
+Expo Web: http://localhost:YOUR_WEB_PORT/auth/callback
+```
+
+Add the exact local callback shown by your running app to Supabase Auth redirect URLs. You can force one with `EXPO_PUBLIC_RANDISH_OAUTH_REDIRECT_URI` when the host or port must stay fixed.
+
 The mobile app opens Supabase OAuth, receives the callback token, and asks the Spring Boot API to verify that token before syncing the user.
 
 ## Database

@@ -6,13 +6,14 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
-import org.springframework.web.util.UriComponentsBuilder;
 
 @Service
 public class SupabaseAuthService {
@@ -54,12 +55,9 @@ public class SupabaseAuthService {
     String resolvedRedirectTo = redirectTo == null || redirectTo.isBlank()
         ? defaultOAuthRedirectUri
         : redirectTo.trim();
-    return UriComponentsBuilder.fromHttpUrl(supabaseUrl)
-        .path("/auth/v1/authorize")
-        .queryParam("provider", normalizedProvider)
-        .queryParam("redirect_to", resolvedRedirectTo)
-        .build()
-        .toUriString();
+    String encodedProvider = URLEncoder.encode(normalizedProvider, StandardCharsets.UTF_8);
+    String encodedRedirectTo = URLEncoder.encode(resolvedRedirectTo, StandardCharsets.UTF_8);
+    return supabaseUrl + "/auth/v1/authorize?provider=" + encodedProvider + "&redirect_to=" + encodedRedirectTo;
   }
 
   public SupabaseAuthResult signUp(String email, String password, String displayName) {

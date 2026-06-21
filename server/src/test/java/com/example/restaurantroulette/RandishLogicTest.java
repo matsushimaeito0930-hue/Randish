@@ -236,7 +236,7 @@ class RandishLogicTest {
 
       assertThat(url).startsWith("https://randish-test.supabase.co/auth/v1/authorize?");
       assertThat(url).contains("provider=google");
-      assertThat(url).contains("redirect_to=randish://auth/callback");
+      assertThat(url).contains("redirect_to=randish%3A%2F%2Fauth%2Fcallback");
     } finally {
       System.clearProperty("SUPABASE_URL");
       System.clearProperty("SUPABASE_ANON_KEY");
