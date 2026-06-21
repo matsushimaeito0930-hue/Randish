@@ -26,7 +26,6 @@ import { FontAwesome, Ionicons, MaterialCommunityIcons } from '@expo/vector-icon
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
-import Svg, { Path } from 'react-native-svg';
 import { INK, ORANGE } from './constants/theme';
 import { styles } from './styles/appStyles';
 
@@ -230,7 +229,7 @@ type DrawAnimationProfile = {
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
 const DEV_DISABLE_MEAL_TICKET_LIMIT = false;
-const DEV_LAN_API_BASE_URLS = ['http://10.230.36.47:8080'];
+const DEV_LAN_API_BASE_URLS = ['http://10.230.36.50:8080', 'http://10.230.36.47:8080'];
 const LOCAL_API_BASE_URLS = Platform.select({
   android: ['http://10.0.2.2:8080', 'http://localhost:8080', 'http://127.0.0.1:8080'],
   web: ['http://localhost:8080', 'http://127.0.0.1:8080'],
@@ -243,9 +242,11 @@ const RANDISH_LOGO = require('./assets/randish-logo-square1.png');
 const HOME_HEADER_MAP = require('./assets/home-map/homeHeader.png');
 const ALBUM_FOOD_ICON = require('./assets/album-food-icon.png');
 const ALBUM_FOOTER_ICON = require('./assets/album-footer-traced.png');
+const GOOGLE_CONTINUE_BUTTON = require('./assets/google-continue-light-ios-3x.png');
 const HOTPEPPER_CREDIT_URL = 'https://webservice.recruit.co.jp/';
 const HOTPEPPER_CREDIT_IMAGE_URL = 'https://webservice.recruit.co.jp/banner/hotpepper-m.gif';
-const OAUTH_REDIRECT_URI = 'randish://auth/callback';
+const NATIVE_OAUTH_REDIRECT_URI = 'randish://auth/callback';
+const OAUTH_CALLBACK_PATH = 'auth/callback';
 
 const OAUTH_PROVIDER_NAMES: Record<OAuthProvider, string> = {
   google: 'Google',
@@ -253,7 +254,7 @@ const OAUTH_PROVIDER_NAMES: Record<OAuthProvider, string> = {
 };
 
 const isOAuthCallbackUrl = (url: string) =>
-  url.startsWith(OAUTH_REDIRECT_URI) || url.includes('/auth/callback');
+  url.startsWith(NATIVE_OAUTH_REDIRECT_URI) || url.includes('/auth/callback');
 
 const decodeOAuthValue = (value: string) => {
   try {
@@ -309,6 +310,11 @@ const getConfiguredApiBaseUrl = () => {
   return runtimeGlobal.process?.env?.EXPO_PUBLIC_RANDISH_API_BASE_URL ?? null;
 };
 
+const getConfiguredOAuthRedirectUri = () => {
+  const runtimeGlobal = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
+  return runtimeGlobal.process?.env?.EXPO_PUBLIC_RANDISH_OAUTH_REDIRECT_URI?.trim() || null;
+};
+
 const getMetroScriptUrl = () => {
   try {
     const sourceCode = NativeModules?.SourceCode as { scriptURL?: string } | undefined;
@@ -322,6 +328,42 @@ const getWebLocationUrl = () => {
   const runtimeGlobal = globalThis as typeof globalThis & { location?: { href?: string } };
   return runtimeGlobal.location?.href;
 };
+
+const getWebOAuthRedirectUri = () => {
+  const locationUrl = getWebLocationUrl();
+  if (!locationUrl) {
+    return null;
+  }
+  try {
+    return `${new URL(locationUrl).origin}/${OAUTH_CALLBACK_PATH}`;
+  } catch {
+    return null;
+  }
+};
+
+const getExpoGoOAuthRedirectUri = () => {
+  const metroScriptUrl = getMetroScriptUrl();
+  if (!metroScriptUrl) {
+    return null;
+  }
+  try {
+    const parsed = new URL(metroScriptUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    const scheme = parsed.protocol === 'https:' ? 'exps' : 'exp';
+    return `${scheme}://${parsed.host}/--/${OAUTH_CALLBACK_PATH}`;
+  } catch {
+    return null;
+  }
+};
+
+const getOAuthRedirectUri = () =>
+  getConfiguredOAuthRedirectUri()
+  ?? (Platform.OS === 'web'
+    ? getWebOAuthRedirectUri()
+    : getExpoGoOAuthRedirectUri())
+  ?? NATIVE_OAUTH_REDIRECT_URI;
 
 const getApiBaseUrlsFromRuntimeUrl = (value?: string) => {
   if (!value) {
@@ -618,7 +660,8 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     resultKicker: "TODAY'S PICK",
     drawAgain: 'もう一回引く',
     goThisShop: 'この店に行く',
-    saveRestaurant: '保存する',
+    saveRestaurant: 'お気に入りに追加',
+    savedRestaurant: 'お気に入り済み',
     nearestStationFrom: '最寄り駅から',
     currentLocationFrom: '現在地から',
     selectedPrefix: '選択',
@@ -631,22 +674,18 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     historyEmpty: '抽選すると、ここに履歴が残ります。',
     savedTitle: '食のアルバム',
     savedLead: 'また行きたい店を、あとで見返せるように残しておけます。',
-    savedEmptyTitle: '保存はまだありません',
-    savedEmptyText: '結果カードの「保存する」から追加できます。',
+    favoriteListTitle: 'お気に入り一覧',
+    savedEmptyTitle: 'お気に入りはまだありません',
+    savedEmptyText: '結果カードのハートから追加できます。',
     analyticsTitle: '分析',
     analyticsLead: '今月の食の傾向を、あとから見返せます。Proなら過去月も残せます。',
     registerTitle: '会員登録',
     registerDesc: 'アカウントを作成して、RANDISHをもっと便利に使いましょう。',
-    loginTitle: 'ログイン',
-    loginDesc: '保存したお店や履歴を引き継いでRANDISHを使います。',
-    emailLabel: 'メールアドレス',
-    passwordLabel: 'パスワード',
     passwordConfirmLabel: 'パスワード（確認）',
     nicknameLabel: 'ニックネーム',
     required: '必須',
     optional: '任意',
-    registerButton: '確認メールを送る',
-    loginLinkButton: 'ログインURLを送る',
+    authSocialLead: 'Googleでログインできます。Appleは公式ボタンの表示確認中です。登録なしならゲストで使えます。',
     guestStart: 'ゲストではじめる',
     guestNote: '登録なしでRANDISHを試せます',
     or: 'または',
@@ -657,10 +696,6 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     appleLogin: 'Appleで続ける',
     lineLogin: 'LINEでログイン',
     appleComingSoon: '準備中',
-    loginQuestion: 'すでにアカウントをお持ちですか？',
-    login: 'ログイン',
-    createAccountQuestion: 'はじめてですか？',
-    createAccount: '会員登録',
   },
   en: {
     accountSettings: 'Account Settings',
@@ -788,7 +823,8 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     resultKicker: "TODAY'S PICK",
     drawAgain: 'Draw Again',
     goThisShop: 'Go Here',
-    saveRestaurant: 'Save',
+    saveRestaurant: 'Add to Favorites',
+    savedRestaurant: 'Favorited',
     nearestStationFrom: 'From nearest station',
     currentLocationFrom: 'From current location',
     selectedPrefix: 'Selected',
@@ -801,22 +837,18 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     historyEmpty: 'Your draw history will appear here.',
     savedTitle: 'Food Album',
     savedLead: 'Keep places you may want to visit again.',
-    savedEmptyTitle: 'No saved places yet',
-    savedEmptyText: 'Save a place from the result card.',
+    favoriteListTitle: 'Favorites',
+    savedEmptyTitle: 'No favorites yet',
+    savedEmptyText: 'Tap the heart on a result card to add one.',
     analyticsTitle: 'Stats',
     analyticsLead: 'View this month for free. Pro keeps past months and deeper trends.',
     registerTitle: 'Create Account',
     registerDesc: 'Create an account to make RANDISH more useful.',
-    loginTitle: 'Log In',
-    loginDesc: 'Continue with your saved places and draw history.',
-    emailLabel: 'Email',
-    passwordLabel: 'Password',
     passwordConfirmLabel: 'Confirm Password',
     nicknameLabel: 'Nickname',
     required: 'Required',
     optional: 'Optional',
-    registerButton: 'Send Email',
-    loginLinkButton: 'Send Login Link',
+    authSocialLead: 'Continue with Google, preview the official Apple button, or use RANDISH as a guest.',
     guestStart: 'Continue as Guest',
     guestNote: 'Try RANDISH without registering',
     or: 'or',
@@ -827,10 +859,6 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     appleLogin: 'Continue with Apple',
     lineLogin: 'Log in with LINE',
     appleComingSoon: 'Soon',
-    loginQuestion: 'Already have an account?',
-    login: 'Log In',
-    createAccountQuestion: 'New here?',
-    createAccount: 'Create Account',
   },
   zh: {
     accountSettings: '账户设置',
@@ -958,7 +986,8 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     resultKicker: "TODAY'S PICK",
     drawAgain: '再抽一次',
     goThisShop: '去这家店',
-    saveRestaurant: '保存',
+    saveRestaurant: '加入收藏',
+    savedRestaurant: '已收藏',
     nearestStationFrom: '从最近车站',
     currentLocationFrom: '从当前位置',
     selectedPrefix: '已选择',
@@ -971,22 +1000,18 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     historyEmpty: '抽选后历史会显示在这里。',
     savedTitle: '美食相册',
     savedLead: '想再去的店铺可以保存在这里。',
-    savedEmptyTitle: '还没有保存',
-    savedEmptyText: '可从结果卡片的“保存”添加。',
+    favoriteListTitle: '收藏列表',
+    savedEmptyTitle: '还没有收藏',
+    savedEmptyText: '点击结果卡片上的爱心即可添加。',
     analyticsTitle: '分析',
     analyticsLead: '将饮食倾向可视化的高级功能。',
     registerTitle: '会员注册',
     registerDesc: '创建账号，让RANDISH更好用。',
-    loginTitle: '登录',
-    loginDesc: '继续使用已保存的店铺和抽选历史。',
-    emailLabel: '邮箱地址',
-    passwordLabel: '密码',
     passwordConfirmLabel: '确认密码',
     nicknameLabel: '昵称',
     required: '必填',
     optional: '可选',
-    registerButton: '发送确认邮件',
-    loginLinkButton: '发送登录链接',
+    authSocialLead: '使用 Google 登录，预览官方 Apple 按钮，或以游客身份使用 RANDISH。',
     guestStart: '以游客开始',
     guestNote: '无需注册即可试用RANDISH',
     or: '或者',
@@ -997,10 +1022,6 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     appleLogin: '使用 Apple 继续',
     lineLogin: '使用 LINE 登录',
     appleComingSoon: '准备中',
-    loginQuestion: '已经有账号了吗？',
-    login: '登录',
-    createAccountQuestion: '第一次使用吗？',
-    createAccount: '注册',
   },
   ko: {
     accountSettings: '계정 설정',
@@ -1128,7 +1149,8 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     resultKicker: "TODAY'S PICK",
     drawAgain: '다시 뽑기',
     goThisShop: '이 가게로 가기',
-    saveRestaurant: '저장',
+    saveRestaurant: '즐겨찾기에 추가',
+    savedRestaurant: '즐겨찾기 완료',
     nearestStationFrom: '가장 가까운 역에서',
     currentLocationFrom: '현재 위치에서',
     selectedPrefix: '선택',
@@ -1141,22 +1163,18 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     historyEmpty: '추첨하면 여기에 기록이 남습니다.',
     savedTitle: '음식 앨범',
     savedLead: '다시 가고 싶은 가게를 여기에 남겨둘 수 있습니다.',
-    savedEmptyTitle: '아직 저장한 곳이 없습니다',
-    savedEmptyText: '결과 카드의 “저장”에서 추가할 수 있습니다.',
+    favoriteListTitle: '즐겨찾기 목록',
+    savedEmptyTitle: '아직 즐겨찾기가 없습니다',
+    savedEmptyText: '결과 카드의 하트를 눌러 추가할 수 있습니다.',
     analyticsTitle: '분석',
     analyticsLead: '식사 취향을 시각화하는 프리미엄 기능입니다.',
     registerTitle: '회원가입',
     registerDesc: '계정을 만들고 RANDISH를 더 편리하게 사용하세요.',
-    loginTitle: '로그인',
-    loginDesc: '저장한 가게와 추첨 기록을 이어서 사용합니다.',
-    emailLabel: '이메일',
-    passwordLabel: '비밀번호',
     passwordConfirmLabel: '비밀번호 확인',
     nicknameLabel: '닉네임',
     required: '필수',
     optional: '선택',
-    registerButton: '확인 메일 보내기',
-    loginLinkButton: '로그인 링크 보내기',
+    authSocialLead: 'Google로 로그인하거나, 공식 Apple 버튼을 미리 보거나, 게스트로 사용할 수 있습니다.',
     guestStart: '게스트로 시작',
     guestNote: '가입 없이 RANDISH를 체험할 수 있습니다',
     or: '또는',
@@ -1167,10 +1185,6 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     appleLogin: 'Apple로 계속',
     lineLogin: 'LINE으로 로그인',
     appleComingSoon: '준비 중',
-    loginQuestion: '이미 계정이 있나요?',
-    login: '로그인',
-    createAccountQuestion: '처음이신가요?',
-    createAccount: '회원가입',
   },
 };
 
@@ -2362,40 +2376,40 @@ const toAuthErrorMessage = (error: unknown, fallback: string) => {
     return fallback;
   }
   if (/Email is already registered/i.test(message)) {
-    return 'このメールアドレスは登録済みです。ログインしてください。';
+    return 'このアカウントはすでに登録されています。同じ方法でログインしてください。';
   }
   if (/Email or password is incorrect|Invalid login credentials/i.test(message)) {
-    return 'メールアドレスまたはパスワードが違います。';
+    return 'ログイン情報を確認してください。';
   }
   if (/email format is invalid|email address.*invalid|invalid email/i.test(message)) {
-    return 'メールアドレスの形式を確認してください。例: name@example.com の形で入力してください。';
+    return 'アカウント情報を確認してください。';
   }
   if (/Supabase signup failed/i.test(message) && /email/i.test(message)) {
-    return 'メールアドレスを確認してください。実在するメールアドレスで登録する必要があります。';
+    return 'アカウント作成に失敗しました。認証設定を確認してください。';
   }
   if (/Resend email verification is not configured/i.test(message)) {
-    return '確認メールの設定が未反映です。RESEND_API_KEYを設定してSpring Bootを再起動してください。';
+    return 'メール認証は現在使っていません。Googleかゲストで続けてください。';
   }
   if (/Resend email send failed/i.test(message) && /own email address|testing emails|verify a domain|domain/i.test(message)) {
-    return 'Resendの開発用送信元は送信先に制限があります。自分のResend登録メール宛てで試すか、ResendのDomainsでドメイン認証をしてください。';
+    return 'メール認証は送信設定で止まりました。Googleかゲストで続けてください。';
   }
   if (/Resend email send failed/i.test(message) && /API key|authentication|unauthorized|forbidden/i.test(message)) {
-    return 'ResendのAPIキーが無効、またはサーバーに未反映です。RESEND_API_KEYを確認してSpring Bootを再起動してください。';
+    return 'メール認証の設定が未反映です。Googleかゲストで続けてください。';
   }
   if (/Resend email send failed/i.test(message) && /from|sender/i.test(message)) {
-    return 'Resendの送信元メールが使えません。開発中は RANDISH <onboarding@resend.dev>、本番は認証済みドメインのメールを設定してください。';
+    return 'メール認証の送信元設定が未反映です。Googleかゲストで続けてください。';
   }
   if (/Resend email send failed/i.test(message)) {
-    return '確認メールを送れませんでした。ResendのAPIキー、送信元、送信先制限を確認してください。';
+    return 'メール認証は現在使えません。Googleかゲストで続けてください。';
   }
   if (/verification token is invalid or expired/i.test(message)) {
-    return '確認URLが無効か期限切れです。もう一度メールを送ってください。';
+    return '認証URLが無効か期限切れです。もう一度ログインしてください。';
   }
   if (/password must be at least 8 characters/i.test(message)) {
     return '古いサーバーが動いています。Spring Bootを止めてから再起動してください。';
   }
   if (/Supabase Auth is not configured/i.test(message)) {
-    return '認証サーバーの設定が未反映です。Spring Bootを再起動するとメールログインを使えます。Google / Appleログインはまだ認証設定が必要です。';
+    return '認証サーバーの設定が未反映です。Spring BootとSupabaseのOAuth設定を確認してください。';
   }
   if (/Please use the social login used for this account/i.test(message)) {
     return 'このアカウントはGoogle / Appleログインで作られています。同じ方法でログインしてください。';
@@ -2598,7 +2612,7 @@ const getSavedRestaurantAnalytics = (savedRestaurants: SavedRestaurant[]): Saved
           id: favorite.id,
           externalProvider: favorite.provider,
           externalId: favorite.providerPlaceId,
-          name: '保存したお店',
+          name: 'お気に入りのお店',
           area: favorite.savedArea ?? 'エリアおまかせ',
           genre: favorite.savedGenre ?? 'ジャンルおまかせ',
           rating: 0,
@@ -3967,14 +3981,9 @@ export default function App() {
     chooseRandomRestaurant();
   }, [chooseEverythingRandom, chooseRandomRestaurant, drawMode, isLoading, mealTicketState, requestCurrentLocation, scrollToContentTop]);
 
-  const saveSelectedRestaurant = useCallback(async () => {
-    if (!selectedRestaurant) {
-      setMessage('先に一店を抽選してください。');
-      return;
-    }
-
+  const saveRestaurantToAlbum = useCallback(async (restaurant: Restaurant) => {
     const localFavorite = toSavedRestaurantFromSelection({
-      restaurant: selectedRestaurant,
+      restaurant,
       userId,
       area,
       genre,
@@ -3983,7 +3992,7 @@ export default function App() {
     });
 
     if (savedRestaurants.some((item) => isSameSavedRestaurant(item, localFavorite))) {
-      setMessage('このお店はすでに保存しています。');
+      setMessage('このお店はすでにお気に入りに入っています。');
       setActiveTab('save');
       scrollToContentTop();
       return;
@@ -3992,13 +4001,13 @@ export default function App() {
     setSavedRestaurants((current) => {
       return [localFavorite, ...current];
     });
-    savedDetailCacheRef.current.set(localFavorite.id, selectedRestaurant);
-    setSavedDetail({ favorite: localFavorite, restaurant: selectedRestaurant });
+    savedDetailCacheRef.current.set(localFavorite.id, restaurant);
+    setSavedDetail({ favorite: localFavorite, restaurant });
     setSavedDetailError(null);
     setSavedDetailLoadingId(null);
     setActiveTab('save');
     scrollToContentTop();
-    setMessage('保存しました。保存タブに追加しました。');
+    setMessage('お気に入りに追加しました。アルバムのお気に入り一覧に入っています。');
 
     try {
       const favorite = await randishApi.addFavorite(apiBaseUrlCandidates, {
@@ -4019,7 +4028,7 @@ export default function App() {
         snapshot: localFavorite.snapshot,
       };
       savedDetailCacheRef.current.delete(localFavorite.id);
-      savedDetailCacheRef.current.set(syncedFavorite.id, localFavorite.snapshot ?? selectedRestaurant);
+      savedDetailCacheRef.current.set(syncedFavorite.id, localFavorite.snapshot ?? restaurant);
       setSavedRestaurants((current) => {
         const existing = current.find((item) => isSameSavedRestaurant(item, syncedFavorite));
         const mergedFavorite = {
@@ -4040,15 +4049,30 @@ export default function App() {
               photoUri: current.favorite.photoUri ?? localFavorite.photoUri ?? null,
               photoTakenAt: current.favorite.photoTakenAt ?? localFavorite.photoTakenAt ?? null,
             },
-            restaurant: localFavorite.snapshot ?? selectedRestaurant,
+            restaurant: localFavorite.snapshot ?? restaurant,
           }
           : current
       ));
-      setMessage('保存しました。保存タブに追加しました。');
+      setMessage('お気に入りに追加しました。アルバムのお気に入り一覧に入っています。');
     } catch {
-      setMessage('端末内に保存しました。API接続後はサーバー保存もできます。');
+      setMessage('端末内のお気に入りに追加しました。API接続後はサーバーにも反映できます。');
     }
-  }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, genre, savedRestaurants, scrollToContentTop, selectedRestaurant, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, genre, savedRestaurants, scrollToContentTop, syncWorkingApiBaseUrl, userId]);
+
+  const saveSelectedRestaurant = useCallback(async () => {
+    if (!selectedRestaurant) {
+      setMessage('先に一店を抽選してください。');
+      return;
+    }
+
+    await saveRestaurantToAlbum(selectedRestaurant);
+  }, [saveRestaurantToAlbum, selectedRestaurant]);
+
+  const isRestaurantSaved = useCallback((restaurant: Restaurant) => {
+    const provider = (restaurant.externalProvider || 'RANDISH_SEED').toUpperCase();
+    const providerPlaceId = getProviderPlaceId(restaurant);
+    return savedRestaurants.some((item) => item.provider === provider && item.providerPlaceId === providerPlaceId);
+  }, [savedRestaurants]);
 
   const openMap = useCallback(() => {
     if (!selectedRestaurant) return;
@@ -4413,6 +4437,8 @@ export default function App() {
             onSearch={loadRestaurants}
             onRandomPress={prepareConditionDraw}
             onAllRandomPress={prepareEverythingDraw}
+            onRestaurantSave={saveRestaurantToAlbum}
+            isRestaurantSaved={isRestaurantSaved}
           />
         )}
         {activeTab === 'random' && (
@@ -4445,6 +4471,7 @@ export default function App() {
             onRandomPress={startPreparedDraw}
             onSavePress={saveSelectedRestaurant}
             onGoPress={openMap}
+            isSelectedRestaurantSaved={selectedRestaurant ? isRestaurantSaved(selectedRestaurant) : false}
           />
         )}
         {activeTab === 'save' && (
@@ -4523,19 +4550,9 @@ function LoginScreen({
   onApiConnected: () => void;
   onStart: (userId?: string, displayName?: string) => void;
 }) {
-  const [email, setEmail] = useState('');
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [authNotice, setAuthNotice] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
   const handledOAuthUrlRef = useRef<string | null>(null);
-  const isLoginMode = authMode === 'login';
-
-  const switchAuthMode = (mode: 'register' | 'login') => {
-    setAuthMode(mode);
-    setAuthNotice('');
-    Keyboard.dismiss();
-  };
 
   const completeOAuthSession = useCallback(async (url: string | null) => {
     if (!url || !isOAuthCallbackUrl(url) || handledOAuthUrlRef.current === url) {
@@ -4586,84 +4603,18 @@ function LoginScreen({
     return () => subscription.remove();
   }, [completeOAuthSession]);
 
-  const handleRegister = async () => {
-    if (isSubmitting) {
-      return;
-    }
-    if (!acceptedTerms) {
-      setAuthNotice('利用規約とプライバシーポリシーへの同意が必要です。');
-      return;
-    }
-    const cleanEmail = email.trim();
-    if (!cleanEmail) {
-      setAuthNotice('メールアドレスを入力してください。');
-      return;
-    }
-    const cleanDisplayName = getDefaultDisplayName(cleanEmail);
-
-    setIsSubmitting(true);
-    setAuthNotice('');
-    try {
-      await randishApi.requestEmailRegistration(apiBaseUrlCandidates, {
-        email: cleanEmail,
-        displayName: cleanDisplayName,
-      });
-      onApiConnected();
-      switchAuthMode('login');
-      setAuthNotice(`${cleanEmail} にURLを送りました。メールのURLを開くと登録してそのままログインできます。`);
-    } catch (error) {
-      if (error instanceof RandishApiError && error.status === 409) {
-        switchAuthMode('login');
-      }
-      const reason = toAuthErrorMessage(error, '登録に失敗しました。');
-      setAuthNotice(`登録できませんでした。${reason}`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleLogin = async () => {
-    if (isSubmitting) {
-      return;
-    }
-    const cleanEmail = email.trim();
-    if (!cleanEmail) {
-      setAuthNotice('メールアドレスを入力してください。');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setAuthNotice('');
-    try {
-      await randishApi.requestEmailRegistration(apiBaseUrlCandidates, {
-        email: cleanEmail,
-        displayName: getDefaultDisplayName(cleanEmail),
-      });
-      onApiConnected();
-      setAuthNotice(`${cleanEmail} にログインURLを送りました。メールのURLを開くとRANDISHに入れます。`);
-    } catch (error) {
-      const reason = toAuthErrorMessage(error, 'ログインに失敗しました。');
-      setAuthNotice(`ログインURLを送れませんでした。${reason}`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const handleSocialPress = async (provider: OAuthProvider) => {
     if (isSubmitting) {
       return;
     }
-    if (!isLoginMode && !acceptedTerms) {
-      setAuthNotice('利用規約とプライバシーポリシーへの同意が必要です。');
-      return;
-    }
 
     setIsSubmitting(true);
     setAuthNotice('');
     try {
-      const authUrl = await randishApi.getOAuthAuthorizeUrl(apiBaseUrlCandidates, provider, OAUTH_REDIRECT_URI);
+      const oauthRedirectUri = getOAuthRedirectUri();
+      const authUrl = await randishApi.getOAuthAuthorizeUrl(apiBaseUrlCandidates, provider, oauthRedirectUri);
       onApiConnected();
-      const result = await WebBrowser.openAuthSessionAsync(authUrl.authorizationUrl, OAUTH_REDIRECT_URI, {
+      const result = await WebBrowser.openAuthSessionAsync(authUrl.authorizationUrl, oauthRedirectUri, {
         dismissButtonStyle: 'cancel',
         preferEphemeralSession: false,
       });
@@ -4704,92 +4655,46 @@ function LoginScreen({
           <Image source={RANDISH_LOGO} style={styles.registerHeaderLogo} resizeMode="contain" />
         </View>
 
-        <Text style={styles.registerTitle}>{isLoginMode ? uiText.loginTitle : uiText.registerTitle}</Text>
-        <Text style={styles.registerDesc}>{isLoginMode ? uiText.loginDesc : uiText.registerDesc}</Text>
+        <Text style={styles.registerTitle}>{uiText.registerTitle}</Text>
+        <Text style={styles.registerDesc}>{uiText.registerDesc}</Text>
 
-        <View style={styles.registerCard}>
-          <RegisterLabel text={uiText.emailLabel} requiredText={uiText.required} />
-          <TextInput
-            style={styles.registerInput}
-            placeholder="例）randish@example.com"
-            placeholderTextColor="#aaa"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            textContentType="emailAddress"
-            value={email}
-            onChangeText={setEmail}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={Keyboard.dismiss}
-          />
+        {!!authNotice && <Text style={styles.registerNotice}>{authNotice}</Text>}
 
-          {!isLoginMode && (
-            <>
-              <Pressable style={styles.registerCheckRow} onPress={() => setAcceptedTerms((value) => !value)}>
-                <View style={[styles.registerCheckbox, acceptedTerms && styles.registerCheckboxActive]}>
-                  {acceptedTerms && <Ionicons name="checkmark" size={16} color="#ffffff" />}
-                </View>
-                <Text style={styles.registerTerms}>
-                  <Text style={styles.registerLink}>利用規約</Text> と <Text style={styles.registerLink}>プライバシーポリシー</Text> に同意します
-                </Text>
-              </Pressable>
-            </>
-          )}
-
-          {!!authNotice && <Text style={styles.registerNotice}>{authNotice}</Text>}
-
-          <Pressable
-            style={[styles.registerMainButton, isSubmitting && styles.registerButtonDisabled]}
-            onPress={isLoginMode ? handleLogin : handleRegister}
+        <View style={styles.registerSocialPanel}>
+          <Text style={styles.registerSocialLead}>{uiText.authSocialLead}</Text>
+          <RegisterSocialButton
+            text={uiText.googleRegister}
+            icon="google"
+            accent="#1f1f1f"
+            onPress={() => handleSocialPress('google')}
             disabled={isSubmitting}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.registerMainButtonText}>{isLoginMode ? uiText.loginLinkButton : uiText.registerButton}</Text>
-            )}
-          </Pressable>
-
-          <Pressable style={styles.registerGuestButton} onPress={() => onStart()}>
-            <Ionicons name="person-outline" size={18} color="#ef552e" />
-            <Text style={styles.registerGuestButtonText}>{uiText.guestStart}</Text>
-          </Pressable>
-          <Text style={styles.registerGuestNote}>{uiText.guestNote}</Text>
+          />
+          <RegisterAppleButton
+            text={uiText.appleRegister}
+            onPress={() => setAuthNotice('Appleログインは公式ボタンの表示確認用です。App Store公開前に接続します。今はGoogleかゲストを使ってください。')}
+            disabled={isSubmitting}
+          />
         </View>
 
-        <Text style={styles.registerOr}>{uiText.or}</Text>
-
-        <RegisterSocialButton
-          text={isLoginMode ? uiText.googleLogin : uiText.googleRegister}
-          icon="google"
-          accent="#1f1f1f"
-          onPress={() => handleSocialPress('google')}
-          disabled={isSubmitting}
-        />
-        <RegisterAppleButton
-          text={isLoginMode ? uiText.appleLogin : uiText.appleRegister}
-          onPress={() => setAuthNotice('AppleログインはApp Store公開前に接続します。いまはGoogleかゲストを使ってください。')}
-        />
-
-        <Pressable style={styles.registerLoginBox} onPress={() => switchAuthMode(isLoginMode ? 'register' : 'login')}>
-          <Text style={styles.registerLoginText}>{isLoginMode ? uiText.createAccountQuestion : uiText.loginQuestion}</Text>
-          <Text style={styles.registerLoginLink}>{isLoginMode ? uiText.createAccount : uiText.login}</Text>
+        <Pressable style={styles.registerGuestButton} onPress={() => onStart()}>
+          <Ionicons name="person-outline" size={18} color="#ef552e" />
+          <Text style={styles.registerGuestButtonText}>{uiText.guestStart}</Text>
         </Pressable>
+        <Text style={styles.registerGuestNote}>{uiText.guestNote}</Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function RegisterLabel({ text, requiredText = '必須' }: { text: string; requiredText?: string }) {
-  return (
-    <View style={styles.registerLabelRow}>
-      <Text style={styles.registerLabel}>{text}</Text>
-      <Text style={styles.registerRequired}>{requiredText}</Text>
-    </View>
-  );
-}
-
-function RegisterAppleButton({ text, onPress }: { text: string; onPress: () => void }) {
+function RegisterAppleButton({
+  text,
+  onPress,
+  disabled = false,
+}: {
+  text: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
   const [canUseNativeButton, setCanUseNativeButton] = useState(Platform.OS === 'ios');
 
   useEffect(() => {
@@ -4821,7 +4726,7 @@ function RegisterAppleButton({ text, onPress }: { text: string; onPress: () => v
 
   if (canUseNativeButton) {
     return (
-      <View style={styles.registerAppleButtonShell}>
+      <View pointerEvents={disabled ? 'none' : 'auto'} style={[styles.registerAppleButtonShell, disabled && styles.registerSocialButtonDisabled]}>
         <AppleAuthentication.AppleAuthenticationButton
           buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
           buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
@@ -4833,7 +4738,7 @@ function RegisterAppleButton({ text, onPress }: { text: string; onPress: () => v
     );
   }
 
-  return <RegisterSocialButton text={text} icon="apple" accent="#15120f" onPress={onPress} />;
+  return <RegisterSocialButton text={text} icon="apple" accent="#15120f" onPress={onPress} disabled={disabled} />;
 }
 
 function RegisterSocialButton({
@@ -4852,42 +4757,32 @@ function RegisterSocialButton({
   badgeText?: string;
 }) {
   const isGoogle = icon === 'google';
+  if (isGoogle) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={text}
+        style={[styles.registerGoogleImageButton, disabled && styles.registerSocialButtonDisabled]}
+        onPress={onPress}
+        disabled={disabled}
+      >
+        <Image source={GOOGLE_CONTINUE_BUTTON} style={styles.registerGoogleButtonImage} resizeMode="contain" />
+      </Pressable>
+    );
+  }
+
   return (
     <Pressable
       style={[styles.registerSocialButton, disabled && styles.registerSocialButtonDisabled]}
       onPress={onPress}
       disabled={disabled}
     >
-      <View style={[styles.registerSocialIcon, isGoogle && styles.registerSocialIconGoogle, { borderColor: accent }]}>
-        {isGoogle ? <GoogleBrandIcon /> : <FontAwesome name={icon} size={18} color={accent} />}
+      <View style={[styles.registerSocialIcon, { borderColor: accent }]}>
+        <FontAwesome name={icon} size={18} color={accent} />
       </View>
       <Text style={styles.registerSocialText}>{text}</Text>
       {!!badgeText && <Text style={styles.registerSocialBadge}>{badgeText}</Text>}
     </Pressable>
-  );
-}
-
-function GoogleBrandIcon() {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 48 48">
-      <Path
-        fill="#EA4335"
-        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-      />
-      <Path
-        fill="#4285F4"
-        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-      />
-      <Path
-        fill="#FBBC05"
-        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-      />
-      <Path
-        fill="#34A853"
-        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-      />
-      <Path fill="none" d="M0 0h48v48H0z" />
-    </Svg>
   );
 }
 
@@ -6312,6 +6207,8 @@ function SearchTab({
   onSearch,
   onRandomPress,
   onAllRandomPress,
+  onRestaurantSave,
+  isRestaurantSaved,
 }: {
   uiText: Record<string, string>;
   apiBaseUrl: string;
@@ -6335,6 +6232,8 @@ function SearchTab({
   onSearch: () => void;
   onRandomPress: () => void;
   onAllRandomPress: () => void;
+  onRestaurantSave: (restaurant: Restaurant) => void;
+  isRestaurantSaved: (restaurant: Restaurant) => boolean;
 }) {
   const isEverythingRandom = drawMode === 'everything';
   const summaryBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax, uiText);
@@ -6393,7 +6292,13 @@ function SearchTab({
       </View>
       <SectionHeader title={uiText.candidateList} action={`${restaurants.length}件`} />
       {restaurants.map((restaurant) => (
-        <RestaurantCard key={restaurant.id} restaurant={restaurant} uiText={uiText} />
+        <RestaurantCard
+          key={restaurant.id}
+          restaurant={restaurant}
+          uiText={uiText}
+          isSaved={isRestaurantSaved(restaurant)}
+          onSavePress={() => onRestaurantSave(restaurant)}
+        />
       ))}
       {restaurants.length > 0 && <HotPepperCredit />}
     </View>
@@ -6425,6 +6330,7 @@ function RandomTab({
   onRandomPress,
   onSavePress,
   onGoPress,
+  isSelectedRestaurantSaved,
 }: {
   uiText: Record<string, string>;
   area: string;
@@ -6450,6 +6356,7 @@ function RandomTab({
   onRandomPress: () => void;
   onSavePress: () => void;
   onGoPress: () => void;
+  isSelectedRestaurantSaved: boolean;
 }) {
   const isEverythingRandom = drawMode === 'everything';
   const isTravelDraw = drawMode === 'travel';
@@ -6741,6 +6648,8 @@ function RandomTab({
             preferredArea={displayAreaBase}
             uiText={uiText}
             onMapPress={onGoPress}
+            onFavoritePress={onSavePress}
+            isFavorite={isSelectedRestaurantSaved}
           />
           <View style={styles.resultActions}>
             <Pressable style={styles.secondaryAction} onPress={onRandomPress}>
@@ -6750,9 +6659,6 @@ function RandomTab({
               <Text style={styles.primaryActionText}>{uiText.goThisShop}</Text>
             </Pressable>
           </View>
-          <Pressable style={styles.saveAction} onPress={onSavePress}>
-            <Text style={styles.saveActionText}>{uiText.saveRestaurant}</Text>
-          </Pressable>
         </Animated.View>
       ) : (
         <View style={styles.emptyPanel}>
@@ -6823,7 +6729,7 @@ function SaveTab({
         id: `saved-photo-${favorite.id}`,
         photoUri: favorite.photoUri ?? '',
         createdAt: favorite.photoTakenAt ?? favorite.createdAt,
-        title: snapshot?.name ?? '保存したお店',
+        title: snapshot?.name ?? 'お気に入りのお店',
         subtitle: favorite.savedGenre ?? snapshot?.genre ?? 'ジャンルおまかせ',
         source: 'saved',
         onRetake: () => onAttachPhoto(favorite.id),
@@ -6919,6 +6825,28 @@ function SaveTab({
           </Text>
         </View>
       )}
+      {savedRestaurants.length === 0 ? (
+        <View style={styles.emptyPanel}>
+          <Text style={styles.emptyTitle}>{uiText.savedEmptyTitle}</Text>
+          <Text style={styles.emptyText}>{uiText.savedEmptyText}</Text>
+        </View>
+      ) : (
+        <View style={styles.savedListBlock}>
+          <SectionHeader title={uiText.favoriteListTitle} action={`${savedRestaurants.length}件`} />
+          <View style={styles.savedList}>
+            {savedRestaurants.map((favorite) => (
+              <SavedPlaceCard
+                key={`${favorite.id}-saved`}
+                favorite={favorite}
+                loading={savedDetailLoadingId === favorite.id}
+                selected={savedDetail?.favorite.id === favorite.id}
+                onPress={() => onSavedPress(favorite)}
+                onPhotoPress={() => onAttachPhoto(favorite.id)}
+              />
+            ))}
+          </View>
+        </View>
+      )}
       {diaryCount > 0 && (
         <View style={styles.albumDiarySection}>
           <SectionHeader title="フードログ" action={`${diaryCount}枚`} />
@@ -6988,28 +6916,6 @@ function SaveTab({
               <Text style={styles.albumEmptyMonthText}>撮った写真はここに4列のアルバムで並びます。</Text>
             </View>
           )}
-        </View>
-      )}
-      {savedRestaurants.length === 0 ? (
-        <View style={styles.emptyPanel}>
-          <Text style={styles.emptyTitle}>{uiText.savedEmptyTitle}</Text>
-          <Text style={styles.emptyText}>{uiText.savedEmptyText}</Text>
-        </View>
-      ) : (
-        <View style={styles.savedListBlock}>
-          <SectionHeader title="保存したお店" action={`${savedRestaurants.length}件`} />
-          <View style={styles.savedList}>
-            {savedRestaurants.map((favorite) => (
-              <SavedPlaceCard
-                key={`${favorite.id}-saved`}
-                favorite={favorite}
-                loading={savedDetailLoadingId === favorite.id}
-                selected={savedDetail?.favorite.id === favorite.id}
-                onPress={() => onSavedPress(favorite)}
-                onPhotoPress={() => onAttachPhoto(favorite.id)}
-              />
-            ))}
-          </View>
         </View>
       )}
       {savedDetailError && (
@@ -7144,12 +7050,12 @@ function SavedPlaceCard({
       )}
       <View style={styles.savedPlaceBody}>
         <View style={styles.savedPlaceTopRow}>
-          <Text style={styles.savedPlaceKicker}>{favorite.photoUri ? 'ごはん写真あり' : 'アルバム保存'}</Text>
+          <Text style={styles.savedPlaceKicker}>{favorite.photoUri ? 'ごはん写真あり' : 'お気に入り'}</Text>
           <Text style={styles.savedPlaceProvider}>{providerLabel}</Text>
         </View>
-        <Text style={styles.savedPlaceTitle} numberOfLines={1}>{snapshot?.name ?? '保存したお店'}</Text>
+        <Text style={styles.savedPlaceTitle} numberOfLines={1}>{snapshot?.name ?? 'お気に入りのお店'}</Text>
         <Text style={styles.savedPlaceMeta} numberOfLines={2}>{buildSavedMetaLine(favorite)}</Text>
-        <Text style={styles.savedPlaceDate}>{savedDate ? `${savedDate}に保存` : '保存済み'}</Text>
+        <Text style={styles.savedPlaceDate}>{savedDate ? `${savedDate}に追加` : 'お気に入り済み'}</Text>
       </View>
       <View style={styles.savedPlaceAction}>
         {loading ? (
@@ -7296,7 +7202,7 @@ function ProPaywall({
   onStartPro: () => void;
   onClose: () => void;
 }) {
-  const features = ['先月との差がわかる', '過去月の分析を保存', 'ジャンル別の傾向を確認', '価格帯ごとの傾向を確認', '保存した店を分析'];
+  const features = ['先月との差がわかる', '過去月の分析を保存', 'ジャンル別の傾向を確認', '価格帯ごとの傾向を確認', 'お気に入り店を分析'];
 
   return (
     <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
@@ -7445,7 +7351,7 @@ function AnalysisDigestCard({
   const sampleLabel = analytics.budgetSampleCount ? `${analytics.budgetSampleCount}件から推定` : '推定データなし';
   const metrics = [
     { label: '抽選', value: `${analytics.drawCount}回` },
-    { label: '保存', value: `${savedCount}件` },
+    { label: 'お気に入り', value: `${savedCount}件` },
     { label: '多いジャンル', value: analytics.topGenre },
     { label: '平均単価', value: averageBudgetLabel },
   ];
@@ -7551,7 +7457,7 @@ function AnalyticsTab({
   const openGenrePaywall = useCallback(() => {
     openPaywall(
       'ジャンル別の傾向はPro機能です。',
-      '過去の抽選から、よく出るジャンル・価格帯・保存傾向を確認できます。',
+      '過去の抽選から、よく出るジャンル・価格帯・お気に入り傾向を確認できます。',
     );
   }, [openPaywall]);
 
@@ -7631,7 +7537,7 @@ function AnalyticsTab({
       <AnalysisSectionHeader
         kicker="RANDISH PRO"
         title="あとから見返す分析"
-        lead={isPro ? '過去月の流れまで表示中です。' : '過去月・比較・保存店の傾向はProで開けます。'}
+        lead={isPro ? '過去月の流れまで表示中です。' : '過去月・比較・お気に入り店の傾向はProで開けます。'}
       />
 
       <View style={styles.proFeatureGrid}>
@@ -7674,12 +7580,12 @@ function AnalyticsTab({
         />
         <ProFeatureCard
           icon="bookmark-outline"
-          title="保存した店の分析"
-          description="保存した店のジャンルや価格帯を見返せます。"
-          value={`${savedAnalytics.totalSaved}件保存`}
+          title="お気に入り店の分析"
+          description="お気に入り店のジャンルや価格帯を見返せます。"
+          value={`${savedAnalytics.totalSaved}件お気に入り`}
           detailLines={[`ジャンル: ${topSavedGenre}`, `価格帯: ${topSavedPrice}`]}
           isPro={isPro}
-          onPress={() => openPaywall('保存した店の分析はPro機能です。', '保存した店のジャンルや価格帯を見返せます。')}
+          onPress={() => openPaywall('お気に入り店の分析はPro機能です。', 'お気に入り店のジャンルや価格帯を見返せます。')}
         />
       </View>
 
@@ -7756,7 +7662,7 @@ function AnalyticsTab({
             <Text style={styles.analysisInsightText}>
               {isPro
                 ? '今月の抽選から、よく出るジャンルや偏りを確認できます。'
-                : 'ジャンルごとの出現頻度や、保存率などのデータをグラフで確認できます。'}
+                : 'ジャンルごとの出現頻度や、お気に入り率などのデータをグラフで確認できます。'}
             </Text>
             <Pressable style={styles.analysisInsightButton} onPress={isPro ? undefined : openGenrePaywall}>
               <Text style={styles.analysisInsightButtonText}>{isPro ? 'Proで表示中' : 'Pro機能をみる'}</Text>
@@ -7794,12 +7700,16 @@ function ResultCard({
   preferredArea,
   uiText = UI_TEXT.ja,
   onMapPress,
+  onFavoritePress,
+  isFavorite = false,
 }: {
   restaurant: Restaurant;
   userLocation: UserLocation | null;
   preferredArea?: string | null;
   uiText?: Record<string, string>;
   onMapPress: () => void;
+  onFavoritePress?: () => void;
+  isFavorite?: boolean;
 }) {
   const stationAccessItems = getNearestStationAccessItems(restaurant);
   const preferredStation = getPreferredStationAccessItem(restaurant, preferredArea);
@@ -7817,7 +7727,20 @@ function ResultCard({
     <View style={styles.resultCard}>
       <RestaurantVisual restaurant={restaurant} large />
       <View style={styles.resultContent}>
-        <Text style={styles.resultName}>{restaurant.name}</Text>
+        <View style={styles.resultTitleRow}>
+          <Text style={styles.resultName}>{restaurant.name}</Text>
+          {!!onFavoritePress && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isFavorite ? uiText.savedRestaurant : uiText.saveRestaurant}
+              style={[styles.resultFavoriteButton, isFavorite && styles.resultFavoriteButtonActive]}
+              onPress={onFavoritePress}
+              disabled={isFavorite}
+            >
+              <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={22} color={isFavorite ? '#ffffff' : ORANGE} />
+            </Pressable>
+          )}
+        </View>
         <View style={styles.resultDistanceBand}>
           <View style={styles.resultDistanceList}>
             <View style={styles.resultDistanceItem}>
@@ -7912,7 +7835,17 @@ function MiniGoogleMap({
   );
 }
 
-function RestaurantCard({ restaurant, uiText = UI_TEXT.ja }: { restaurant: Restaurant; uiText?: Record<string, string> }) {
+function RestaurantCard({
+  restaurant,
+  uiText = UI_TEXT.ja,
+  isSaved = false,
+  onSavePress,
+}: {
+  restaurant: Restaurant;
+  uiText?: Record<string, string>;
+  isSaved?: boolean;
+  onSavePress?: () => void;
+}) {
   return (
     <View style={styles.restaurantCard}>
       <View style={styles.restaurantThumbWrap}>
@@ -7929,6 +7862,17 @@ function RestaurantCard({ restaurant, uiText = UI_TEXT.ja }: { restaurant: Resta
           <Text style={styles.restaurantMetaPill}>{formatPrice(restaurant, uiText)}</Text>
         </View>
       </View>
+      {!!onSavePress && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isSaved ? uiText.savedRestaurant : uiText.saveRestaurant}
+          style={[styles.restaurantFavoriteButton, isSaved && styles.restaurantFavoriteButtonActive]}
+          onPress={onSavePress}
+          disabled={isSaved}
+        >
+          <Ionicons name={isSaved ? 'heart' : 'heart-outline'} size={17} color={isSaved ? '#ffffff' : ORANGE} />
+        </Pressable>
+      )}
     </View>
   );
 }
