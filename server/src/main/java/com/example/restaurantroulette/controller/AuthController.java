@@ -3,6 +3,7 @@ package com.example.restaurantroulette.controller;
 import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
 import com.example.restaurantroulette.dto.ApiDtos.EmailVerificationResponse;
 import com.example.restaurantroulette.dto.ApiDtos.OAuthAuthorizeResponse;
+import com.example.restaurantroulette.dto.ApiDtos.OAuthRefreshRequest;
 import com.example.restaurantroulette.dto.ApiDtos.OAuthSessionRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
@@ -66,6 +67,11 @@ public class AuthController {
   @PostMapping("/oauth/session")
   public AuthResponse oauthSession(@RequestBody OAuthSessionRequest request) {
     return authService.loginWithOAuthSession(request);
+  }
+
+  @PostMapping("/oauth/refresh")
+  public AuthResponse oauthRefresh(@RequestBody OAuthRefreshRequest request) {
+    return authService.refreshOAuthSession(request);
   }
 
   private String successPage(String accessToken) {

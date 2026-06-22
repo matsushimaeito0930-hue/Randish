@@ -2,6 +2,7 @@ package com.example.restaurantroulette.service;
 
 import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
 import com.example.restaurantroulette.dto.ApiDtos.OAuthAuthorizeResponse;
+import com.example.restaurantroulette.dto.ApiDtos.OAuthRefreshRequest;
 import com.example.restaurantroulette.dto.ApiDtos.OAuthSessionRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
@@ -43,7 +44,7 @@ public class AuthService {
 
     SupabaseAuthService.SupabaseAuthResult authResult = supabaseAuthService.signUp(email, request.password(), displayName);
     UserResponse user = userService.syncSupabaseUser(authResult.user(), displayName);
-    return new AuthResponse(user, authResult.accessToken());
+    return new AuthResponse(user, authResult.accessToken(), authResult.refreshToken());
   }
 
   public AuthResponse login(UserLoginRequest request) {
@@ -60,7 +61,7 @@ public class AuthService {
       try {
         SupabaseAuthService.SupabaseAuthResult authResult = supabaseAuthService.signInWithPassword(email, request.password());
         UserResponse user = userService.syncSupabaseUser(authResult.user(), null);
-        return new AuthResponse(user, authResult.accessToken());
+        return new AuthResponse(user, authResult.accessToken(), authResult.refreshToken());
       } catch (UnauthorizedException ignored) {
         throw localException;
       }
@@ -80,6 +81,15 @@ public class AuthService {
     SupabaseAuthService.SupabaseAuthUser authUser = supabaseAuthService.getUser("Bearer " + accessToken);
     UserResponse user = userService.syncSupabaseUser(authUser, null);
     return new AuthResponse(user, accessToken);
+  }
+
+  public AuthResponse refreshOAuthSession(OAuthRefreshRequest request) {
+    if (request == null || request.refreshToken() == null || request.refreshToken().isBlank()) {
+      throw new BadRequestException("refreshToken is required.");
+    }
+    SupabaseAuthService.SupabaseAuthResult authResult = supabaseAuthService.refreshSession(request.refreshToken().trim());
+    UserResponse user = userService.syncSupabaseUser(authResult.user(), null);
+    return new AuthResponse(user, authResult.accessToken(), authResult.refreshToken());
   }
 
   public AuthResponse me(String authorizationHeader) {

@@ -59,6 +59,7 @@ export type UserLoginParams = {
 export type AuthResponse = {
   user: User;
   accessToken: string | null;
+  refreshToken?: string | null;
 };
 
 export type EmailVerificationResponse = {
@@ -76,6 +77,10 @@ export type OAuthAuthorizeResponse = {
 
 export type OAuthSessionParams = {
   accessToken: string;
+};
+
+export type OAuthRefreshParams = {
+  refreshToken: string;
 };
 
 export type RandomHistory = {
@@ -325,6 +330,12 @@ export const randishApi = {
 
   loginWithOAuthSession: (baseUrl: ApiBaseUrlInput, params: OAuthSessionParams) =>
     request<AuthResponse>(baseUrl, 'api/auth/oauth/session', undefined, {
+      method: 'POST',
+      body: params,
+    }),
+
+  refreshOAuthSession: (baseUrl: ApiBaseUrlInput, params: OAuthRefreshParams) =>
+    request<AuthResponse>(baseUrl, 'api/auth/oauth/refresh', undefined, {
       method: 'POST',
       body: params,
     }),

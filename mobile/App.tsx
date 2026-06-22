@@ -20,13 +20,14 @@ import {
   View,
 } from 'react-native';
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
-import type { Favorite as ApiFavorite, OAuthProvider, RandomHistory as ApiRandomHistory } from './services/randishApi';
+import type { AuthResponse, Favorite as ApiFavorite, OAuthProvider, RandomHistory as ApiRandomHistory } from './services/randishApi';
 import { JAPAN_MUNICIPALITY_PRESETS } from './data/japanMunicipalities';
 import { FontAwesome, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
-import { INK, ORANGE } from './constants/theme';
+import * as SecureStore from 'expo-secure-store';
+import { FAVORITE_PINK, INK, ORANGE } from './constants/theme';
 import { styles } from './styles/appStyles';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -247,11 +248,94 @@ const HOTPEPPER_CREDIT_URL = 'https://webservice.recruit.co.jp/';
 const HOTPEPPER_CREDIT_IMAGE_URL = 'https://webservice.recruit.co.jp/banner/hotpepper-m.gif';
 const NATIVE_OAUTH_REDIRECT_URI = 'randish://auth/callback';
 const OAUTH_CALLBACK_PATH = 'auth/callback';
+const AUTH_SESSION_STORAGE_KEY = 'randish.authSession.v1';
 
 const OAUTH_PROVIDER_NAMES: Record<OAuthProvider, string> = {
   google: 'Google',
   apple: 'Apple',
 };
+
+type StoredAuthSession = {
+  accessToken: string;
+  refreshToken?: string | null;
+  userId?: string;
+  displayName?: string;
+  savedAt?: string;
+};
+
+const getWebLocalStorage = () => {
+  const runtimeGlobal = globalThis as typeof globalThis & {
+    localStorage?: {
+      getItem: (key: string) => string | null;
+      setItem: (key: string, value: string) => void;
+      removeItem: (key: string) => void;
+    };
+  };
+  return runtimeGlobal.localStorage ?? null;
+};
+
+const parseStoredAuthSession = (value: string | null): StoredAuthSession | null => {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as Partial<StoredAuthSession>;
+    return typeof parsed.accessToken === 'string' && parsed.accessToken.trim()
+      ? { ...parsed, accessToken: parsed.accessToken.trim() }
+      : null;
+  } catch {
+    return value.trim() ? { accessToken: value.trim() } : null;
+  }
+};
+
+const readStoredAuthSession = async () => {
+  try {
+    const stored = Platform.OS === 'web'
+      ? getWebLocalStorage()?.getItem(AUTH_SESSION_STORAGE_KEY) ?? null
+      : await SecureStore.getItemAsync(AUTH_SESSION_STORAGE_KEY);
+    return parseStoredAuthSession(stored);
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredAuthSession = async (session: StoredAuthSession) => {
+  const cleanToken = session.accessToken.trim();
+  if (!cleanToken) {
+    return;
+  }
+  const payload = JSON.stringify({
+    ...session,
+    accessToken: cleanToken,
+    savedAt: new Date().toISOString(),
+  });
+  try {
+    if (Platform.OS === 'web') {
+      getWebLocalStorage()?.setItem(AUTH_SESSION_STORAGE_KEY, payload);
+      return;
+    }
+    await SecureStore.setItemAsync(AUTH_SESSION_STORAGE_KEY, payload);
+  } catch {
+    // If secure storage is unavailable, the user can still use the current session.
+  }
+};
+
+const clearStoredAuthSession = async () => {
+  try {
+    if (Platform.OS === 'web') {
+      getWebLocalStorage()?.removeItem(AUTH_SESSION_STORAGE_KEY);
+      return;
+    }
+    await SecureStore.deleteItemAsync(AUTH_SESSION_STORAGE_KEY);
+  } catch {
+    // Storage cleanup should not block entering the guest flow.
+  }
+};
+
+const isAuthTokenExpiredError = (error: unknown) =>
+  error instanceof RandishApiError
+  && error.kind === 'http'
+  && (error.status === 401 || error.status === 403);
 
 const isOAuthCallbackUrl = (url: string) =>
   url.startsWith(NATIVE_OAUTH_REDIRECT_URI) || url.includes('/auth/callback');
@@ -3344,6 +3428,7 @@ export default function App() {
   const randomResultOffsetRef = useRef(0);
   const savedDetailCacheRef = useRef(new Map<string, Restaurant>());
   const didAskLocation = useRef(false);
+  const didRestoreAuth = useRef(false);
   const areaRef = useRef(area);
   const userLocationRef = useRef<UserLocation | null>(userLocation);
 
@@ -3357,6 +3442,37 @@ export default function App() {
     const targetY = Math.max(randomTabOffsetRef.current + randomResultOffsetRef.current - 18, 0);
     scrollViewRef.current?.scrollTo({ y: targetY, animated: true });
   }, []);
+
+  const enterMain = useCallback((nextUserId = APP_USER_ID, nextProfileName?: string) => {
+    setUserId(nextUserId);
+    if (nextUserId === APP_USER_ID) {
+      setProfileName('RANDISH Guest');
+      setProfileImageUri(null);
+    } else if (nextProfileName?.trim()) {
+      setProfileName(nextProfileName.trim());
+    }
+    setStage('main');
+  }, []);
+
+  const enterAuthenticatedSession = useCallback(async (auth: AuthResponse, accessToken: string, refreshToken?: string | null) => {
+    const cleanToken = accessToken.trim();
+    if (cleanToken) {
+      randishApi.setAuthToken(cleanToken);
+      await writeStoredAuthSession({
+        accessToken: cleanToken,
+        refreshToken: refreshToken?.trim() || auth.refreshToken?.trim() || null,
+        userId: auth.user.id,
+        displayName: auth.user.displayName,
+      });
+    }
+    enterMain(auth.user.id, auth.user.displayName);
+  }, [enterMain]);
+
+  const enterGuestSession = useCallback(async () => {
+    randishApi.setAuthToken(null);
+    await clearStoredAuthSession();
+    enterMain();
+  }, [enterMain]);
 
   useEffect(() => {
     areaRef.current = area;
@@ -3435,6 +3551,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (didRestoreAuth.current) {
+      return;
+    }
+    didRestoreAuth.current = true;
+    let cancelled = false;
+
     Animated.parallel([
       Animated.timing(logoOpacity, {
         toValue: 1,
@@ -3449,9 +3571,61 @@ export default function App() {
       }),
     ]).start();
 
-    const timer = setTimeout(() => setStage('login'), 900);
-    return () => clearTimeout(timer);
-  }, [logoOpacity, logoScale]);
+    const restoreAuthSession = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      if (cancelled) {
+        return;
+      }
+
+      const storedSession = await readStoredAuthSession();
+      if (!storedSession?.accessToken) {
+        setStage('login');
+        return;
+      }
+
+      randishApi.setAuthToken(storedSession.accessToken);
+      try {
+        const auth = await randishApi.getCurrentUser(apiBaseUrlCandidates);
+        if (cancelled) {
+          return;
+        }
+        syncWorkingApiBaseUrl();
+        await enterAuthenticatedSession(auth, storedSession.accessToken, storedSession.refreshToken);
+      } catch (error) {
+        if (isAuthTokenExpiredError(error) && storedSession.refreshToken) {
+          try {
+            const refreshedAuth = await randishApi.refreshOAuthSession(apiBaseUrlCandidates, {
+              refreshToken: storedSession.refreshToken,
+            });
+            const refreshedAccessToken = refreshedAuth.accessToken;
+            if (!refreshedAccessToken) {
+              throw new Error('Supabase refresh did not return access token.');
+            }
+            if (cancelled) {
+              return;
+            }
+            syncWorkingApiBaseUrl();
+            await enterAuthenticatedSession(refreshedAuth, refreshedAccessToken, refreshedAuth.refreshToken ?? storedSession.refreshToken);
+            return;
+          } catch {
+            // Fall through to clearing the stale session.
+          }
+        }
+        randishApi.setAuthToken(null);
+        if (!isApiConnectivityError(error)) {
+          await clearStoredAuthSession();
+        }
+        if (!cancelled) {
+          setStage('login');
+        }
+      }
+    };
+
+    restoreAuthSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrlCandidates, enterAuthenticatedSession, logoOpacity, logoScale, syncWorkingApiBaseUrl]);
 
   const apiParams = useMemo(
     () => {
@@ -3993,8 +4167,6 @@ export default function App() {
 
     if (savedRestaurants.some((item) => isSameSavedRestaurant(item, localFavorite))) {
       setMessage('このお店はすでにお気に入りに入っています。');
-      setActiveTab('save');
-      scrollToContentTop();
       return;
     }
 
@@ -4005,9 +4177,7 @@ export default function App() {
     setSavedDetail({ favorite: localFavorite, restaurant });
     setSavedDetailError(null);
     setSavedDetailLoadingId(null);
-    setActiveTab('save');
-    scrollToContentTop();
-    setMessage('お気に入りに追加しました。アルバムのお気に入り一覧に入っています。');
+    setMessage('お気に入りに追加しました。');
 
     try {
       const favorite = await randishApi.addFavorite(apiBaseUrlCandidates, {
@@ -4053,11 +4223,11 @@ export default function App() {
           }
           : current
       ));
-      setMessage('お気に入りに追加しました。アルバムのお気に入り一覧に入っています。');
+      setMessage('お気に入りに追加しました。');
     } catch {
       setMessage('端末内のお気に入りに追加しました。API接続後はサーバーにも反映できます。');
     }
-  }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, genre, savedRestaurants, scrollToContentTop, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, genre, savedRestaurants, syncWorkingApiBaseUrl, userId]);
 
   const saveSelectedRestaurant = useCallback(async () => {
     if (!selectedRestaurant) {
@@ -4320,17 +4490,6 @@ export default function App() {
     scrollToContentTop(false);
   }, [openRandomTab, scrollToContentTop]);
 
-  const enterMain = useCallback((nextUserId = APP_USER_ID, nextProfileName?: string) => {
-    setUserId(nextUserId);
-    if (nextUserId === APP_USER_ID) {
-      setProfileName('RANDISH Guest');
-      setProfileImageUri(null);
-    } else if (nextProfileName?.trim()) {
-      setProfileName(nextProfileName.trim());
-    }
-    setStage('main');
-  }, []);
-
   if (stage === 'splash') {
     return (
       <SafeAreaView style={styles.splashScreen}>
@@ -4352,7 +4511,8 @@ export default function App() {
         uiText={UI_TEXT[appLanguage]}
         locationStatus={locationStatus}
         onApiConnected={syncWorkingApiBaseUrl}
-        onStart={enterMain}
+        onAuthenticated={enterAuthenticatedSession}
+        onStart={enterGuestSession}
       />
     );
   }
@@ -4479,6 +4639,7 @@ export default function App() {
             savedRestaurants={savedRestaurants}
             albumPhotos={albumPhotos}
             history={randomHistory}
+            drawHistories={drawHistories}
             uiText={UI_TEXT[appLanguage]}
             savedDetail={savedDetail}
             savedDetailLoadingId={savedDetailLoadingId}
@@ -4542,12 +4703,14 @@ function LoginScreen({
   uiText,
   locationStatus,
   onApiConnected,
+  onAuthenticated,
   onStart,
 }: {
   apiBaseUrlCandidates: string[];
   uiText: Record<string, string>;
   locationStatus: string;
   onApiConnected: () => void;
+  onAuthenticated: (auth: AuthResponse, accessToken: string, refreshToken?: string | null) => Promise<void>;
   onStart: (userId?: string, displayName?: string) => void;
 }) {
   const [authNotice, setAuthNotice] = useState('');
@@ -4569,6 +4732,7 @@ function LoginScreen({
       setAuthNotice('外部ログインから認証トークンを受け取れませんでした。SupabaseのRedirect URL設定を確認してください。');
       return;
     }
+    const refreshToken = params.refresh_token || params.refreshToken || null;
 
     setIsSubmitting(true);
     setAuthNotice('');
@@ -4577,21 +4741,22 @@ function LoginScreen({
         randishApi.setAuthToken(accessToken);
         const auth = await randishApi.getCurrentUser(apiBaseUrlCandidates);
         onApiConnected();
-        onStart(auth.user.id, auth.user.displayName);
+        await onAuthenticated(auth, accessToken, refreshToken);
         return;
       }
 
       const auth = await randishApi.loginWithOAuthSession(apiBaseUrlCandidates, { accessToken });
-      randishApi.setAuthToken(auth.accessToken);
+      const sessionToken = auth.accessToken ?? accessToken;
+      randishApi.setAuthToken(sessionToken);
       onApiConnected();
-      onStart(auth.user.id, auth.user.displayName);
+      await onAuthenticated(auth, sessionToken, auth.refreshToken ?? refreshToken);
     } catch (error) {
       const reason = toAuthErrorMessage(error, '外部ログインに失敗しました。');
       setAuthNotice(`外部ログインを完了できませんでした。${reason}`);
     } finally {
       setIsSubmitting(false);
     }
-  }, [apiBaseUrlCandidates, onApiConnected, onStart]);
+  }, [apiBaseUrlCandidates, onApiConnected, onAuthenticated]);
 
   useEffect(() => {
     const subscription = Linking.addEventListener('url', ({ url }) => {
@@ -6676,6 +6841,7 @@ function SaveTab({
   savedRestaurants,
   albumPhotos,
   history,
+  drawHistories,
   uiText,
   savedDetail,
   savedDetailLoadingId,
@@ -6692,6 +6858,7 @@ function SaveTab({
   savedRestaurants: SavedRestaurant[];
   albumPhotos: AlbumPhotoEntry[];
   history: Restaurant[];
+  drawHistories: DrawHistoryEntry[];
   uiText: Record<string, string>;
   savedDetail: { favorite: SavedRestaurant; restaurant: Restaurant } | null;
   savedDetailLoadingId: string | null;
@@ -6707,8 +6874,12 @@ function SaveTab({
 }) {
   const [previewPhoto, setPreviewPhoto] = useState<AlbumPhotoPreview | null>(null);
   const [selectedAlbumMonth, setSelectedAlbumMonth] = useState('all');
+  const albumHistory = useMemo(
+    () => drawHistories.length ? drawHistories.map((entry) => entry.restaurant) : history,
+    [drawHistories, history],
+  );
   const showHotPepperCredit =
-    history.some((restaurant) => restaurant.externalProvider === 'HOTPEPPER') ||
+    albumHistory.some((restaurant) => restaurant.externalProvider === 'HOTPEPPER') ||
     savedRestaurants.some((favorite) => favorite.provider === 'HOTPEPPER' || favorite.snapshot?.externalProvider === 'HOTPEPPER');
   const savedPhotoEntries = useMemo(
     () => savedRestaurants.filter((favorite) => Boolean(favorite.photoUri)),
@@ -6956,7 +7127,7 @@ function SaveTab({
           />
         </View>
       )}
-      <HistorySection history={history} uiText={uiText} />
+      <HistorySection history={albumHistory} uiText={uiText} showAll />
       {showHotPepperCredit && <HotPepperCredit />}
       <Modal
         visible={Boolean(previewPhoto)}
@@ -7737,7 +7908,7 @@ function ResultCard({
               onPress={onFavoritePress}
               disabled={isFavorite}
             >
-              <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={22} color={isFavorite ? '#ffffff' : ORANGE} />
+              <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={22} color={isFavorite ? '#ffffff' : FAVORITE_PINK} />
             </Pressable>
           )}
         </View>
@@ -7870,7 +8041,7 @@ function RestaurantCard({
           onPress={onSavePress}
           disabled={isSaved}
         >
-          <Ionicons name={isSaved ? 'heart' : 'heart-outline'} size={17} color={isSaved ? '#ffffff' : ORANGE} />
+          <Ionicons name={isSaved ? 'heart' : 'heart-outline'} size={17} color={isSaved ? '#ffffff' : FAVORITE_PINK} />
         </Pressable>
       )}
     </View>
@@ -7952,14 +8123,25 @@ function RestaurantVisual({
   );
 }
 
-function HistorySection({ history, uiText }: { history: Restaurant[]; uiText: Record<string, string> }) {
+function HistorySection({
+  history,
+  uiText,
+  showAll = false,
+}: {
+  history: Restaurant[];
+  uiText: Record<string, string>;
+  showAll?: boolean;
+}) {
+  const displayedHistory = showAll ? history : history.slice(0, 5);
   return (
     <View>
       <SectionHeader title={uiText.recentHistory} action={history.length ? `${history.length}件` : uiText.noHistory} />
       {history.length === 0 ? (
         <Text style={styles.mutedText}>{uiText.historyEmpty}</Text>
       ) : (
-        history.slice(0, 5).map((restaurant) => <RestaurantCard key={`${restaurant.id}-history`} restaurant={restaurant} uiText={uiText} />)
+        displayedHistory.map((restaurant, index) => (
+          <RestaurantCard key={`${restaurant.id}-history-${index}`} restaurant={restaurant} uiText={uiText} />
+        ))
       )}
     </View>
   );

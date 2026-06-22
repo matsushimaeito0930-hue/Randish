@@ -1,6 +1,6 @@
 ﻿import { StyleSheet } from 'react-native';
 
-import { CARD, INK, LINE, ORANGE, PAPER } from '../constants/theme';
+import { CARD, FAVORITE_PINK, INK, LINE, ORANGE, PAPER } from '../constants/theme';
 
 export const styles = StyleSheet.create({
   screen: {
@@ -5404,8 +5404,8 @@ export const styles = StyleSheet.create({
     borderColor: '#ffd6c4',
   },
   resultFavoriteButtonActive: {
-    backgroundColor: ORANGE,
-    borderColor: ORANGE,
+    backgroundColor: FAVORITE_PINK,
+    borderColor: FAVORITE_PINK,
   },
   resultDistanceBand: {
     minHeight: 112,
@@ -8110,8 +8110,8 @@ export const styles = StyleSheet.create({
     borderColor: '#ffd6c4',
   },
   restaurantFavoriteButtonActive: {
-    backgroundColor: ORANGE,
-    borderColor: ORANGE,
+    backgroundColor: FAVORITE_PINK,
+    borderColor: FAVORITE_PINK,
   },
   restaurantNote: {
     marginTop: 12,
