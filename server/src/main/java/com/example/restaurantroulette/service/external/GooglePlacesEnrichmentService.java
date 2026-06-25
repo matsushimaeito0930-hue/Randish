@@ -1,5 +1,7 @@
 package com.example.restaurantroulette.service.external;
 
+import com.example.restaurantroulette.dto.ApiDtos.CandidatePlaceResponse;
+import com.example.restaurantroulette.dto.ApiDtos.NearbyPlacesRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.entity.Restaurant;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -38,11 +40,22 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "places.location",
       "places.rating",
       "places.types",
+      "places.priceLevel",
       "places.photos.name",
       "places.googleMapsUri",
       "places.currentOpeningHours.openNow",
       "places.currentOpeningHours.nextOpenTime",
       "places.currentOpeningHours.nextCloseTime");
+  private static final String NEARBY_FIELD_MASK = String.join(",",
+      "places.id",
+      "places.displayName",
+      "places.formattedAddress",
+      "places.location",
+      "places.rating",
+      "places.types",
+      "places.priceLevel",
+      "places.googleMapsUri",
+      "places.currentOpeningHours.openNow");
   private static final String DETAIL_FIELD_MASK = String.join(",",
       "id",
       "displayName",
@@ -50,6 +63,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "location",
       "rating",
       "types",
+      "priceLevel",
       "photos.name",
       "googleMapsUri",
       "currentOpeningHours.openNow",
@@ -295,6 +309,50 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
         .toList();
   }
 
+  public List<CandidatePlaceResponse> searchNearbyCandidates(NearbyPlacesRequest request, int maxCandidates) {
+    if (!isAvailable() || maxCandidates <= 0) {
+      return List.of();
+    }
+
+    int radiusMeters = request.radius() == null ? 1500 : request.radius();
+    int maxResultCount = Math.max(1, Math.min(maxCandidates, GOOGLE_RESULT_COUNT_PER_KEYWORD));
+    if (!reserveGoogleRequests(1, "nearby roulette search")) {
+      return List.of();
+    }
+
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("textQuery", buildNearbyTextQuery(request.category()));
+    body.put("languageCode", "ja");
+    body.put("regionCode", "JP");
+    body.put("maxResultCount", maxResultCount);
+    body.put("locationBias", Map.of(
+        "circle", Map.of(
+            "center", Map.of("latitude", request.latitude(), "longitude", request.longitude()),
+            "radius", radiusMeters)));
+
+    GooglePlacesTextSearchResponse response = restClient.post()
+        .uri("/places:searchText")
+        .header("X-Goog-Api-Key", apiKey)
+        .header("X-Goog-FieldMask", NEARBY_FIELD_MASK)
+        .body(body)
+        .retrieve()
+        .body(GooglePlacesTextSearchResponse.class);
+
+    if (response == null || response.places() == null) {
+      return List.of();
+    }
+
+    return response.places().stream()
+        .map(place -> toCandidatePlace(place, request))
+        .filter(Optional::isPresent)
+        .map(Optional::get)
+        .filter(candidate -> candidate.distanceMeters() == null || candidate.distanceMeters() <= radiusMeters)
+        .filter(candidate -> matchesNearbyOpenNow(candidate, request.openNow()))
+        .filter(candidate -> matchesNearbyPrice(candidate.priceLevel(), request.priceRange()))
+        .limit(maxResultCount)
+        .toList();
+  }
+
   public RestaurantResponse enrich(RestaurantResponse restaurant) {
     if (!isAvailable()) {
       return restaurant;
@@ -468,6 +526,130 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
     }
 
     return List.copyOf(restaurants.values());
+  }
+
+  private Optional<CandidatePlaceResponse> toCandidatePlace(GooglePlace place, NearbyPlacesRequest request) {
+    if (place == null || place.id() == null || place.id().isBlank() || place.location() == null) {
+      return Optional.empty();
+    }
+    String name = place.displayName() == null ? null : place.displayName().text();
+    if (name == null || name.isBlank() || place.location().latitude() == null || place.location().longitude() == null) {
+      return Optional.empty();
+    }
+    Integer distanceMeters = distanceMeters(
+        request.latitude(),
+        request.longitude(),
+        place.location().latitude(),
+        place.location().longitude());
+    return Optional.of(new CandidatePlaceResponse(
+        place.id(),
+        name,
+        place.location().latitude(),
+        place.location().longitude(),
+        candidateCategories(request.category(), place.types()),
+        place.rating(),
+        toCandidatePriceLevel(place.priceLevel()),
+        place.currentOpeningHours() == null ? null : place.currentOpeningHours().openNow(),
+        place.formattedAddress(),
+        distanceMeters,
+        place.googleMapsUri()));
+  }
+
+  private String buildNearbyTextQuery(String category) {
+    String normalizedCategory = normalizeGenre(category);
+    if (normalizedCategory.isBlank() || ALL_GENRES.equals(normalizedCategory)) {
+      return "飲食店 レストラン";
+    }
+    return normalizedCategory + " 飲食店";
+  }
+
+  private List<String> candidateCategories(String requestedCategory, List<String> placeTypes) {
+    List<String> categories = new ArrayList<>();
+    String normalizedCategory = normalizeGenre(requestedCategory);
+    if (!normalizedCategory.isBlank() && !ALL_GENRES.equals(normalizedCategory)) {
+      categories.add(normalizedCategory);
+    }
+    if (placeTypes != null) {
+      placeTypes.stream()
+          .filter(type -> type != null && !type.isBlank())
+          .limit(4)
+          .forEach(categories::add);
+    }
+    return categories.stream().distinct().toList();
+  }
+
+  private boolean matchesNearbyOpenNow(CandidatePlaceResponse candidate, Boolean openNow) {
+    return !Boolean.TRUE.equals(openNow) || Boolean.TRUE.equals(candidate.openNow());
+  }
+
+  private boolean matchesNearbyPrice(Integer priceLevel, String priceRange) {
+    List<Integer> allowedLevels = allowedPriceLevels(priceRange);
+    return allowedLevels.isEmpty() || priceLevel == null || allowedLevels.contains(priceLevel);
+  }
+
+  private List<Integer> allowedPriceLevels(String priceRange) {
+    if (priceRange == null || priceRange.isBlank()) {
+      return List.of();
+    }
+    String normalized = priceRange.trim().toLowerCase(Locale.ROOT);
+    if (normalized.matches("\\d+")) {
+      int yen = Integer.parseInt(normalized);
+      if (yen <= 1000) {
+        return List.of(0, 1);
+      }
+      if (yen <= 3000) {
+        return List.of(0, 1, 2);
+      }
+      if (yen <= 6000) {
+        return List.of(0, 1, 2, 3);
+      }
+      return List.of();
+    }
+    if (normalized.contains("cheap") || normalized.contains("inexpensive") || normalized.contains("安")) {
+      return List.of(0, 1);
+    }
+    if (normalized.contains("moderate") || normalized.contains("mid") || normalized.contains("普通")) {
+      return List.of(1, 2);
+    }
+    if (normalized.contains("expensive") || normalized.contains("high") || normalized.contains("高")) {
+      return List.of(3, 4);
+    }
+    return normalized.chars()
+        .filter(Character::isDigit)
+        .map(Character::getNumericValue)
+        .filter(value -> value >= 0 && value <= 4)
+        .boxed()
+        .distinct()
+        .toList();
+  }
+
+  private Integer toCandidatePriceLevel(String priceLevel) {
+    if (priceLevel == null || priceLevel.isBlank()) {
+      return null;
+    }
+    return switch (priceLevel.trim().toUpperCase(Locale.ROOT)) {
+      case "PRICE_LEVEL_FREE" -> 0;
+      case "PRICE_LEVEL_INEXPENSIVE" -> 1;
+      case "PRICE_LEVEL_MODERATE" -> 2;
+      case "PRICE_LEVEL_EXPENSIVE" -> 3;
+      case "PRICE_LEVEL_VERY_EXPENSIVE" -> 4;
+      default -> null;
+    };
+  }
+
+  private Integer distanceMeters(Double fromLatitude, Double fromLongitude, Double toLatitude, Double toLongitude) {
+    if (fromLatitude == null || fromLongitude == null || toLatitude == null || toLongitude == null) {
+      return null;
+    }
+    double earthRadiusMeters = 6_371_000;
+    double latitudeDelta = Math.toRadians(toLatitude - fromLatitude);
+    double longitudeDelta = Math.toRadians(toLongitude - fromLongitude);
+    double fromLatitudeRad = Math.toRadians(fromLatitude);
+    double toLatitudeRad = Math.toRadians(toLatitude);
+    double haversine = Math.sin(latitudeDelta / 2) * Math.sin(latitudeDelta / 2)
+        + Math.cos(fromLatitudeRad) * Math.cos(toLatitudeRad)
+        * Math.sin(longitudeDelta / 2) * Math.sin(longitudeDelta / 2);
+    return (int) Math.round(earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine)));
   }
 
   private Optional<Restaurant> toRestaurant(
@@ -746,6 +928,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       GoogleLocation location,
       Double rating,
       List<String> types,
+      String priceLevel,
       List<GooglePhoto> photos,
       String googleMapsUri,
       GoogleOpeningHours currentOpeningHours) {

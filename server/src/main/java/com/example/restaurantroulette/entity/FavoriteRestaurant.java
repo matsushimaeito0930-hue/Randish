@@ -12,6 +12,7 @@ public record FavoriteRestaurant(
     String savedGenre,
     Integer savedBudgetMin,
     Integer savedBudgetMax,
+    Integer savedRangeMeters,
     String userMemo,
     String userTags,
     Instant createdAt) {

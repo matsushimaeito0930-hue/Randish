@@ -45,11 +45,15 @@ public class DtoMapper {
     return new RandomHistoryResponse(
         history.id(),
         history.userId(),
-        toRestaurantResponse(restaurant),
+        history.provider(),
+        history.providerPlaceId(),
+        history.restaurantId(),
+        restaurant == null ? null : toRestaurantResponse(restaurant),
         history.area(),
         history.genre(),
         history.budgetMin(),
         history.budgetMax(),
+        history.rangeMeters(),
         history.createdAt());
   }
 
@@ -74,6 +78,7 @@ public class DtoMapper {
         favorite.savedGenre(),
         favorite.savedBudgetMin(),
         favorite.savedBudgetMax(),
+        favorite.savedRangeMeters(),
         favorite.userMemo(),
         favorite.userTags(),
         restaurant == null ? null : toRestaurantResponse(restaurant),

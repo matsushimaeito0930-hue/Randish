@@ -42,6 +42,7 @@ public class RandomRestaurantService {
         request.latitude(),
         request.longitude(),
         request.range());
+    Integer distanceMeters = validationService.optionalPositiveInteger("distanceMeters", request.distanceMeters());
     List<Restaurant> candidates = restaurantQueryService.searchRandomEntities(
         request.area(),
         request.genre(),
@@ -58,10 +59,10 @@ public class RandomRestaurantService {
     Set<String> recentRestaurantIds = validationService.isGuestUserId(userId)
         ? Set.of()
         : randomHistoryService.findRecentEntities(userId, RECENT_HISTORY_LIMIT).stream()
-            .map(history -> history.restaurantId())
+            .map(history -> historyKey(history.provider(), history.providerPlaceId()))
             .collect(Collectors.toSet());
     List<Restaurant> preferredCandidates = candidates.stream()
-        .filter(restaurant -> !recentRestaurantIds.contains(restaurant.id()))
+        .filter(restaurant -> !recentRestaurantIds.contains(historyKey(restaurant.externalProvider(), restaurant.externalId())))
         .toList();
     List<Restaurant> lotteryPool = preferredCandidates.isEmpty() ? candidates : preferredCandidates;
     Restaurant selected = lotteryPool.get(ThreadLocalRandom.current().nextInt(lotteryPool.size()));
@@ -70,12 +71,21 @@ public class RandomRestaurantService {
     if (!validationService.isGuestUserId(userId)) {
       randomHistoryService.create(new RandomHistoryCreateRequest(
           userId,
-          selected.id(),
+          restaurantQueryService.shouldPersistRestaurant(selected) ? selected.id() : null,
+          selected.externalProvider(),
+          selected.externalId(),
           request.area(),
           request.genre(),
           request.budgetMin(),
-          request.budgetMax()));
+          request.budgetMax(),
+          distanceMeters));
     }
     return mapper.toRestaurantResponse(selected);
+  }
+
+  private String historyKey(String provider, String providerPlaceId) {
+    return "%s:%s".formatted(
+        provider == null ? "" : provider.trim().toUpperCase(),
+        providerPlaceId == null ? "" : providerPlaceId.trim());
   }
 }

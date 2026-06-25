@@ -30,10 +30,42 @@ export type RestaurantSearchParams = {
   latitude?: number;
   longitude?: number;
   range?: number;
+  distanceMeters?: number;
 };
 
 export type RandomRestaurantParams = RestaurantSearchParams & {
   userId: string;
+};
+
+export type CandidatePlace = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  categories: string[];
+  rating?: number | null;
+  priceLevel?: number | null;
+  openNow?: boolean | null;
+  address?: string | null;
+  distanceMeters?: number | null;
+  googleMapsUri?: string | null;
+};
+
+export type NearbyPlacesParams = {
+  latitude: number;
+  longitude: number;
+  radius: number;
+  category?: string;
+  priceRange?: string;
+  openNow?: boolean;
+};
+
+export type NearbyPlacesResponse = {
+  places: CandidatePlace[];
+  cacheHit: boolean;
+  source: 'GOOGLE_PLACES' | 'MOCK_PLACES' | string;
+  fetchedAt: string;
+  message: string;
 };
 
 export type User = {
@@ -61,6 +93,30 @@ export type AuthResponse = {
   accessToken: string | null;
 };
 
+export type PremiumStatus = {
+  isPro: boolean;
+  entitlementKey: string;
+  source: 'FREE' | 'GRANT' | 'SUBSCRIPTION' | string;
+  activeUntil: string | null;
+  provider: string | null;
+  environment: string | null;
+};
+
+export type AiReportPayload = Record<string, unknown>;
+
+export type AiReportResponse = {
+  title?: string;
+  summary?: string;
+  mood?: string;
+  highlights?: string[];
+  recommendations?: string[];
+  savingsTips?: string[];
+  nextAction?: string;
+  closingNotes?: string[];
+  generatedAt?: string;
+  source?: 'gemini' | 'fallback' | 'demo' | string;
+};
+
 export type EmailVerificationResponse = {
   email: string;
   expiresAt: string;
@@ -81,11 +137,15 @@ export type OAuthSessionParams = {
 export type RandomHistory = {
   id: string;
   userId: string;
-  restaurant: Restaurant;
+  provider: string;
+  providerPlaceId: string;
+  restaurantId: string | null;
+  restaurant: Restaurant | null;
   area: string | null;
   genre: string | null;
   budgetMin: number | null;
   budgetMax: number | null;
+  rangeMeters: number | null;
   createdAt: string;
 };
 
@@ -99,6 +159,7 @@ export type Favorite = {
   savedGenre: string | null;
   savedBudgetMin: number | null;
   savedBudgetMax: number | null;
+  savedRangeMeters: number | null;
   userMemo: string | null;
   userTags: string | null;
   restaurant: Restaurant | null;
@@ -114,6 +175,7 @@ export type FavoriteCreateParams = {
   savedGenre?: string | null;
   savedBudgetMin?: number | null;
   savedBudgetMax?: number | null;
+  savedRangeMeters?: number | null;
   userMemo?: string | null;
   userTags?: string | null;
 };
@@ -143,6 +205,7 @@ export type Statistics = {
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'DELETE';
   body?: unknown;
+  skipAuth?: boolean;
 };
 
 type ApiBaseUrlInput = string | readonly string[];
@@ -224,7 +287,7 @@ const requestUrl = async <T>(url: string, options: RequestOptions = {}, timeoutM
     if (options.body) {
       headers['Content-Type'] = 'application/json';
     }
-    if (authToken) {
+    if (authToken && !options.skipAuth) {
       headers.Authorization = `Bearer ${authToken}`;
     }
 
@@ -306,27 +369,34 @@ export const randishApi = {
     request<EmailVerificationResponse>(baseUrl, 'api/auth/register', undefined, {
       method: 'POST',
       body: params,
+      skipAuth: true,
     }),
 
   requestEmailRegistration: (baseUrl: ApiBaseUrlInput, params: UserCreateParams) =>
     request<EmailVerificationResponse>(baseUrl, 'api/auth/register/request', undefined, {
       method: 'POST',
       body: params,
+      skipAuth: true,
     }),
 
   login: (baseUrl: ApiBaseUrlInput, params: UserLoginParams) =>
     request<AuthResponse>(baseUrl, 'api/auth/login', undefined, {
       method: 'POST',
       body: params,
+      skipAuth: true,
     }),
 
+  logout: (baseUrl: ApiBaseUrlInput) =>
+    request<void>(baseUrl, 'api/auth/logout', undefined, { method: 'POST', skipAuth: true }),
+
   getOAuthAuthorizeUrl: (baseUrl: ApiBaseUrlInput, provider: OAuthProvider, redirectTo: string) =>
-    request<OAuthAuthorizeResponse>(baseUrl, `api/auth/oauth/${provider}/authorize`, { redirectTo }),
+    request<OAuthAuthorizeResponse>(baseUrl, `api/auth/oauth/${provider}/authorize`, { redirectTo }, { skipAuth: true }),
 
   loginWithOAuthSession: (baseUrl: ApiBaseUrlInput, params: OAuthSessionParams) =>
     request<AuthResponse>(baseUrl, 'api/auth/oauth/session', undefined, {
       method: 'POST',
       body: params,
+      skipAuth: true,
     }),
 
   getCurrentUser: (baseUrl: ApiBaseUrlInput) =>
@@ -335,11 +405,29 @@ export const randishApi = {
   getUser: (baseUrl: ApiBaseUrlInput, userId: string) =>
     request<User>(baseUrl, `api/users/${userId}`),
 
+  getPremiumStatus: (baseUrl: ApiBaseUrlInput, userId: string) =>
+    request<PremiumStatus>(baseUrl, 'api/premium/status', { userId }),
+
+  generateAiReport: (baseUrl: ApiBaseUrlInput, userId: string, payload: AiReportPayload) =>
+    request<AiReportResponse>(baseUrl, 'api/premium/ai-report', { userId }, {
+      method: 'POST',
+      body: payload,
+    }),
+
   chooseRandom: (baseUrl: ApiBaseUrlInput, params: RandomRestaurantParams) =>
     request<Restaurant>(baseUrl, 'api/restaurants/random', params),
 
+  getNearbyPlaces: (baseUrl: ApiBaseUrlInput, params: NearbyPlacesParams) =>
+    request<NearbyPlacesResponse>(baseUrl, 'api/places/nearby', undefined, {
+      method: 'POST',
+      body: params,
+    }),
+
   getRandomHistories: (baseUrl: ApiBaseUrlInput, userId: string) =>
     request<RandomHistory[]>(baseUrl, `api/random-histories/user/${userId}`),
+
+  getRandomHistoryRestaurant: (baseUrl: ApiBaseUrlInput, historyId: string) =>
+    request<Restaurant>(baseUrl, `api/random-histories/${historyId}/restaurant`),
 
   addFavorite: (baseUrl: ApiBaseUrlInput, favorite: FavoriteCreateParams) =>
     request<Favorite>(baseUrl, 'api/favorites', undefined, {

@@ -23,6 +23,7 @@ Useful endpoints:
 
 - `GET http://localhost:8080/api/restaurants`
 - `GET http://localhost:8080/api/restaurants/random`
+- `POST http://localhost:8080/api/places/nearby`
 - `POST http://localhost:8080/api/auth/register`
 - `POST http://localhost:8080/api/auth/login`
 - `GET http://localhost:8080/api/favorites/user/{userId}`
@@ -76,6 +77,59 @@ RANDISH_GOOGLE_PLACES_ENABLED=true
 RANDISH_GOOGLE_PLACES_SESSION_LIMIT=30
 GOOGLE_PLACES_API_KEY=YOUR_LOCAL_KEY
 ```
+
+## Google Map Roulette
+
+The current-location map roulette uses two Google capabilities:
+
+- Google Maps SDK for Android / iOS, used by `react-native-maps` to render the map in the Expo native app.
+- Google Places API, called only by the Spring Boot API through `POST /api/places/nearby`.
+
+Do not put the Places secret key in the mobile bundle. Use `.env.local` at the repo root or `server/.env.local`:
+
+```env
+GOOGLE_PLACES_API_KEY=YOUR_SERVER_SIDE_PLACES_KEY
+RANDISH_GOOGLE_PLACES_ENABLED=true
+PLACES_CACHE_TTL_SECONDS=600
+PLACES_CACHE_DISTANCE_METERS=300
+RANDISH_PLACES_MAX_RESULTS=20
+```
+
+For native map rendering, provide a Maps SDK key. It is a client-side Maps key, separate from the Places secret:
+
+```env
+GOOGLE_MAPS_API_KEY=YOUR_MAPS_SDK_KEY
+# Optional when you need Expo public env access too.
+EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=YOUR_MAPS_SDK_KEY
+```
+
+Start both apps for local development:
+
+```powershell
+cd server
+mvn spring-boot:run
+```
+
+```powershell
+cd mobile
+npm install
+npm run start
+```
+
+Location permission is requested only after login or guest start, from the Randish location explanation screen. To retest the first-run flow, clear app storage for Expo Go / the development build, or clear browser site data on Expo Web.
+
+Development mock mode is available only when explicitly enabled and not in production:
+
+```env
+RANDISH_PLACES_MOCK_ENABLED=true
+```
+
+Mock places are used only when Google Places is unavailable. Keep `RANDISH_PLACES_MOCK_ENABLED=false` and set `RANDISH_ENV=production` for production environments.
+
+Places API call suppression works in two layers:
+
+- The mobile app keeps the current candidate pool in memory for 10 minutes by default and reuses it for "もう一回". It invalidates the pool when conditions change or the center moves more than about 300m.
+- The server keeps a short in-memory nearby response cache with the same default TTL and distance threshold. Server logs include new searches, cache hits, cache reuse, and invalidation reasons with the `[RANDISH_PLACES]` prefix.
 
 For Supabase Postgres, put the Supabase connection URI in `.env.local`:
 

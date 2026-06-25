@@ -6,6 +6,7 @@
   "exclude": [
     "node_modules",
     ".expo",
+    "dist",
     "App-LAPTOP-*.tsx",
     "app-LAPTOP-*.json",
     "server",

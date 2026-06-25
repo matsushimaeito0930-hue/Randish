@@ -23,6 +23,7 @@ public class RestaurantRepository {
         SELECT id, external_provider, external_id, name, area, genre, budget_min, budget_max,
                rating, minutes, address, photo_url, note, latitude, longitude
         FROM restaurants
+        WHERE external_provider = 'RANDISH_SEED'
         ORDER BY name
         """)
         .query(this::mapRestaurant)

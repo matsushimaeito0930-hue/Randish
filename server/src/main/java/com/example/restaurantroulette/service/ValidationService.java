@@ -18,6 +18,8 @@ public class ValidationService {
   private static final int MAX_TEXT_LENGTH = 120;
   private static final int MAX_NOTE_LENGTH = 1000;
   private static final int MAX_BUDGET = 1_000_000;
+  private static final int MIN_NEARBY_RADIUS_METERS = 100;
+  private static final int MAX_NEARBY_RADIUS_METERS = 5_000;
   private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9._:@-]{1,120}");
   private static final Pattern SAFE_PROVIDER = Pattern.compile("[A-Za-z0-9_-]{1,80}");
 
@@ -101,6 +103,16 @@ public class ValidationService {
     }
   }
 
+  public Integer optionalPositiveInteger(String name, Integer value) {
+    if (value == null) {
+      return null;
+    }
+    if (value <= 0) {
+      throw new BadRequestException(name + " must be positive.");
+    }
+    return value;
+  }
+
   public void validateSearchRequest(
       String area,
       String genre,
@@ -113,6 +125,23 @@ public class ValidationService {
     optionalSearchText("genre", genre);
     validateBudget(budgetMin, budgetMax);
     validateCoordinates(latitude, longitude, range);
+  }
+
+  public void validateNearbyPlacesRequest(
+      Double latitude,
+      Double longitude,
+      Integer radius,
+      String category,
+      String priceRange) {
+    validateCoordinates(latitude, longitude, null);
+    if (latitude == null || longitude == null) {
+      throw new BadRequestException("latitude and longitude are required.");
+    }
+    if (radius != null && (radius < MIN_NEARBY_RADIUS_METERS || radius > MAX_NEARBY_RADIUS_METERS)) {
+      throw new BadRequestException("radius must be between 100 and 5000 meters.");
+    }
+    optionalSearchText("category", category);
+    optionalSearchText("priceRange", priceRange);
   }
 
   public void validateCoordinates(Double latitude, Double longitude, Integer range) {

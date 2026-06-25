@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
   Animated,
@@ -20,9 +21,18 @@ import {
   View,
 } from 'react-native';
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
-import type { Favorite as ApiFavorite, OAuthProvider, RandomHistory as ApiRandomHistory } from './services/randishApi';
+import type { CandidatePlace, Favorite as ApiFavorite, OAuthProvider, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory } from './services/randishApi';
+import {
+  getNativeBillingSetupMessage,
+  presentPremiumPaywall,
+  refreshNativePremiumStatus,
+  restorePremiumPurchases,
+  TRUST_NATIVE_REVENUECAT_STATUS,
+} from './services/premiumBilling';
 import { JAPAN_MUNICIPALITY_PRESETS } from './data/japanMunicipalities';
 import { FontAwesome, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import Svg, { Circle, G } from 'react-native-svg';
+import { getNativeMapModule } from './services/optionalMap';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -31,7 +41,9 @@ import { styles } from './styles/appStyles';
 
 WebBrowser.maybeCompleteAuthSession();
 
-type AppStage = 'splash' | 'login' | 'main';
+const consumedOAuthCallbackUrls = new Set<string>();
+
+type AppStage = 'splash' | 'login' | 'loggedOut' | 'main';
 type TabKey = 'home' | 'search' | 'random' | 'save' | 'analytics';
 type DrawAnimationKey = 'roulette' | 'lottery' | 'shuffle' | 'radar';
 type DrawMode = 'condition' | 'everything' | 'travel';
@@ -39,6 +51,7 @@ type ConditionRandomField = 'area' | 'budget' | 'distance' | 'genre';
 type MealSlotKey = 'morning' | 'lunch' | 'dinner' | 'midnight';
 type TravelRevealStep = 'hidden' | 'genre' | 'area' | 'restaurant';
 type AppLanguage = 'ja' | 'en' | 'zh' | 'ko';
+type AlbumViewKey = 'photos' | 'slideshow' | 'favorites' | 'history';
 
 type ConditionRandomState = Record<ConditionRandomField, boolean>;
 
@@ -83,7 +96,15 @@ type Restaurant = ApiRestaurant & {
 
 type DrawHistoryEntry = {
   id: string;
-  restaurant: Restaurant;
+  provider: string;
+  providerPlaceId: string;
+  restaurantId: string | null;
+  restaurant: Restaurant | null;
+  area: string | null;
+  genre: string | null;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  rangeMeters: number | null;
   createdAt: string;
 };
 
@@ -97,6 +118,7 @@ type SavedRestaurant = {
   savedGenre: string | null;
   savedBudgetMin: number | null;
   savedBudgetMax: number | null;
+  savedRangeMeters: number | null;
   userMemo: string | null;
   userTags: string | null;
   createdAt: string;
@@ -115,6 +137,7 @@ type AlbumPhotoEntry = {
 
 type AlbumPhotoPreview = {
   photoUri: string;
+  imageSource?: ImageSourcePropType;
   title: string;
   subtitle: string;
   dateLabel: string;
@@ -123,6 +146,7 @@ type AlbumPhotoPreview = {
 type AlbumDiaryItem = {
   id: string;
   photoUri: string;
+  photoSource?: ImageSourcePropType;
   createdAt: string;
   title: string;
   subtitle: string;
@@ -133,8 +157,12 @@ type AlbumDiaryItem = {
 
 type SubscriptionState = {
   isPro: boolean;
-  source: 'dev-stub';
+  source: 'free' | 'server' | 'native' | 'error';
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  activeUntil: string | null;
   startProPurchase: () => void;
+  restoreProPurchase: () => void;
+  refresh: () => Promise<void>;
 };
 
 type AnalyticsTrendItem = {
@@ -164,6 +192,60 @@ type SavedRestaurantAnalytics = {
   priceRangeAnalytics: AnalyticsTrendItem[];
 };
 
+type YearlyAnalytics = {
+  year: number;
+  yearLabel: string;
+  entries: DrawHistoryEntry[];
+  drawCount: number;
+  estimatedSpend: number;
+  budgetSampleCount: number;
+  averageBudget: number;
+  genreAnalytics: AnalyticsTrendItem[];
+  areaAnalytics: AnalyticsTrendItem[];
+  priceRangeAnalytics: AnalyticsTrendItem[];
+  monthlyAnalytics: MonthlyAnalytics[];
+  topGenre: string;
+  topArea: string;
+  topMonth: MonthlyAnalytics | null;
+  activeMonthCount: number;
+};
+
+type YearlyWrappedReport = {
+  title: string;
+  subtitle: string;
+  heroLine: string;
+  totalMealsLabel: string;
+  totalSpendLabel: string;
+  averageBudgetLabel: string;
+  topGenreLabel: string;
+  topAreaLabel: string;
+  topMonthLabel: string;
+  highlights: string[];
+  nextYearMission: string;
+};
+
+type AiMonthlyReport = {
+  title: string;
+  summary: string;
+  mood: string;
+  highlights: string[];
+  recommendations: string[];
+  savingsTips: string[];
+  nextAction: string;
+  closingNotes: string[];
+  generatedAt: string;
+  source: 'gemini' | 'demo' | 'fallback';
+};
+
+type AiReportStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+type AiReportGenrePlan = {
+  label: string;
+  count: number;
+  budget: number;
+  budgets?: number[];
+};
+
 type GenreItem = {
   label: string;
   color: string;
@@ -191,6 +273,31 @@ type StationAccessItem = {
 };
 
 type LocationRequestMode = 'sync-search' | 'background';
+type LocationIntroState = 'loading' | 'pending' | 'completed';
+type MapRouletteStatus = 'idle' | 'locating' | 'locationReady' | 'searching' | 'candidatesReady' | 'spinning' | 'result' | 'empty' | 'error';
+
+type StoredUserLocation = UserLocation & {
+  updatedAt: number;
+};
+
+type CandidateCacheEntry = {
+  key: string;
+  center: UserLocation;
+  candidates: CandidatePlace[];
+  fetchedAt: number;
+  usedIds: string[];
+  lastSelectedId: string | null;
+  source: string;
+};
+
+type CandidateQuery = {
+  key: string;
+  center: UserLocation;
+  radius: number;
+  category?: string;
+  priceRange?: string;
+  openNow?: boolean;
+};
 
 type AreaPreset = {
   label: string;
@@ -228,8 +335,13 @@ type DrawAnimationProfile = {
 
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
-const DEV_DISABLE_MEAL_TICKET_LIMIT = false;
-const DEV_LAN_API_BASE_URLS = ['http://10.230.36.50:8080', 'http://10.230.36.47:8080'];
+const LOCATION_INTRO_STORAGE_KEY = 'randish.locationIntro.completed.v1';
+const LOCATION_CACHE_STORAGE_KEY = 'randish.location.cached.v1';
+const PLACES_CACHE_TTL_SECONDS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_TTL_SECONDS ?? 600);
+const PLACES_CACHE_DISTANCE_METERS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_DISTANCE_METERS ?? 300);
+const FEATURE_MEAL_TICKETS_ENABLED = false;
+const DEV_DISABLE_MEAL_TICKET_LIMIT = true;
+const DEV_LAN_API_BASE_URLS = ['http://10.230.36.34:8080', 'http://10.230.36.50:8080', 'http://10.230.36.47:8080'];
 const LOCAL_API_BASE_URLS = Platform.select({
   android: ['http://10.0.2.2:8080', 'http://localhost:8080', 'http://127.0.0.1:8080'],
   web: ['http://localhost:8080', 'http://127.0.0.1:8080'],
@@ -505,24 +617,137 @@ const pickNextDrawAnimation = (current: DrawAnimationKey) => {
 const DISTANCE_OPTIONS = ['500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
 const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
 const FREE_MEAL_TICKET_COUNT = 3;
-const DEV_SUBSCRIPTION_IS_PRO = false;
 
-function useSubscription(userId: string): SubscriptionState {
-  const [devIsPro] = useState(DEV_SUBSCRIPTION_IS_PRO);
+function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]): SubscriptionState {
+  const [serverStatus, setServerStatus] = useState<ApiPremiumStatus | null>(null);
+  const [nativeIsPro, setNativeIsPro] = useState(false);
+  const [status, setStatus] = useState<SubscriptionState['status']>('idle');
+  const [source, setSource] = useState<SubscriptionState['source']>('free');
+
+  const refresh = useCallback(async () => {
+    if (userId === APP_USER_ID) {
+      setServerStatus(null);
+      setNativeIsPro(false);
+      setStatus('ready');
+      setSource('free');
+      return;
+    }
+
+    setStatus('loading');
+    try {
+      const nextStatus = await randishApi.getPremiumStatus(apiBaseUrlCandidates, userId);
+      setServerStatus(nextStatus);
+      setSource(nextStatus.isPro ? 'server' : 'free');
+
+      try {
+        const hasNativePremium = await refreshNativePremiumStatus(userId);
+        setNativeIsPro(hasNativePremium);
+        if (TRUST_NATIVE_REVENUECAT_STATUS && hasNativePremium && !nextStatus.isPro) {
+          setSource('native');
+        }
+      } catch {
+        setNativeIsPro(false);
+      }
+
+      setStatus('ready');
+    } catch (error) {
+      setServerStatus(null);
+      try {
+        const hasNativePremium = await refreshNativePremiumStatus(userId);
+        setNativeIsPro(hasNativePremium);
+        setStatus(TRUST_NATIVE_REVENUECAT_STATUS && hasNativePremium ? 'ready' : 'error');
+        setSource(TRUST_NATIVE_REVENUECAT_STATUS && hasNativePremium ? 'native' : 'error');
+      } catch {
+        setNativeIsPro(false);
+        setStatus('error');
+        setSource('error');
+      }
+      if (!isApiConnectivityError(error)) {
+        console.warn('[RANDISH PRO] premium status check failed', error);
+      }
+    }
+  }, [apiBaseUrlCandidates, userId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const startProPurchase = useCallback(() => {
-    // TODO: Replace this stub with RevenueCat, StoreKit, or Google Play Billing purchase flow.
-    console.log('[RANDISH PRO] purchase flow stub', { userId });
-    Alert.alert(
-      'RANDISH PRO',
-      '実決済はこれから接続します。RevenueCat / StoreKit / Google Play Billing の購入処理に差し替える予定です。',
-    );
-  }, [userId]);
+    if (userId === APP_USER_ID) {
+      Alert.alert('会員登録が必要です', 'RANDISH PROはアカウントに紐づくため、先に会員登録またはログインしてください。');
+      return;
+    }
+
+    const setupMessage = getNativeBillingSetupMessage();
+    if (setupMessage) {
+      Alert.alert('決済設定待ち', setupMessage);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const result = await presentPremiumPaywall(userId);
+        setNativeIsPro(result.isPro);
+        if (TRUST_NATIVE_REVENUECAT_STATUS && result.isPro) {
+          setSource('native');
+        }
+        await refresh();
+        Alert.alert(
+          'RANDISH PRO',
+          result.isPro && !TRUST_NATIVE_REVENUECAT_STATUS
+            ? '購入状態を確認しました。サーバー同期後にRANDISH PROが反映されます。'
+            : result.message,
+        );
+      } catch (error) {
+        console.warn('[RANDISH PRO] purchase failed', error);
+        Alert.alert('購入を開始できませんでした', 'ストア設定または通信状態を確認して、もう一度試してください。');
+      }
+    })();
+  }, [refresh, userId]);
+
+  const restoreProPurchase = useCallback(() => {
+    if (userId === APP_USER_ID) {
+      Alert.alert('会員登録が必要です', '購入履歴の復元には、先に会員登録またはログインが必要です。');
+      return;
+    }
+
+    const setupMessage = getNativeBillingSetupMessage();
+    if (setupMessage) {
+      Alert.alert('決済設定待ち', setupMessage);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const result = await restorePremiumPurchases(userId);
+        setNativeIsPro(result.isPro);
+        if (TRUST_NATIVE_REVENUECAT_STATUS && result.isPro) {
+          setSource('native');
+        }
+        await refresh();
+        Alert.alert(
+          'RANDISH PRO',
+          result.isPro && !TRUST_NATIVE_REVENUECAT_STATUS
+            ? '購入履歴を確認しました。サーバー同期後にRANDISH PROが反映されます。'
+            : result.message,
+        );
+      } catch (error) {
+        console.warn('[RANDISH PRO] restore failed', error);
+        Alert.alert('復元できませんでした', 'ストア設定または通信状態を確認して、もう一度試してください。');
+      }
+    })();
+  }, [refresh, userId]);
+
+  const isPro = Boolean(serverStatus?.isPro || (TRUST_NATIVE_REVENUECAT_STATUS && nativeIsPro));
 
   return {
-    isPro: devIsPro,
-    source: 'dev-stub',
+    isPro,
+    source: isPro ? source === 'free' || source === 'error' ? 'native' : source : source,
+    status,
+    activeUntil: serverStatus?.activeUntil ?? null,
     startProPurchase,
+    restoreProPurchase,
+    refresh,
   };
 }
 
@@ -582,6 +807,12 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     travelSub: '県・街・距離・ジャンルをおまかせ',
     searchPlaceholder: '梅田・美郷町・駅名で検索',
     close: '閉じる',
+    logout: 'ログアウト',
+    logoutValue: 'この端末のセッションを終了',
+    logoutConfirmTitle: 'ログアウトしますか？',
+    logoutConfirmMessage: 'この端末からログアウトして、登録画面に戻ります。',
+    logoutConfirmCancel: 'キャンセル',
+    logoutConfirmAction: 'ログアウト',
     lockedTitle: '会員限定です',
     profileLockedMessage: 'プロフィール変更は会員登録またはログイン後に使えます。',
     profilePhotoLockedMessage: 'プロフィール画像の変更は会員登録またはログイン後に使えます。',
@@ -669,7 +900,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     loading: '取得中',
     emptyResultTitle: 'まだ一店は決まっていません',
     emptyResultText: '大きなカードのSTARTを押すと抽選が始まります。',
-    recentHistory: '最近引いた店',
+    recentHistory: '最近の履歴',
     noHistory: '履歴なし',
     historyEmpty: '抽選すると、ここに履歴が残ります。',
     savedTitle: '食のアルバム',
@@ -745,6 +976,12 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     travelSub: 'Random area, distance, and genre',
     searchPlaceholder: 'Search Umeda, Misato, station...',
     close: 'Close',
+    logout: 'Log out',
+    logoutValue: 'End this device session',
+    logoutConfirmTitle: 'Log out?',
+    logoutConfirmMessage: 'You will leave this session and return to the sign-in screen.',
+    logoutConfirmCancel: 'Cancel',
+    logoutConfirmAction: 'Log out',
     lockedTitle: 'Members Only',
     profileLockedMessage: 'Profile editing is available after registration or login.',
     profilePhotoLockedMessage: 'Profile photo changes are available after registration or login.',
@@ -832,7 +1069,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     loading: 'Loading',
     emptyResultTitle: 'No place chosen yet',
     emptyResultText: 'Press START on the big card to begin.',
-    recentHistory: 'Recent Draws',
+    recentHistory: 'Recent History',
     noHistory: 'No history',
     historyEmpty: 'Your draw history will appear here.',
     savedTitle: 'Food Album',
@@ -908,6 +1145,12 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     travelSub: '随机选择地区、距离和类型',
     searchPlaceholder: '搜索梅田、美乡町、车站...',
     close: '关闭',
+    logout: '退出登录',
+    logoutValue: '结束此设备上的会话',
+    logoutConfirmTitle: '要退出登录吗？',
+    logoutConfirmMessage: '将退出此设备上的会话并返回登录页面。',
+    logoutConfirmCancel: '取消',
+    logoutConfirmAction: '退出登录',
     lockedTitle: '会员限定',
     profileLockedMessage: '注册或登录后可以编辑个人资料。',
     profilePhotoLockedMessage: '注册或登录后可以更改头像。',
@@ -995,7 +1238,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     loading: '获取中',
     emptyResultTitle: '还没有决定店铺',
     emptyResultText: '点击大卡片的START开始抽选。',
-    recentHistory: '最近抽到的店',
+    recentHistory: '最近记录',
     noHistory: '没有历史',
     historyEmpty: '抽选后历史会显示在这里。',
     savedTitle: '美食相册',
@@ -1071,6 +1314,12 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     travelSub: '지역, 거리, 장르를 랜덤 선택',
     searchPlaceholder: '우메다, 미사토, 역 이름 검색...',
     close: '닫기',
+    logout: '로그아웃',
+    logoutValue: '이 기기의 세션 종료',
+    logoutConfirmTitle: '로그아웃할까요?',
+    logoutConfirmMessage: '이 기기에서 로그아웃하고 로그인 화면으로 돌아갑니다.',
+    logoutConfirmCancel: '취소',
+    logoutConfirmAction: '로그아웃',
     lockedTitle: '회원 전용',
     profileLockedMessage: '프로필 변경은 회원가입 또는 로그인 후 사용할 수 있습니다.',
     profilePhotoLockedMessage: '프로필 사진 변경은 회원가입 또는 로그인 후 사용할 수 있습니다.',
@@ -1158,7 +1407,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     loading: '불러오는 중',
     emptyResultTitle: '아직 가게가 정해지지 않았습니다',
     emptyResultText: '큰 카드의 START를 누르면 추첨이 시작됩니다.',
-    recentHistory: '최근 뽑은 가게',
+    recentHistory: '최근 기록',
     noHistory: '기록 없음',
     historyEmpty: '추첨하면 여기에 기록이 남습니다.',
     savedTitle: '음식 앨범',
@@ -1966,6 +2215,47 @@ const GENRES: GenreItem[] = [
   { label: 'その他', color: '#8f7f68', image: require('./assets/category/world.png') },
 ];
 
+const AI_REPORT_MONTH_OPTIONS = [1, 2, 3, 4, 5];
+const AI_REPORT_GENRE_OPTIONS = GENRES.filter((genre) => genre.label !== 'すべて');
+const AI_REPORT_BUDGET_OPTIONS = [1000, 1500, 3000, 5000];
+const AI_REPORT_DEFAULT_MEAL_COUNT = 5;
+const AI_REPORT_DEFAULT_GENRE_PLANS: AiReportGenrePlan[] = [];
+const AI_REPORT_LIMIT_NOTICE = '展示では1人1回まで。月の外食回数、ジャンル回数、ジャンル別予算を選んでAIレポートを作成します。';
+const AI_REPORT_MONTHLY_NOTICE = 'ルーレットで出た結果を月次レポートに直接反映します。ジャンルや金額は手入力せず、今月の履歴から作成します。';
+const AI_REPORT_SAMPLE_MEAL_COUNT = 10;
+const AI_REPORT_SAMPLE_GENRE_PLANS: AiReportGenrePlan[] = [
+  { label: 'ラーメン', count: 2, budget: 1200, budgets: [980, 1380] },
+  { label: 'ファストフード', count: 2, budget: 900, budgets: [780, 920] },
+  { label: '寿司', count: 1, budget: 3200, budgets: [3200] },
+  { label: '焼肉', count: 1, budget: 5200, budgets: [5200] },
+  { label: '洋食', count: 1, budget: 1900, budgets: [1900] },
+  { label: 'カレー', count: 1, budget: 1300, budgets: [1300] },
+  { label: '定食', count: 1, budget: 1100, budgets: [1100] },
+  { label: 'カフェ', count: 1, budget: 1450, budgets: [1450] },
+];
+const YEARLY_WRAPPED_DEMO_PLANS = [
+  { genre: 'ラーメン', area: '大阪府', budget: 1180 },
+  { genre: '寿司', area: '東京都', budget: 3600 },
+  { genre: '焼肉', area: '福岡県', budget: 5200 },
+  { genre: 'カフェ', area: '京都府', budget: 1450 },
+  { genre: '定食', area: '兵庫県', budget: 1280 },
+  { genre: 'イタリアン', area: '神奈川県', budget: 3100 },
+  { genre: '中華', area: '愛知県', budget: 1850 },
+  { genre: '海鮮', area: '北海道', budget: 4300 },
+  { genre: 'カレー', area: '大阪府', budget: 1350 },
+  { genre: 'うどん', area: '香川県', budget: 920 },
+  { genre: 'そば', area: '長野県', budget: 1600 },
+  { genre: '韓国料理', area: '東京都', budget: 2700 },
+  { genre: '粉もの', area: '大阪府', budget: 1700 },
+  { genre: '焼き鳥', area: '福岡県', budget: 2800 },
+  { genre: 'ピザ', area: '神奈川県', budget: 2400 },
+  { genre: '洋食', area: '京都府', budget: 2200 },
+  { genre: '餃子', area: '栃木県', budget: 1250 },
+  { genre: 'スイーツ', area: '兵庫県', budget: 1100 },
+  { genre: '居酒屋', area: '広島県', budget: 3800 },
+  { genre: '郷土料理', area: '沖縄県', budget: 3300 },
+] as const;
+
 const hexToRgba = (hex: string, alpha: number) => {
   const normalized = hex.replace('#', '');
   if (normalized.length !== 6) {
@@ -2001,6 +2291,32 @@ const normalizeGenreLabel = (genre?: string | null) => {
 
 const getGenreVisual = (genre?: string | null) =>
   GENRES.find((item) => item.label === normalizeGenreLabel(genre)) ?? GENRES[0];
+
+const getAlbumDiaryImageSource = (item: AlbumDiaryItem): ImageSourcePropType =>
+  item.photoSource ?? { uri: item.photoUri };
+
+const createDemoAlbumSlideItems = (): AlbumDiaryItem[] => {
+  const now = new Date();
+  const demoSlides = [
+    { genre: 'ラーメン', title: '締めのラーメン', subtitle: '6月のリピート枠' },
+    { genre: '洋食', title: '洋食で気分転換', subtitle: 'いつもと違う選択' },
+    { genre: 'ハンバーガー', title: 'バーガーの日', subtitle: '軽めに済ませたい日' },
+    { genre: '寿司', title: '週末の寿司', subtitle: '少し特別な一食' },
+  ];
+  return demoSlides.map((item, index) => {
+    const visual = getGenreVisual(item.genre);
+    const createdAt = new Date(now.getFullYear(), now.getMonth(), 4 + index * 6, 19, 10).toISOString();
+    return {
+      id: `demo-album-slide-${item.genre}`,
+      photoUri: '',
+      photoSource: visual.image,
+      createdAt,
+      title: item.title,
+      subtitle: `${item.genre} / ${item.subtitle}`,
+      source: 'album',
+    };
+  });
+};
 
 const isWideGenreLabel = (label: string) => label.length >= 6 || label.includes('・');
 
@@ -2247,9 +2563,224 @@ const getEstimatedBudget = (restaurant: Restaurant) => {
 
 const formatYen = (value: number) => `${Math.round(value).toLocaleString()}円`;
 
+const getAiReportGenreVisual = (label: string) =>
+  AI_REPORT_GENRE_OPTIONS.find((genre) => genre.label === label) ?? GENRES[0];
+
+const getAiReportPlanTotal = (plans: AiReportGenrePlan[]) =>
+  plans.reduce((total, plan) => total + Math.max(0, plan.count), 0);
+
+const getAiReportPlanSpend = (plans: AiReportGenrePlan[]) =>
+  plans.reduce((total, plan) =>
+    total + getAiReportPlanBudgets(plan).reduce((subtotal, budget) => subtotal + Math.max(0, budget), 0), 0);
+
+const normalizeAiReportBudget = (value: number, fallback = 1500) => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.min(50000, Math.max(500, Math.round(value)));
+};
+
+const getAiReportBudgetDraftKey = (genre: string, visitIndex: number) =>
+  `${genre}__visit_${visitIndex}`;
+
+const getAiReportPlanBudgets = (plan: AiReportGenrePlan) => {
+  const count = Math.max(0, Math.round(plan.count));
+  const fallbackBudget = normalizeAiReportBudget(plan.budget);
+  return Array.from({ length: count }, (_, index) =>
+    normalizeAiReportBudget(plan.budgets?.[index] ?? fallbackBudget, fallbackBudget));
+};
+
+const getAiReportPlanBudgetAt = (plan: AiReportGenrePlan, visitIndex: number) =>
+  getAiReportPlanBudgets(plan)[visitIndex] ?? normalizeAiReportBudget(plan.budget);
+
+const setAiReportPlanBudgetAt = (plan: AiReportGenrePlan, visitIndex: number, budget: number): AiReportGenrePlan => {
+  const normalizedBudget = normalizeAiReportBudget(budget, getAiReportPlanBudgetAt(plan, visitIndex));
+  const budgets = getAiReportPlanBudgets(plan);
+  budgets[visitIndex] = normalizedBudget;
+  return { ...plan, budget: normalizedBudget, budgets };
+};
+
+const normalizeAiReportPlans = (plans: AiReportGenrePlan[]) =>
+  plans
+    .map((plan) => {
+      const count = Math.max(0, Math.round(plan.count));
+      const fallbackBudget = normalizeAiReportBudget(plan.budget);
+      const budgets = Array.from({ length: count }, (_, index) =>
+        normalizeAiReportBudget(plan.budgets?.[index] ?? fallbackBudget, fallbackBudget));
+      return {
+        ...plan,
+        count,
+        budget: budgets[budgets.length - 1] ?? fallbackBudget,
+        budgets,
+      };
+    })
+    .filter((plan) => plan.count > 0);
+
+const trimAiReportPlansToMealCount = (plans: AiReportGenrePlan[], mealCount: number) => {
+  const nextPlans = plans.map((plan) => ({ ...plan }));
+  let total = getAiReportPlanTotal(nextPlans);
+  for (let index = nextPlans.length - 1; index >= 0 && total > mealCount; index -= 1) {
+    const removable = Math.min(nextPlans[index].count, total - mealCount);
+    nextPlans[index].count -= removable;
+    total -= removable;
+  }
+  return normalizeAiReportPlans(nextPlans);
+};
+
+const parseDistanceMeters = (value?: string | null) => {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.endsWith('km')) {
+    const km = Number(normalized.replace('km', ''));
+    return Number.isFinite(km) && km > 0 ? Math.round(km * 1000) : null;
+  }
+  if (normalized.endsWith('m')) {
+    const meters = Number(normalized.replace('m', ''));
+    return Number.isFinite(meters) && meters > 0 ? Math.round(meters) : null;
+  }
+  return null;
+};
+
+const formatDistanceMeters = (meters?: number | null) => {
+  if (meters == null || !Number.isFinite(meters) || meters <= 0) {
+    return '距離おまかせ';
+  }
+  if (meters < 1000) {
+    return `${Math.round(meters)}m`;
+  }
+  const kilometers = meters / 1000;
+  return Number.isInteger(kilometers) ? `${kilometers}km` : `${kilometers.toFixed(1)}km`;
+};
+
+const getSafePlacesCacheTtlMs = () => {
+  const ttlSeconds = Number.isFinite(PLACES_CACHE_TTL_SECONDS) && PLACES_CACHE_TTL_SECONDS > 0
+    ? PLACES_CACHE_TTL_SECONDS
+    : 600;
+  return ttlSeconds * 1000;
+};
+
+const getSafePlacesCacheDistanceMeters = () =>
+  Number.isFinite(PLACES_CACHE_DISTANCE_METERS) && PLACES_CACHE_DISTANCE_METERS > 0
+    ? PLACES_CACHE_DISTANCE_METERS
+    : 300;
+
+const distanceBetweenLocationsMeters = (from: UserLocation, to: UserLocation) => {
+  const km = getDistanceKm(from, {
+    id: 'distance-target',
+    externalProvider: 'LOCAL',
+    externalId: 'distance-target',
+    name: 'distance target',
+    area: to.label,
+    genre: '',
+    budgetMin: 0,
+    budgetMax: 0,
+    rating: 0,
+    minutes: 0,
+    address: to.label,
+    photoUrl: null,
+    note: '',
+    latitude: to.latitude,
+    longitude: to.longitude,
+  });
+  return km == null ? Number.POSITIVE_INFINITY : Math.round(km * 1000);
+};
+
+const formatCandidatePriceRange = (priceLevel?: number | null) => {
+  switch (priceLevel) {
+    case 0:
+      return '価格情報なし';
+    case 1:
+      return 'お手頃';
+    case 2:
+      return '標準';
+    case 3:
+      return '少し高め';
+    case 4:
+      return '高め';
+    default:
+      return '価格確認中';
+  }
+};
+
+const estimateBudgetFromPriceLevel = (priceLevel?: number | null) => {
+  switch (priceLevel) {
+    case 1:
+      return { min: 0, max: 1500 };
+    case 2:
+      return { min: 1200, max: 3500 };
+    case 3:
+      return { min: 3000, max: 8000 };
+    case 4:
+      return { min: 8000, max: 20000 };
+    default:
+      return { min: 0, max: 999999 };
+  }
+};
+
+const candidatePlaceToRestaurant = (place: CandidatePlace, area: string, genre: string): Restaurant => {
+  const displayGenre = place.categories?.find((category) => category && !category.includes('_')) ?? genre ?? '飲食店';
+  const budget = estimateBudgetFromPriceLevel(place.priceLevel);
+  return {
+    id: `google-places-${place.id.replace(/[^A-Za-z0-9_-]/g, '_')}`,
+    externalProvider: 'GOOGLE_PLACES',
+    externalId: place.id,
+    name: place.name,
+    area: area === '現在地' ? '現在地周辺' : area,
+    genre: displayGenre,
+    budgetMin: budget.min,
+    budgetMax: budget.max,
+    rating: place.rating ?? 0,
+    minutes: place.distanceMeters ? Math.max(1, Math.round((place.distanceMeters / 1000) * 12.5)) : 0,
+    address: place.address ?? 'Google Mapsで住所を確認してください',
+    photoUrl: null,
+    note: 'Google Placesの近隣候補から選ばれました。',
+    priceRange: formatCandidatePriceRange(place.priceLevel),
+    latitude: place.latitude,
+    longitude: place.longitude,
+    googleRating: place.rating ?? null,
+    googleMapsUri: place.googleMapsUri ?? null,
+    openNow: place.openNow ?? null,
+    googlePlaceId: place.id,
+  };
+};
+
+const pickCandidateFromPool = (candidates: CandidatePlace[], usedIds: string[], lastSelectedId: string | null) => {
+  if (candidates.length === 0) {
+    return { selected: null, nextUsedIds: usedIds };
+  }
+
+  const used = new Set(usedIds);
+  let pool = candidates.filter((candidate) => !used.has(candidate.id));
+  if (pool.length === 0) {
+    used.clear();
+    pool = candidates;
+  }
+  if (pool.length > 1 && lastSelectedId) {
+    const different = pool.filter((candidate) => candidate.id !== lastSelectedId);
+    if (different.length) {
+      pool = different;
+    }
+  }
+  const selected = pool[Math.floor(Math.random() * pool.length)] ?? candidates[0];
+  return {
+    selected,
+    nextUsedIds: [...used, selected.id],
+  };
+};
+
 const toDrawHistoryEntry = (history: ApiRandomHistory): DrawHistoryEntry => ({
   id: history.id,
-  restaurant: normalizeRestaurant(history.restaurant),
+  provider: history.provider,
+  providerPlaceId: history.providerPlaceId,
+  restaurantId: history.restaurantId,
+  restaurant: history.restaurant ? normalizeRestaurant(history.restaurant) : null,
+  area: history.area,
+  genre: history.genre,
+  budgetMin: history.budgetMin,
+  budgetMax: history.budgetMax,
+  rangeMeters: history.rangeMeters,
   createdAt: history.createdAt,
 });
 
@@ -2290,6 +2821,7 @@ const toSavedRestaurantFromApi = (favorite: ApiFavorite): SavedRestaurant => ({
   savedGenre: favorite.savedGenre,
   savedBudgetMin: favorite.savedBudgetMin,
   savedBudgetMax: favorite.savedBudgetMax,
+  savedRangeMeters: favorite.savedRangeMeters,
   userMemo: favorite.userMemo,
   userTags: favorite.userTags,
   createdAt: favorite.createdAt,
@@ -2305,6 +2837,7 @@ const toSavedRestaurantFromSelection = ({
   genre,
   budgetMin,
   budgetMax,
+  distance,
 }: {
   restaurant: Restaurant;
   userId: string;
@@ -2312,6 +2845,7 @@ const toSavedRestaurantFromSelection = ({
   genre: string;
   budgetMin: string;
   budgetMax: string;
+  distance: string;
 }): SavedRestaurant => {
   const provider = (restaurant.externalProvider || 'RANDISH_SEED').toUpperCase();
   const createdAt = new Date().toISOString();
@@ -2325,6 +2859,7 @@ const toSavedRestaurantFromSelection = ({
     savedGenre: cleanTextOrNull(genre === 'すべて' ? null : genre),
     savedBudgetMin: parseBudgetNumber(budgetMin),
     savedBudgetMax: parseBudgetNumber(budgetMax),
+    savedRangeMeters: parseDistanceMeters(distance),
     userMemo: null,
     userTags: null,
     createdAt,
@@ -2354,6 +2889,27 @@ const buildSavedMetaLine = (favorite: SavedRestaurant) => [
   favorite.savedGenre ?? 'ジャンルおまかせ',
   favorite.savedArea ?? 'エリアおまかせ',
   formatSavedBudgetLabel(favorite),
+  formatDistanceMeters(favorite.savedRangeMeters),
+].join(' / ');
+
+const formatHistoryBudgetLabel = (entry: DrawHistoryEntry) => {
+  if (entry.budgetMin != null && entry.budgetMax != null) {
+    return `${formatYen(entry.budgetMin)}〜${formatYen(entry.budgetMax)}`;
+  }
+  if (entry.budgetMax != null) {
+    return `〜${formatYen(entry.budgetMax)}`;
+  }
+  if (entry.budgetMin != null) {
+    return `${formatYen(entry.budgetMin)}〜`;
+  }
+  return '予算おまかせ';
+};
+
+const buildHistoryMetaLine = (entry: DrawHistoryEntry) => [
+  entry.genre ?? 'ジャンルおまかせ',
+  entry.area ?? 'エリアおまかせ',
+  formatHistoryBudgetLabel(entry),
+  formatDistanceMeters(entry.rangeMeters),
 ].join(' / ');
 
 const API_CONNECTION_MESSAGE = 'お店データに接続できませんでした。サーバーを確認して、もう一度試してください。';
@@ -2434,6 +2990,12 @@ const isSameMonth = (dateText: string, monthDate: Date) => {
     && date.getMonth() === monthDate.getMonth();
 };
 
+const isSameYear = (dateText: string, yearDate: Date) => {
+  const date = new Date(dateText);
+  return !Number.isNaN(date.getTime())
+    && date.getFullYear() === yearDate.getFullYear();
+};
+
 const formatShortDate = (dateText: string) => {
   const date = new Date(dateText);
   if (Number.isNaN(date.getTime())) {
@@ -2468,6 +3030,25 @@ const formatAlbumMonthLabel = (monthKey: string) => {
   return `${year}年${Number(month)}月`;
 };
 
+const getAlbumDiaryGenreLabel = (item?: AlbumDiaryItem | null) => {
+  const subtitleGenre = item?.subtitle?.split('/')?.[0]?.trim();
+  return normalizeGenreLabel(subtitleGenre || item?.title || 'ごはん');
+};
+
+const getAlbumSlideshowMoodLine = (item: AlbumDiaryItem, index: number, total: number) => {
+  const genre = getAlbumDiaryGenreLabel(item);
+  const moodByGenre: Record<string, string> = {
+    ラーメン: '湯気まで思い出す、今月の主役級の一杯。',
+    カフェ: '少し立ち止まった日の、ゆっくりしたごほうび。',
+    焼肉: '元気を足したい日に選んだ、満足度の高い一食。',
+    寿司: 'いつもの月に、少し特別感を足してくれた一皿。',
+    洋食: '気分を変えたい日にちょうどよかった、外食のアクセント。',
+    カレー: '迷った日でも背中を押してくれる、安心の一皿。',
+    ハンバーガー: '軽く済ませたい日にも記憶に残る、楽しい選択。',
+  };
+  return moodByGenre[genre] ?? `${index + 1}/${total}枚目。${genre}の日を、もう一度見返せます。`;
+};
+
 const getFreeAlbumCutoffDate = (baseDate = new Date()) =>
   new Date(baseDate.getFullYear(), baseDate.getMonth() - 2, 1);
 
@@ -2480,6 +3061,8 @@ const isInFreeAlbumWindow = (dateText: string, baseDate = new Date()) => {
 };
 
 const getMonthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+
+const getYearStart = (date: Date) => new Date(date.getFullYear(), 0, 1);
 
 const addMonthsToStart = (date: Date, monthOffset: number) =>
   new Date(date.getFullYear(), date.getMonth() + monthOffset, 1);
@@ -2502,11 +3085,23 @@ const getPriceRangeBucketLabel = (estimatedBudget: number | null) => {
   return '4,001円以上';
 };
 
+const getHistoryGenreLabel = (entry: DrawHistoryEntry) =>
+  entry.genre?.trim() || entry.restaurant?.genre?.trim() || 'ジャンル未分類';
+
+const getHistoryEstimatedBudget = (entry: DrawHistoryEntry) => {
+  if (entry.budgetMin != null || entry.budgetMax != null) {
+    const min = entry.budgetMin ?? entry.budgetMax ?? 0;
+    const max = entry.budgetMax ?? entry.budgetMin ?? min;
+    return Math.round((min + max) / 2);
+  }
+  return entry.restaurant ? getEstimatedBudget(entry.restaurant) : null;
+};
+
 const getGenreAnalytics = (entries: DrawHistoryEntry[]): AnalyticsTrendItem[] => {
   const counts = new Map<string, AnalyticsTrendItem>();
   entries.forEach((entry) => {
-    const label = entry.restaurant.genre?.trim() || 'ジャンル未分類';
-    const estimatedBudget = getEstimatedBudget(entry.restaurant);
+    const label = getHistoryGenreLabel(entry);
+    const estimatedBudget = getHistoryEstimatedBudget(entry);
     const current = counts.get(label) ?? { label, count: 0, estimatedSpend: 0 };
     counts.set(label, {
       ...current,
@@ -2520,8 +3115,23 @@ const getGenreAnalytics = (entries: DrawHistoryEntry[]): AnalyticsTrendItem[] =>
 const getPriceRangeAnalytics = (entries: DrawHistoryEntry[]): AnalyticsTrendItem[] => {
   const counts = new Map<string, AnalyticsTrendItem>();
   entries.forEach((entry) => {
-    const estimatedBudget = getEstimatedBudget(entry.restaurant);
+    const estimatedBudget = getHistoryEstimatedBudget(entry);
     const label = getPriceRangeBucketLabel(estimatedBudget);
+    const current = counts.get(label) ?? { label, count: 0, estimatedSpend: 0 };
+    counts.set(label, {
+      ...current,
+      count: current.count + 1,
+      estimatedSpend: current.estimatedSpend + (estimatedBudget ?? 0),
+    });
+  });
+  return [...counts.values()].sort((a, b) => b.count - a.count || b.estimatedSpend - a.estimatedSpend);
+};
+
+const getAreaAnalytics = (entries: DrawHistoryEntry[]): AnalyticsTrendItem[] => {
+  const counts = new Map<string, AnalyticsTrendItem>();
+  entries.forEach((entry) => {
+    const label = entry.area?.trim() || entry.restaurant?.area?.trim() || 'エリア未設定';
+    const estimatedBudget = getHistoryEstimatedBudget(entry);
     const current = counts.get(label) ?? { label, count: 0, estimatedSpend: 0 };
     counts.set(label, {
       ...current,
@@ -2538,14 +3148,14 @@ const getMonthlyAnalytics = (entries: DrawHistoryEntry[], monthDate: Date): Mont
     .filter((entry) => isSameMonth(entry.createdAt, monthStart))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const budgetValues = monthEntries
-    .map((entry) => getEstimatedBudget(entry.restaurant))
+    .map(getHistoryEstimatedBudget)
     .filter((value): value is number => value != null);
   const estimatedSpend = budgetValues.reduce((total, value) => total + value, 0);
   const buckets = [0, 0, 0, 0, 0];
 
   monthEntries.forEach((entry) => {
     const date = new Date(entry.createdAt);
-    const budget = getEstimatedBudget(entry.restaurant);
+    const budget = getHistoryEstimatedBudget(entry);
     if (Number.isNaN(date.getTime()) || budget == null) {
       return;
     }
@@ -2579,6 +3189,323 @@ const getMonthlyAnalytics = (entries: DrawHistoryEntry[], monthDate: Date): Mont
 const getCurrentMonthAnalytics = (entries: DrawHistoryEntry[], now = new Date()) =>
   getMonthlyAnalytics(entries, now);
 
+const buildDemoYearlyWrappedEntries = (now = new Date()): DrawHistoryEntry[] => {
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0, 0, 0);
+  const yearEnd = new Date(now.getFullYear(), 11, 31, 20, 30, 0, 0);
+  const totalDays = Math.max(0, Math.round((yearEnd.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+  const entryCount = Math.max(12, Math.min(54, Math.round(totalDays / 4)));
+  const spacing = entryCount > 1 ? totalDays / (entryCount - 1) : 0;
+
+  return Array.from({ length: entryCount }, (_, index) => {
+    const plan = YEARLY_WRAPPED_DEMO_PLANS[index % YEARLY_WRAPPED_DEMO_PLANS.length];
+    const date = addDays(start, Math.round(index * spacing));
+    date.setHours([12, 18, 19, 20][index % 4], [10, 25, 40, 5][index % 4], 0, 0);
+    const monthlyLift = date.getMonth() === 11 ? 1.14 : date.getMonth() === 7 ? 1.08 : 1;
+    const swing = ((index % 5) - 2) * 120;
+    const budget = Math.max(700, Math.round((plan.budget * monthlyLift + swing) / 10) * 10);
+    const margin = budget >= 4000 ? 700 : budget >= 2500 ? 450 : budget >= 1500 ? 260 : 160;
+    const budgetMin = Math.max(500, Math.round((budget - margin) / 10) * 10);
+    const budgetMax = Math.round((budget + margin) / 10) * 10;
+
+    return {
+      id: `yearly-demo-${now.getFullYear()}-${index}`,
+      provider: 'RANDISH_DEMO',
+      providerPlaceId: `yearly-demo-${index}`,
+      restaurantId: null,
+      restaurant: null,
+      area: plan.area,
+      genre: plan.genre,
+      budgetMin,
+      budgetMax,
+      rangeMeters: null,
+      createdAt: date.toISOString(),
+    };
+  });
+};
+
+const getYearlyAnalytics = (entries: DrawHistoryEntry[], yearDate = new Date()): YearlyAnalytics => {
+  const yearStart = getYearStart(yearDate);
+  const yearEntries = entries
+    .filter((entry) => isSameYear(entry.createdAt, yearStart))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const budgetValues = yearEntries
+    .map(getHistoryEstimatedBudget)
+    .filter((value): value is number => value != null);
+  const monthlyAnalytics = Array.from({ length: 12 }, (_, monthIndex) =>
+    getMonthlyAnalytics(yearEntries, new Date(yearStart.getFullYear(), monthIndex, 1)));
+  const activeMonths = monthlyAnalytics.filter((item) => item.drawCount > 0);
+  const topMonth = activeMonths
+    .slice()
+    .sort((a, b) => b.drawCount - a.drawCount || b.estimatedSpend - a.estimatedSpend)[0] ?? null;
+  const genreAnalytics = getGenreAnalytics(yearEntries);
+  const areaAnalytics = getAreaAnalytics(yearEntries);
+
+  return {
+    year: yearStart.getFullYear(),
+    yearLabel: `${yearStart.getFullYear()}年`,
+    entries: yearEntries,
+    drawCount: yearEntries.length,
+    estimatedSpend: budgetValues.reduce((total, value) => total + value, 0),
+    budgetSampleCount: budgetValues.length,
+    averageBudget: budgetValues.length ? Math.round(budgetValues.reduce((total, value) => total + value, 0) / budgetValues.length) : 0,
+    genreAnalytics,
+    areaAnalytics,
+    priceRangeAnalytics: getPriceRangeAnalytics(yearEntries),
+    monthlyAnalytics,
+    topGenre: genreAnalytics[0]?.label ?? 'まだなし',
+    topArea: areaAnalytics[0]?.label ?? 'まだなし',
+    topMonth,
+    activeMonthCount: activeMonths.length,
+  };
+};
+
+const buildYearlyWrappedReport = (analytics: YearlyAnalytics): YearlyWrappedReport => {
+  const topGenreItem = analytics.genreAnalytics[0] ?? null;
+  const topAreaItem = analytics.areaAnalytics[0] ?? null;
+  const secondGenre = analytics.genreAnalytics[1]?.label ?? null;
+  const topGenre = analytics.topGenre === 'まだなし' ? 'これから見つかる食の軸' : analytics.topGenre;
+  const totalSpendLabel = analytics.budgetSampleCount ? `約${formatYen(analytics.estimatedSpend)}` : '未計測';
+  const averageLabel = analytics.budgetSampleCount ? `約${formatYen(analytics.averageBudget)}` : '未計測';
+  const topMonthLabel = analytics.topMonth ? `${analytics.topMonth.monthLabel} / ${analytics.topMonth.drawCount}回` : 'まだなし';
+  const topAreaLabel = topAreaItem ? `${topAreaItem.label} ${topAreaItem.count}回` : 'まだなし';
+  const genreCount = analytics.genreAnalytics.filter((item) => item.count > 0).length;
+  const areaCount = analytics.areaAnalytics.filter((item) => item.count > 0).length;
+  const topShare = analytics.drawCount && topGenreItem
+    ? Math.round((topGenreItem.count / analytics.drawCount) * 100)
+    : 0;
+  const explorationLabel = genreCount >= 8
+    ? 'かなり冒険した一年'
+    : genreCount >= 5
+      ? 'ほどよく広げた一年'
+      : genreCount >= 2
+        ? '安心枠を育てた一年'
+        : 'これから記録が育つ一年';
+
+  return {
+    title: `${analytics.yearLabel}の食べ歩きまとめ`,
+    subtitle: '12月31日に、今年の外食ログを1年分まとめて振り返ります。',
+    heroLine: analytics.drawCount
+      ? `あなたの今年の主役は「${topGenre}」。${analytics.drawCount}回の外食ログから見えた食のクセです。`
+      : '今年の外食ログはまだ少なめです。ルーレットを回すほど、年末のまとめが育ちます。',
+    totalMealsLabel: `${analytics.drawCount}回`,
+    totalSpendLabel,
+    averageBudgetLabel: averageLabel,
+    topGenreLabel: topGenreItem ? `${topGenreItem.label} ${topGenreItem.count}回${topShare ? ` / ${topShare}%` : ''}` : 'まだなし',
+    topAreaLabel,
+    topMonthLabel,
+    highlights: [
+      analytics.drawCount
+        ? `${analytics.yearLabel}は${analytics.drawCount}回の外食ログが残りました。平均単価は${averageLabel}です。`
+        : '今年の外食ログが入ると、ここに年間の食傾向が出ます。',
+      topGenreItem
+        ? `${topGenreItem.label}が${topGenreItem.count}回で年間トップ。${secondGenre ? `${secondGenre}も続いています。` : '迷った日の安心枠になっています。'}`
+        : 'トップジャンルはこれから見えてきます。',
+      topAreaItem
+        ? `範囲は${topAreaItem.label}が中心。全体では${areaCount}県に広がっています。`
+        : '県ごとの傾向はこれから見えてきます。',
+      `${genreCount}ジャンルに広がり、今年は「${explorationLabel}」でした。`,
+      analytics.topMonth
+        ? `いちばん外食が多かった月は${analytics.topMonth.monthLabel}。${analytics.topMonth.drawCount}回のログが残っています。`
+        : '月ごとの山はまだありません。',
+      analytics.budgetSampleCount
+        ? `年間推定外食費は${totalSpendLabel}。来年は高単価ジャンルを月1回だけ意識すると整えやすくなります。`
+        : '予算が入ると、年間の支出傾向と節約ポイントまで見えるようになります。',
+    ],
+    nextYearMission: topGenreItem
+      ? `来年は「${topGenre}を残しつつ、${secondGenre ?? '未開拓ジャンル'}を月1回混ぜる」をミッションにすると、Wrappedの表情が変わります。`
+      : '来年はまず3回ルーレットを回して、あなたの食の軸を育てましょう。',
+  };
+};
+
+const buildDemoAiReportAnalytics = (
+  genrePlans: AiReportGenrePlan[],
+  mealCount: number,
+  area: string,
+  now = new Date(),
+): MonthlyAnalytics => {
+  const plans = trimAiReportPlansToMealCount(genrePlans, mealCount);
+  const monthStart = getMonthStart(now);
+  const reportArea = area?.trim() || '現在地周辺';
+  const entries: DrawHistoryEntry[] = [];
+
+  plans.forEach((plan) => {
+    getAiReportPlanBudgets(plan).forEach((budget, visitIndex) => {
+      const normalizedBudget = Math.max(500, Math.round(budget));
+      const spread = normalizedBudget >= 2000 ? 400 : 250;
+      const budgetMin = Math.max(300, normalizedBudget - spread);
+      const budgetMax = normalizedBudget + spread;
+      const index = entries.length;
+      const createdAt = new Date(monthStart);
+      createdAt.setDate(Math.min(28, 2 + index * 5));
+      createdAt.setHours(12 + (index % 6), 0, 0, 0);
+      entries.push({
+        id: `demo-ai-report-${plan.label}-${visitIndex}`,
+        provider: 'RANDISH_DEMO',
+        providerPlaceId: `demo-ai-report-${plan.label}-${visitIndex}`,
+        restaurantId: null,
+        restaurant: null,
+        area: reportArea,
+        genre: plan.label,
+        budgetMin,
+        budgetMax,
+        rangeMeters: 1500,
+        createdAt: createdAt.toISOString(),
+      });
+    });
+  });
+
+  return getMonthlyAnalytics(entries, now);
+};
+
+const buildAiReportPayload = (
+  currentAnalytics: MonthlyAnalytics,
+  savedAnalytics: SavedRestaurantAnalytics,
+) => ({
+  monthLabel: currentAnalytics.monthLabel,
+  drawCount: currentAnalytics.drawCount,
+  mealDecisionCount: currentAnalytics.drawCount,
+  terminology: {
+    countLabel: '外食回数',
+    preferredActionWords: ['外食', 'お店選び', '抽選'],
+    forbiddenWords: ['ドロー'],
+  },
+  estimatedSpend: currentAnalytics.estimatedSpend,
+  averageBudget: currentAnalytics.averageBudget,
+  budgetSampleCount: currentAnalytics.budgetSampleCount,
+  topGenre: currentAnalytics.topGenre,
+  genreAnalytics: currentAnalytics.genreAnalytics.slice(0, 5),
+  priceRangeAnalytics: currentAnalytics.priceRangeAnalytics.slice(0, 4),
+  weekSpends: currentAnalytics.weekSpends,
+  recentDraws: currentAnalytics.recentDraws.slice(0, 5).map((entry) => ({
+    area: entry.area ?? entry.restaurant?.area ?? null,
+    genre: entry.genre ?? entry.restaurant?.genre ?? null,
+    budgetMin: entry.budgetMin ?? entry.restaurant?.budgetMin ?? null,
+    budgetMax: entry.budgetMax ?? entry.restaurant?.budgetMax ?? null,
+  })),
+  saved: {
+    total: savedAnalytics.totalSaved,
+    topGenre: savedAnalytics.genreAnalytics[0]?.label ?? 'まだなし',
+    topPriceRange: savedAnalytics.priceRangeAnalytics[0]?.label ?? 'まだなし',
+  },
+});
+
+const buildLocalAiReport = (
+  currentAnalytics: MonthlyAnalytics,
+  savedAnalytics: SavedRestaurantAnalytics,
+): AiMonthlyReport => {
+  const topGenreItem = currentAnalytics.genreAnalytics[0] ?? null;
+  const topGenre = currentAnalytics.topGenre === 'まだなし' ? '気分まかせ' : currentAnalytics.topGenre;
+  const topGenreCount = topGenreItem?.count ?? 0;
+  const drawCount = currentAnalytics.drawCount;
+  const topShare = drawCount && topGenreCount ? Math.round((topGenreCount / drawCount) * 100) : 0;
+  const genreCount = currentAnalytics.genreAnalytics.filter((item) => item.count > 0).length;
+  const otherGenres = currentAnalytics.genreAnalytics
+    .slice(1, 4)
+    .map((item) => item.label)
+    .filter(Boolean)
+    .join('・');
+  const explorationLabel = genreCount >= 4
+    ? 'かなり広め'
+    : genreCount >= 3
+      ? 'ほどよく広い'
+      : genreCount >= 2
+        ? '少し偏りあり'
+        : 'かなり集中';
+  const spendLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.estimatedSpend)}` : 'まだ集計待ち';
+  const averageLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.averageBudget)}` : 'まだなし';
+  const topPrice = currentAnalytics.priceRangeAnalytics[0]?.label ?? 'まだなし';
+  const savedTopGenre = savedAnalytics.genreAnalytics[0]?.label ?? 'お気に入り待ち';
+  const highSpendGenre = currentAnalytics.genreAnalytics
+    .filter((item) => item.estimatedSpend > 0)
+    .sort((a, b) => b.estimatedSpend - a.estimatedSpend)[0] ?? topGenreItem;
+  const activeWeek = currentAnalytics.weekSpends
+    .filter((item) => item.amount > 0)
+    .sort((a, b) => b.amount - a.amount)[0] ?? null;
+
+  return {
+    title: `${currentAnalytics.monthLabel}の食傾向レポート`,
+    summary: currentAnalytics.drawCount
+      ? `${currentAnalytics.monthLabel}は${topGenre}が軸ですが、${genreCount}ジャンルに分散しています。平均単価は${averageLabel}で、価格帯は安定しつつ発見も作れています。`
+      : '今月はまだ外食履歴が少なめです。1回使うと、AIがジャンルの偏り・予算・お気に入り傾向を読み始めます。',
+    mood: currentAnalytics.drawCount >= 5 ? `${topGenre}軸の探索型` : '傾向育成中',
+    highlights: [
+      topGenreCount
+        ? `${topGenre}が${topGenreCount}/${drawCount}回${topShare ? `（${topShare}%）` : ''}で、今月の軸になっています。`
+        : '外食回数がまだ少ないため、食の軸はこれから見えてきます。',
+      `冒険度は${explorationLabel}。${otherGenres ? `${otherGenres}にも広がりがあります。` : '次は別ジャンルを1つ混ぜると差が出ます。'}`,
+      `推定外食費は${spendLabel}、平均単価は${averageLabel}。価格帯は${topPrice}に寄っています。`,
+      activeWeek
+        ? `${activeWeek.label}に支出が集中。外食タイミングの山が見えています。`
+        : '週ごとの偏りはまだ弱く、使うほど外食タイミングが見えてきます。',
+      `お気に入り傾向は${savedTopGenre}。保存を増やすほど次月の提案が具体的になります。`,
+    ],
+    recommendations: [
+      `${topGenre}は残しつつ、次の3回のうち1回だけ${otherGenres ? '未開拓ジャンル' : '別ジャンル'}を固定すると、レポートに差が出ます。`,
+      `次回は${topPrice}のまま、エリアだけ変えてお店選びをすると「価格は同じで発見だけ増える」動きになります。`,
+      '行った店は写真かお気に入りを1つ残すと、月末スライドショーと年次レポートの材料になります。',
+    ],
+    savingsTips: [
+      currentAnalytics.budgetSampleCount
+        ? `${highSpendGenre?.label ?? topGenre}の日は、同じジャンルで上限を${formatYen(Math.max(700, Math.round((currentAnalytics.averageBudget || 1500) * 0.85)))}前後に置くと、満足感を残したまま支出を抑えやすいです。`
+        : 'まずは次の3回だけ価格を残すと、どのジャンルが節約ポイントか見えるようになります。',
+      currentAnalytics.budgetSampleCount
+        ? `手軽枠の${topGenre}を残しつつ、高単価になりやすい外食を月1回だけランチ帯に寄せると、月合計を整えやすいです。`
+        : 'ランチ・夜のどちらで食べたかを残すと、節約できる時間帯が見つけやすくなります。',
+      'お気に入りに「安くて満足」な店を1件保存しておくと、迷った日の節約候補として使えます。',
+    ],
+    nextAction: `次のお店選びは「${topGenre}以外を1回だけ混ぜる」設定で回してみましょう。`,
+    closingNotes: [
+      `${topGenre}が多い月は、迷った時の安心枠がはっきりしています。`,
+      `${drawCount}回だけでも、ジャンルの寄り方と予算のクセは見え始めています。`,
+      `平均単価${averageLabel}は、次の店選びの基準として使いやすいラインです。`,
+      otherGenres ? `${otherGenres}を混ぜているので、同じ月の中にも小さな変化があります。` : '次に別ジャンルを1つ足すと、レポートの見え方が一気に変わります。',
+      '写真かお気に入りを1つ残すだけで、来月のレポートはもっと自分専用になります。',
+    ],
+    generatedAt: new Date().toISOString(),
+    source: 'demo',
+  };
+};
+
+const requestAiMonthlyReport = async (
+  currentAnalytics: MonthlyAnalytics,
+  savedAnalytics: SavedRestaurantAnalytics,
+  apiBaseUrlCandidates: readonly string[],
+  userId: string,
+): Promise<AiMonthlyReport> => {
+  const fallback = buildLocalAiReport(currentAnalytics, savedAnalytics);
+  if (!apiBaseUrlCandidates.length || userId === APP_USER_ID) {
+    return fallback;
+  }
+
+  try {
+    const data = await randishApi.generateAiReport(
+      apiBaseUrlCandidates,
+      userId,
+      buildAiReportPayload(currentAnalytics, savedAnalytics),
+    );
+    const normalizeReportList = (value: unknown, fallbackItems: string[], limit: number) => {
+      const items = Array.isArray(value)
+        ? value.slice(0, limit).map(String).filter((item) => item.trim().length > 0)
+        : [];
+      return [...items, ...fallbackItems].slice(0, limit);
+    };
+    return {
+      title: typeof data.title === 'string' ? data.title : fallback.title,
+      summary: typeof data.summary === 'string' ? data.summary : fallback.summary,
+      mood: typeof data.mood === 'string' ? data.mood : fallback.mood,
+      highlights: normalizeReportList(data.highlights, fallback.highlights, 5),
+      recommendations: normalizeReportList(data.recommendations, fallback.recommendations, 3),
+      savingsTips: normalizeReportList(data.savingsTips, fallback.savingsTips, 3),
+      nextAction: typeof data.nextAction === 'string' ? data.nextAction : fallback.nextAction,
+      closingNotes: normalizeReportList(data.closingNotes, fallback.closingNotes, 5),
+      generatedAt: typeof data.generatedAt === 'string' ? data.generatedAt : new Date().toISOString(),
+      source: data.source === 'gemini' ? 'gemini' : data.source === 'fallback' ? 'fallback' : 'demo',
+    };
+  } catch {
+    return { ...fallback, source: 'fallback' };
+  }
+};
+
 const getPreviousMonthComparison = (entries: DrawHistoryEntry[], now = new Date()) => {
   const current = getCurrentMonthAnalytics(entries, now);
   const previous = getMonthlyAnalytics(entries, addMonthsToStart(now, -1));
@@ -2607,6 +3534,9 @@ const getSavedRestaurantAnalytics = (savedRestaurants: SavedRestaurant[]): Saved
     const budgetMax = savedBudget ?? snapshot?.budgetMax ?? 999999;
     return {
       id: `saved-${favorite.id}-${index}`,
+      provider: favorite.provider,
+      providerPlaceId: favorite.providerPlaceId,
+      restaurantId: favorite.restaurantId,
       restaurant: {
         ...(snapshot ?? {
           id: favorite.id,
@@ -2627,6 +3557,11 @@ const getSavedRestaurantAnalytics = (savedRestaurants: SavedRestaurant[]): Saved
         budgetMin,
         budgetMax,
       } as Restaurant,
+      area: favorite.savedArea,
+      genre: favorite.savedGenre,
+      budgetMin: favorite.savedBudgetMin,
+      budgetMax: favorite.savedBudgetMax,
+      rangeMeters: favorite.savedRangeMeters,
       createdAt: favorite.createdAt,
     };
   });
@@ -3114,6 +4049,7 @@ const getOptionalLocationModule = () => {
   try {
     return require('expo-location') as {
       Accuracy: { Balanced: unknown };
+      getForegroundPermissionsAsync?: () => Promise<{ status: string; granted?: boolean }>;
       requestForegroundPermissionsAsync: () => Promise<{ status: string }>;
       getCurrentPositionAsync: (options?: unknown) => Promise<{ coords: { latitude: number; longitude: number } }>;
       reverseGeocodeAsync: (coords: { latitude: number; longitude: number }) => Promise<
@@ -3128,6 +4064,78 @@ const getOptionalLocationModule = () => {
     };
   } catch {
     return null;
+  }
+};
+
+type OptionalAsyncStorage = {
+  getItem: (key: string) => Promise<string | null>;
+  setItem: (key: string, value: string) => Promise<void>;
+};
+
+const getOptionalAsyncStorageModule = (): OptionalAsyncStorage | null => {
+  try {
+    const module = require('@react-native-async-storage/async-storage') as {
+      default?: OptionalAsyncStorage;
+      getItem?: (key: string) => Promise<string | null>;
+      setItem?: (key: string, value: string) => Promise<void>;
+    };
+    if (module.default) {
+      return module.default;
+    }
+    return module.getItem && module.setItem
+      ? { getItem: module.getItem, setItem: module.setItem }
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const getOptionalHapticsModule = () => {
+  try {
+    return require('expo-haptics') as {
+      ImpactFeedbackStyle?: { Light?: unknown; Medium?: unknown };
+      NotificationFeedbackType?: { Success?: unknown; Warning?: unknown };
+      impactAsync?: (style?: unknown) => Promise<void>;
+      notificationAsync?: (type?: unknown) => Promise<void>;
+    };
+  } catch {
+    return null;
+  }
+};
+
+const readLocalValue = async (key: string) => {
+  const storage = getOptionalAsyncStorageModule();
+  if (storage) {
+    return storage.getItem(key);
+  }
+  if (Platform.OS === 'web') {
+    try {
+      const runtimeGlobal = globalThis as typeof globalThis & {
+        localStorage?: { getItem: (key: string) => string | null };
+      };
+      return runtimeGlobal.localStorage?.getItem(key) ?? null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const writeLocalValue = async (key: string, value: string) => {
+  const storage = getOptionalAsyncStorageModule();
+  if (storage) {
+    await storage.setItem(key, value);
+    return;
+  }
+  if (Platform.OS === 'web') {
+    try {
+      const runtimeGlobal = globalThis as typeof globalThis & {
+        localStorage?: { setItem: (key: string, value: string) => void };
+      };
+      runtimeGlobal.localStorage?.setItem(key, value);
+    } catch {
+      // Local storage can be unavailable in private windows; the app can still continue.
+    }
   }
 };
 
@@ -3298,7 +4306,6 @@ const buildGenreDiagnosticMessage = (requestedGenre: string, restaurants: Restau
 export default function App() {
   const [stage, setStage] = useState<AppStage>('splash');
   const [userId, setUserId] = useState(APP_USER_ID);
-  const subscription = useSubscription(userId);
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const runtimeApiBaseUrl = useMemo(getRuntimeApiBaseUrl, []);
   const [apiBaseUrl, setApiBaseUrl] = useState(runtimeApiBaseUrl);
@@ -3316,15 +4323,25 @@ export default function App() {
   const [savedDetail, setSavedDetail] = useState<{ favorite: SavedRestaurant; restaurant: Restaurant } | null>(null);
   const [savedDetailLoadingId, setSavedDetailLoadingId] = useState<string | null>(null);
   const [savedDetailError, setSavedDetailError] = useState<string | null>(null);
+  const [historyDetailLoadingId, setHistoryDetailLoadingId] = useState<string | null>(null);
+  const [historyDetailError, setHistoryDetailError] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const [locationIntroState, setLocationIntroState] = useState<LocationIntroState>('loading');
+  const [locationIntroWorking, setLocationIntroWorking] = useState(false);
   const [profileName, setProfileName] = useState('RANDISH Guest');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('ja');
+  const [freshOAuthSessionPreferred, setFreshOAuthSessionPreferred] = useState(false);
   const [locationStatus, setLocationStatus] = useState('現在地を確認できます');
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('条件を選んで、今日の一店を決めましょう。');
   const [drawAnimationKey, setDrawAnimationKey] = useState<DrawAnimationKey>('roulette');
   const [drawMode, setDrawMode] = useState<DrawMode>('condition');
+  const [mapRouletteStatus, setMapRouletteStatus] = useState<MapRouletteStatus>('idle');
+  const [mapCandidates, setMapCandidates] = useState<CandidatePlace[]>([]);
+  const [mapRouletteTarget, setMapRouletteTarget] = useState<CandidatePlace | null>(null);
+  const [mapRouletteError, setMapRouletteError] = useState<string | null>(null);
+  const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false);
   const [travelRevealStep, setTravelRevealStep] = useState<TravelRevealStep>('hidden');
   const [travelDisplayArea, setTravelDisplayArea] = useState<string | null>(null);
   const [conditionRandom, setConditionRandom] = useState<ConditionRandomState>({
@@ -3338,13 +4355,18 @@ export default function App() {
   const logoScale = useRef(new Animated.Value(0.88)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const spinValue = useRef(new Animated.Value(0)).current;
+  const mapPinProgress = useRef(new Animated.Value(0)).current;
+  const mapPinBounce = useRef(new Animated.Value(0)).current;
   const resultRevealValue = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef<ScrollView | null>(null);
   const randomTabOffsetRef = useRef(0);
   const randomResultOffsetRef = useRef(0);
   const savedDetailCacheRef = useRef(new Map<string, Restaurant>());
   const didAskLocation = useRef(false);
+  const candidateCacheRef = useRef<CandidateCacheEntry | null>(null);
+  const mapSpinRunIdRef = useRef(0);
   const areaRef = useRef(area);
+  const userIdRef = useRef(userId);
   const userLocationRef = useRef<UserLocation | null>(userLocation);
 
   const scrollToContentTop = useCallback((animated = true) => {
@@ -3363,6 +4385,10 @@ export default function App() {
   }, [area]);
 
   useEffect(() => {
+    userIdRef.current = userId;
+  }, [userId]);
+
+  useEffect(() => {
     userLocationRef.current = userLocation;
   }, [userLocation]);
 
@@ -3375,16 +4401,71 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const mealTicketState = useMemo(
-    () => buildMealTicketState(now, drawHistories, subscription.isPro, DEV_DISABLE_MEAL_TICKET_LIMIT),
-    [drawHistories, now, subscription.isPro],
-  );
-  const isRegisteredUser = userId !== APP_USER_ID;
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      const [introValue, cachedLocationValue] = await Promise.all([
+        readLocalValue(LOCATION_INTRO_STORAGE_KEY),
+        readLocalValue(LOCATION_CACHE_STORAGE_KEY),
+      ]);
+      if (!mounted) {
+        return;
+      }
+      setLocationIntroState(introValue === 'completed' ? 'completed' : 'pending');
+      if (cachedLocationValue) {
+        try {
+          const parsed = JSON.parse(cachedLocationValue) as StoredUserLocation;
+          if (
+            typeof parsed.latitude === 'number'
+            && typeof parsed.longitude === 'number'
+            && Number.isFinite(parsed.latitude)
+            && Number.isFinite(parsed.longitude)
+          ) {
+            const cachedLocation = {
+              latitude: parsed.latitude,
+              longitude: parsed.longitude,
+              label: parsed.label || '現在地',
+            };
+            userLocationRef.current = cachedLocation;
+            setUserLocation(cachedLocation);
+            setLocationStatus(`${cachedLocation.label} 周辺から探します`);
+          }
+        } catch {
+          // Ignore stale location cache.
+        }
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (mounted) {
+          setReduceMotionEnabled(enabled);
+        }
+      })
+      .catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener?.('reduceMotionChanged', setReduceMotionEnabled);
+    return () => {
+      mounted = false;
+      subscription?.remove?.();
+    };
+  }, []);
 
   const apiBaseUrlCandidates = useMemo(
     () => buildApiBaseUrlCandidates(apiBaseUrl, runtimeApiBaseUrl),
     [apiBaseUrl, runtimeApiBaseUrl],
   );
+  const subscription = useSubscription(userId, apiBaseUrlCandidates);
+  const mealTicketState = useMemo(
+    () => buildMealTicketState(now, drawHistories, subscription.isPro, DEV_DISABLE_MEAL_TICKET_LIMIT),
+    [drawHistories, now, subscription.isPro],
+  );
+  const isRegisteredUser = userId !== APP_USER_ID;
 
   const syncWorkingApiBaseUrl = useCallback(() => {
     const workingBaseUrl = randishApi.getLastSuccessfulBaseUrl();
@@ -3394,8 +4475,12 @@ export default function App() {
   }, []);
 
   const loadDrawHistories = useCallback(async () => {
+    const requestedUserId = userId;
     try {
       const data = await randishApi.getRandomHistories(apiBaseUrlCandidates, userId);
+      if (userIdRef.current !== requestedUserId) {
+        return;
+      }
       syncWorkingApiBaseUrl();
       const entries = data
         .map(toDrawHistoryEntry)
@@ -3403,7 +4488,7 @@ export default function App() {
       const recentRestaurants: Restaurant[] = [];
       const seenRestaurantIds = new Set<string>();
       entries.forEach((entry) => {
-        if (seenRestaurantIds.has(entry.restaurant.id)) {
+        if (!entry.restaurant || seenRestaurantIds.has(entry.restaurant.id)) {
           return;
         }
         seenRestaurantIds.add(entry.restaurant.id);
@@ -3417,8 +4502,12 @@ export default function App() {
   }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl, userId]);
 
   const loadSavedRestaurants = useCallback(async () => {
+    const requestedUserId = userId;
     try {
       const data = await randishApi.getFavorites(apiBaseUrlCandidates, userId);
+      if (userIdRef.current !== requestedUserId) {
+        return;
+      }
       syncWorkingApiBaseUrl();
       setSavedRestaurants(data.map(toSavedRestaurantFromApi));
     } catch {
@@ -3429,10 +4518,22 @@ export default function App() {
   const recordDrawForAnalytics = useCallback((restaurant: Restaurant) => {
     const createdAt = new Date().toISOString();
     setDrawHistories((current) => [
-      { id: `local-${createdAt}-${restaurant.id}`, restaurant, createdAt },
+      {
+        id: `local-${createdAt}-${restaurant.id}`,
+        provider: (restaurant.externalProvider || 'RANDISH_SEED').toUpperCase(),
+        providerPlaceId: getProviderPlaceId(restaurant),
+        restaurantId: shouldPersistRestaurantId(restaurant) ? restaurant.id : null,
+        restaurant,
+        area: cleanTextOrNull(area === '現在地' ? '現在地周辺' : area),
+        genre: cleanTextOrNull(genre === 'すべて' ? null : genre),
+        budgetMin: parseBudgetNumber(budgetMin),
+        budgetMax: parseBudgetNumber(budgetMax),
+        rangeMeters: parseDistanceMeters(distance),
+        createdAt,
+      },
       ...current,
     ].slice(0, 100));
-  }, []);
+  }, [area, budgetMax, budgetMin, distance, genre]);
 
   useEffect(() => {
     Animated.parallel([
@@ -3474,6 +4575,7 @@ export default function App() {
         latitude: coordinateSource?.latitude,
         longitude: coordinateSource?.longitude,
         range: coordinateSource ? toHotPepperRange(distance) : undefined,
+        distanceMeters: coordinateSource ? parseDistanceMeters(distance) ?? undefined : undefined,
       };
     },
     [area, budgetMax, budgetMin, distance, genre, userLocation],
@@ -3561,7 +4663,9 @@ export default function App() {
       if (mode === 'sync-search' || areaRef.current === '現在地') {
         setLocationStatus('現在地を取得中...');
       }
-      const permission = await Location.requestForegroundPermissionsAsync();
+      const permission = mode === 'background' && Location.getForegroundPermissionsAsync
+        ? await Location.getForegroundPermissionsAsync()
+        : await Location.requestForegroundPermissionsAsync();
       if (permission.status !== 'granted') {
         if (mode === 'sync-search' || areaRef.current === '現在地') {
           setLocationStatus('位置情報の許可がオフです');
@@ -3591,6 +4695,7 @@ export default function App() {
       const nextLocation = { ...coords, label };
       userLocationRef.current = nextLocation;
       setUserLocation(nextLocation);
+      void writeLocalValue(LOCATION_CACHE_STORAGE_KEY, JSON.stringify({ ...nextLocation, updatedAt: Date.now() } satisfies StoredUserLocation));
       if (mode === 'sync-search') {
         setArea('現在地');
         setLocationStatus(formatLocationStatus(prefecture, label));
@@ -3608,12 +4713,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (stage !== 'main' || didAskLocation.current) {
+    if (stage !== 'main' || locationIntroState !== 'completed' || didAskLocation.current) {
       return;
     }
     didAskLocation.current = true;
     requestCurrentLocation('background');
-  }, [requestCurrentLocation, stage]);
+  }, [locationIntroState, requestCurrentLocation, stage]);
 
   useEffect(() => {
     if (stage !== 'main') {
@@ -3622,6 +4727,17 @@ export default function App() {
     loadDrawHistories();
     loadSavedRestaurants();
   }, [loadDrawHistories, loadSavedRestaurants, stage]);
+
+  useEffect(() => {
+    if (activeTab === 'random' || mapRouletteStatus !== 'spinning') {
+      return;
+    }
+    mapSpinRunIdRef.current += 1;
+    mapPinProgress.stopAnimation();
+    mapPinBounce.stopAnimation();
+    setIsLoading(false);
+    setMapRouletteStatus(mapCandidates.length ? 'candidatesReady' : 'idle');
+  }, [activeTab, mapCandidates.length, mapPinBounce, mapPinProgress, mapRouletteStatus]);
 
   const runRandomAnimation = useCallback(() => {
     spinValue.setValue(0);
@@ -3750,6 +4866,7 @@ export default function App() {
         latitude: latestLocation.latitude,
         longitude: latestLocation.longitude,
         range: toHotPepperRange(distance),
+        distanceMeters: parseDistanceMeters(distance) ?? undefined,
       }
       : drawApiParams;
     const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
@@ -3950,12 +5067,259 @@ export default function App() {
     }
   }, [apiBaseUrlCandidates, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
 
+  const triggerRouletteHaptic = useCallback((final = false) => {
+    const Haptics = getOptionalHapticsModule();
+    if (!Haptics) {
+      return;
+    }
+    if (final && Haptics.notificationAsync && Haptics.NotificationFeedbackType?.Success) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      return;
+    }
+    if (Haptics.impactAsync) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle?.Light);
+    }
+  }, []);
+
+  const buildCandidateQuery = useCallback(async (): Promise<CandidateQuery | null> => {
+    const cleanArea = areaRef.current.trim();
+    let center: UserLocation | null = null;
+    if (!cleanArea || cleanArea === '現在地') {
+      center = userLocationRef.current;
+      if (!center) {
+        setMapRouletteStatus('locating');
+        center = await requestCurrentLocation('sync-search');
+      }
+    } else {
+      const preset = getCoordinatePresetForArea(cleanArea);
+      if (preset) {
+        center = {
+          latitude: preset.preset.latitude,
+          longitude: preset.preset.longitude,
+          label: preset.label,
+        };
+      }
+    }
+
+    if (!center) {
+      return null;
+    }
+
+    const radius = parseDistanceMeters(distance) ?? 1500;
+    const category = genre === 'すべて' || conditionRandom.genre ? undefined : genre;
+    const priceRange = conditionRandom.budget ? undefined : budgetMax || undefined;
+    const key = [
+      radius,
+      category ?? 'all',
+      priceRange ?? 'any',
+      'open:any',
+      cleanArea || '現在地',
+    ].join('|');
+    return { key, center, radius, category, priceRange };
+  }, [budgetMax, conditionRandom.budget, conditionRandom.genre, distance, genre, requestCurrentLocation]);
+
+  const getUsableCandidateCache = useCallback((query: CandidateQuery) => {
+    const cached = candidateCacheRef.current;
+    if (!cached) {
+      console.info('[RANDISH MAP] 新規店舗検索: 候補キャッシュなし');
+      return null;
+    }
+    if (cached.key !== query.key) {
+      console.info('[RANDISH MAP] キャッシュ無効化: 条件変更', { previousKey: cached.key, nextKey: query.key });
+      return null;
+    }
+    const ageMs = Date.now() - cached.fetchedAt;
+    if (ageMs > getSafePlacesCacheTtlMs()) {
+      console.info('[RANDISH MAP] キャッシュ無効化: TTL超過', { ageMs, ttlMs: getSafePlacesCacheTtlMs() });
+      return null;
+    }
+    const movedMeters = distanceBetweenLocationsMeters(cached.center, query.center);
+    if (movedMeters > getSafePlacesCacheDistanceMeters()) {
+      console.info('[RANDISH MAP] キャッシュ無効化: 現在地移動', { movedMeters, threshold: getSafePlacesCacheDistanceMeters() });
+      return null;
+    }
+    console.info('[RANDISH MAP] キャッシュヒット', { count: cached.candidates.length, source: cached.source });
+    return cached;
+  }, []);
+
+  const loadCandidatePool = useCallback(async (query: CandidateQuery) => {
+    const cached = getUsableCandidateCache(query);
+    if (cached) {
+      console.info('[RANDISH MAP] キャッシュからの再抽選');
+      setMapCandidates(cached.candidates);
+      setMapRouletteStatus(cached.candidates.length ? 'candidatesReady' : 'empty');
+      return cached;
+    }
+
+    setMapRouletteStatus('searching');
+    console.info('[RANDISH MAP] 新規店舗検索', {
+      radius: query.radius,
+      category: query.category ?? 'all',
+      priceRange: query.priceRange ?? 'any',
+    });
+    const response = await randishApi.getNearbyPlaces(apiBaseUrlCandidates, {
+      latitude: query.center.latitude,
+      longitude: query.center.longitude,
+      radius: query.radius,
+      category: query.category,
+      priceRange: query.priceRange,
+      openNow: query.openNow,
+    });
+    syncWorkingApiBaseUrl();
+    const nextCache: CandidateCacheEntry = {
+      key: query.key,
+      center: query.center,
+      candidates: response.places ?? [],
+      fetchedAt: Date.now(),
+      usedIds: [],
+      lastSelectedId: null,
+      source: response.source,
+    };
+    candidateCacheRef.current = nextCache;
+    setMapCandidates(nextCache.candidates);
+    setMapRouletteStatus(nextCache.candidates.length ? 'candidatesReady' : 'empty');
+    return nextCache;
+  }, [apiBaseUrlCandidates, getUsableCandidateCache, syncWorkingApiBaseUrl]);
+
+  const chooseMapRouletteRestaurant = useCallback(async () => {
+    if (mapRouletteStatus === 'searching' || mapRouletteStatus === 'spinning') {
+      return;
+    }
+    setActiveTab('random');
+    setIsLoading(true);
+    setMapRouletteError(null);
+    setSelectedRestaurant(null);
+    resultRevealValue.setValue(0);
+    mapPinProgress.stopAnimation();
+    mapPinBounce.stopAnimation();
+    mapPinProgress.setValue(0);
+    mapPinBounce.setValue(0);
+
+    try {
+      const query = await buildCandidateQuery();
+      if (!query) {
+        setMapRouletteStatus('error');
+        setMapRouletteError('現在地または座標付きエリアを選んでください。');
+        setMessage('現在地が使えない場合は、エリアを選んでからルーレットを回せます。');
+        setActiveTab('search');
+        setIsLoading(false);
+        return;
+      }
+
+      const cacheEntry = await loadCandidatePool(query);
+      if (cacheEntry.candidates.length === 0) {
+        setMapRouletteStatus('empty');
+        setMapRouletteError('条件に合う店舗が見つかりませんでした。');
+        setMessage('条件に合う店舗が見つかりませんでした。距離を広げるか、条件を減らしてください。');
+        setIsLoading(false);
+        return;
+      }
+
+      const { selected, nextUsedIds } = pickCandidateFromPool(
+        cacheEntry.candidates,
+        cacheEntry.usedIds,
+        cacheEntry.lastSelectedId,
+      );
+      if (!selected) {
+        setMapRouletteStatus('empty');
+        setMapRouletteError('候補店舗がありません。');
+        setIsLoading(false);
+        return;
+      }
+
+      const runId = mapSpinRunIdRef.current + 1;
+      mapSpinRunIdRef.current = runId;
+      setMapRouletteTarget(selected);
+      setMapRouletteStatus('spinning');
+      setMessage(cacheEntry.candidates.length === 1
+        ? '候補が1件だけ見つかりました。このお店で止めます。'
+        : '赤いピンが候補の間を巡回しています。');
+      triggerRouletteHaptic(false);
+
+      const finishSelection = () => {
+        if (mapSpinRunIdRef.current !== runId) {
+          return;
+        }
+        const normalized = candidatePlaceToRestaurant(selected, areaRef.current, genre);
+        candidateCacheRef.current = {
+          ...cacheEntry,
+          usedIds: nextUsedIds,
+          lastSelectedId: selected.id,
+        };
+        setSelectedRestaurant(normalized);
+        setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+        recordDrawForAnalytics(normalized);
+        setMapRouletteStatus('result');
+        setMessage(cacheEntry.candidates.length === 1
+          ? '候補が1件だけだったため、このお店に決まりました。'
+          : '今日の一店が決まりました。');
+        setIsLoading(false);
+        triggerRouletteHaptic(true);
+        revealSelectedRestaurant();
+        setTimeout(scrollToRandomResult, 220);
+      };
+
+      if (reduceMotionEnabled) {
+        mapPinProgress.setValue(1);
+        setTimeout(finishSelection, 180);
+        return;
+      }
+
+      Animated.sequence([
+        Animated.timing(mapPinProgress, {
+          toValue: 1,
+          duration: 2800,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(mapPinBounce, {
+          toValue: 1,
+          friction: 3,
+          tension: 130,
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          finishSelection();
+        }
+      });
+    } catch (error) {
+      setMapRouletteStatus('error');
+      setMapCandidates([]);
+      setMapRouletteTarget(null);
+      logApiUiError('nearby map roulette failed', error, apiBaseUrlCandidates);
+      const noKey = error instanceof RandishApiError && error.status === 400;
+      const messageText = noKey
+        ? 'Google Places APIが未設定、または近隣検索が無効です。開発時はモックモードを有効にできます。'
+        : isApiConnectivityError(error)
+          ? '店舗検索APIに接続できませんでした。ネットワークを確認してください。'
+          : '店舗検索APIでエラーが発生しました。少し時間をおいて再度お試しください。';
+      setMapRouletteError(messageText);
+      setMessage(messageText);
+      setIsLoading(false);
+    }
+  }, [
+    apiBaseUrlCandidates,
+    buildCandidateQuery,
+    genre,
+    loadCandidatePool,
+    mapPinBounce,
+    mapPinProgress,
+    mapRouletteStatus,
+    recordDrawForAnalytics,
+    reduceMotionEnabled,
+    resultRevealValue,
+    revealSelectedRestaurant,
+    scrollToRandomResult,
+    triggerRouletteHaptic,
+  ]);
+
   const startPreparedDraw = useCallback(async () => {
     if (isLoading) {
       return;
     }
     const currentTicket = mealTicketState.current;
-    if (!currentTicket.available) {
+    if (FEATURE_MEAL_TICKETS_ENABLED && !currentTicket.available) {
       if (currentTicket.proOnly && !mealTicketState.isProUser) {
         setMessage(`深夜の抽選はPro限定です。${mealTicketState.nextUnlockLabel}で朝の一回が使えます。`);
       } else if (currentTicket.used) {
@@ -3970,16 +5334,42 @@ export default function App() {
       chooseEverythingRandom();
       return;
     }
-    if (areaRef.current.trim() === '現在地' && !userLocationRef.current) {
-      setMessage('現在地を確認してから抽選します。');
-      const nextLocation = await requestCurrentLocation('sync-search');
-      if (!nextLocation) {
-        setMessage('現在地が取得できませんでした。位置情報を許可するか、エリアを選んでください。');
-        return;
-      }
+    await chooseMapRouletteRestaurant();
+  }, [chooseEverythingRandom, chooseMapRouletteRestaurant, drawMode, isLoading, mealTicketState, scrollToContentTop]);
+
+  const completeLocationIntro = useCallback(async () => {
+    setLocationIntroState('completed');
+    await writeLocalValue(LOCATION_INTRO_STORAGE_KEY, 'completed');
+  }, []);
+
+  const useCurrentLocationFromIntro = useCallback(async () => {
+    if (locationIntroWorking) {
+      return;
     }
-    chooseRandomRestaurant();
-  }, [chooseEverythingRandom, chooseRandomRestaurant, drawMode, isLoading, mealTicketState, requestCurrentLocation, scrollToContentTop]);
+    setLocationIntroWorking(true);
+    const nextLocation = await requestCurrentLocation('sync-search');
+    await completeLocationIntro();
+    setLocationIntroWorking(false);
+    if (nextLocation) {
+      setActiveTab('home');
+      setMessage('現在地を使えるようになりました。近くのお店から選べます。');
+      return;
+    }
+    setActiveTab('search');
+    setMessage('位置情報が使えませんでした。エリアを選んで利用できます。');
+  }, [completeLocationIntro, locationIntroWorking, requestCurrentLocation]);
+
+  const chooseManualAreaFromIntro = useCallback(async () => {
+    await completeLocationIntro();
+    setActiveTab('search');
+    setMessage('エリアを選んで、近くのお店を探せます。');
+  }, [completeLocationIntro]);
+
+  const skipLocationIntroForNow = useCallback(async () => {
+    await completeLocationIntro();
+    setActiveTab('home');
+    setMessage('位置情報はあとで設定できます。エリア選択でも利用できます。');
+  }, [completeLocationIntro]);
 
   const saveRestaurantToAlbum = useCallback(async (restaurant: Restaurant) => {
     const localFavorite = toSavedRestaurantFromSelection({
@@ -3989,25 +5379,24 @@ export default function App() {
       genre,
       budgetMin,
       budgetMax,
+      distance,
     });
 
     if (savedRestaurants.some((item) => isSameSavedRestaurant(item, localFavorite))) {
       setMessage('このお店はすでにお気に入りに入っています。');
-      setActiveTab('save');
-      scrollToContentTop();
       return;
     }
 
     setSavedRestaurants((current) => {
       return [localFavorite, ...current];
     });
-    savedDetailCacheRef.current.set(localFavorite.id, restaurant);
+    if (shouldPersistRestaurantId(restaurant)) {
+      savedDetailCacheRef.current.set(localFavorite.id, restaurant);
+    }
     setSavedDetail({ favorite: localFavorite, restaurant });
     setSavedDetailError(null);
     setSavedDetailLoadingId(null);
-    setActiveTab('save');
-    scrollToContentTop();
-    setMessage('お気に入りに追加しました。アルバムのお気に入り一覧に入っています。');
+    setMessage('お気に入りに追加しました。♡が保存済みになりました。');
 
     try {
       const favorite = await randishApi.addFavorite(apiBaseUrlCandidates, {
@@ -4019,6 +5408,7 @@ export default function App() {
         savedGenre: localFavorite.savedGenre,
         savedBudgetMin: localFavorite.savedBudgetMin,
         savedBudgetMax: localFavorite.savedBudgetMax,
+        savedRangeMeters: localFavorite.savedRangeMeters,
         userMemo: localFavorite.userMemo,
         userTags: localFavorite.userTags,
       });
@@ -4028,7 +5418,9 @@ export default function App() {
         snapshot: localFavorite.snapshot,
       };
       savedDetailCacheRef.current.delete(localFavorite.id);
-      savedDetailCacheRef.current.set(syncedFavorite.id, localFavorite.snapshot ?? restaurant);
+      if (shouldPersistRestaurantId(restaurant)) {
+        savedDetailCacheRef.current.set(syncedFavorite.id, localFavorite.snapshot ?? restaurant);
+      }
       setSavedRestaurants((current) => {
         const existing = current.find((item) => isSameSavedRestaurant(item, syncedFavorite));
         const mergedFavorite = {
@@ -4053,11 +5445,11 @@ export default function App() {
           }
           : current
       ));
-      setMessage('お気に入りに追加しました。アルバムのお気に入り一覧に入っています。');
+      setMessage('お気に入りを同期しました。♡は保存済みです。');
     } catch {
       setMessage('端末内のお気に入りに追加しました。API接続後はサーバーにも反映できます。');
     }
-  }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, genre, savedRestaurants, scrollToContentTop, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, distance, genre, savedRestaurants, syncWorkingApiBaseUrl, userId]);
 
   const saveSelectedRestaurant = useCallback(async () => {
     if (!selectedRestaurant) {
@@ -4106,27 +5498,27 @@ export default function App() {
     setMessage('ごはん写真をアルバムに追加しました。');
   }, []);
 
+  const requestFoodPhotoFromLibrary = useCallback(async (): Promise<string | null> => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('写真を選べません', 'アルバムに残すには、写真へのアクセスを許可してください。');
+      return null;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) {
+      return null;
+    }
+
+    return result.assets[0].uri;
+  }, []);
+
   const requestFoodPhotoUri = useCallback(async (): Promise<string | null> => {
-    const pickFromLibrary = async (): Promise<string | null> => {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('写真を選べません', 'アルバムに残すには、写真へのアクセスを許可してください。');
-        return null;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 0.85,
-      });
-
-      if (result.canceled || !result.assets?.[0]?.uri) {
-        return null;
-      }
-
-      return result.assets[0].uri;
-    };
-
     try {
       const currentPermission = await ImagePicker.getCameraPermissionsAsync();
       const permission = currentPermission.granted
@@ -4138,7 +5530,7 @@ export default function App() {
             'カメラを使えません',
             'ごはん写真を撮るには、カメラの使用を許可してください。写真から選ぶこともできます。',
             [
-              { text: '写真から選ぶ', onPress: () => { void pickFromLibrary().then(resolve); } },
+              { text: '写真から選ぶ', onPress: () => { void requestFoodPhotoFromLibrary().then(resolve); } },
               { text: '設定を開く', onPress: () => { void Linking.openSettings(); resolve(null); } },
               { text: '閉じる', style: 'cancel', onPress: () => resolve(null) },
             ],
@@ -4164,14 +5556,14 @@ export default function App() {
           'カメラを起動できませんでした',
           '開発ビルドの権限が未反映か、端末側でカメラを開けない状態です。写真から選ぶこともできます。',
           [
-            { text: '写真から選ぶ', onPress: () => { void pickFromLibrary().then(resolve); } },
+            { text: '写真から選ぶ', onPress: () => { void requestFoodPhotoFromLibrary().then(resolve); } },
             { text: '閉じる', style: 'cancel', onPress: () => resolve(null) },
           ],
           { onDismiss: () => resolve(null) },
         );
       });
     }
-  }, []);
+  }, [requestFoodPhotoFromLibrary]);
 
   const attachSavedFoodPhoto = useCallback(async (favoriteId: string) => {
     const photoUri = await requestFoodPhotoUri();
@@ -4181,12 +5573,7 @@ export default function App() {
     updateSavedFoodPhoto(favoriteId, photoUri);
   }, [requestFoodPhotoUri, updateSavedFoodPhoto]);
 
-  const captureAlbumPhoto = useCallback(async () => {
-    const photoUri = await requestFoodPhotoUri();
-    if (!photoUri) {
-      return;
-    }
-
+  const addAlbumPhoto = useCallback((photoUri: string, title: string, subtitle: string) => {
     const createdAt = new Date().toISOString();
     setAlbumPhotos((current) => {
       const next = [
@@ -4194,20 +5581,39 @@ export default function App() {
           id: `album-photo-${createdAt}`,
           photoUri,
           createdAt,
-          title: '今日の一枚',
-          subtitle: 'RANDISHアルバム',
+          title,
+          subtitle,
         },
         ...current,
       ];
       return (subscription.isPro ? next : next.filter((item) => isInFreeAlbumWindow(item.createdAt))).slice(0, subscription.isPro ? 360 : 90);
     });
+  }, [subscription.isPro]);
+
+  const captureAlbumPhoto = useCallback(async () => {
+    const photoUri = await requestFoodPhotoUri();
+    if (!photoUri) {
+      return;
+    }
+
+    addAlbumPhoto(photoUri, '今日の一枚', 'RANDISHアルバム');
     setMessage('今日の一枚をアルバムに追加しました。');
-  }, [requestFoodPhotoUri, subscription.isPro]);
+  }, [addAlbumPhoto, requestFoodPhotoUri]);
+
+  const uploadAlbumPhoto = useCallback(async () => {
+    const photoUri = await requestFoodPhotoFromLibrary();
+    if (!photoUri) {
+      return;
+    }
+
+    addAlbumPhoto(photoUri, 'スマホから追加', '写真フォルダからアルバムへ');
+    setMessage('スマホの写真をアルバムに追加しました。');
+  }, [addAlbumPhoto, requestFoodPhotoFromLibrary]);
 
   const openSavedRestaurant = useCallback(async (favorite: SavedRestaurant) => {
     setSavedDetailError(null);
     const cached = savedDetailCacheRef.current.get(favorite.id);
-    if (cached) {
+    if (cached && favorite.provider === 'RANDISH_SEED') {
       setSavedDetail({ favorite, restaurant: cached });
       return;
     }
@@ -4220,7 +5626,9 @@ export default function App() {
       const detail = await randishApi.getFavoriteRestaurant(apiBaseUrlCandidates, favorite.id);
       syncWorkingApiBaseUrl();
       const normalized = normalizeRestaurant(detail);
-      savedDetailCacheRef.current.set(favorite.id, normalized);
+      if (favorite.provider === 'RANDISH_SEED') {
+        savedDetailCacheRef.current.set(favorite.id, normalized);
+      }
       setSavedDetail({ favorite: { ...favorite, snapshot: normalized }, restaurant: normalized });
       setSavedRestaurants((current) => current.map((item) => item.id === favorite.id ? { ...item, snapshot: normalized } : item));
     } catch {
@@ -4233,6 +5641,48 @@ export default function App() {
     }
   }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl]);
 
+  const openHistoryRestaurant = useCallback(async (entry: DrawHistoryEntry) => {
+    if (entry.restaurant) {
+      setSelectedRestaurant(entry.restaurant);
+      setActiveTab('random');
+      setMessage('履歴から店舗情報を表示しました。');
+      setTimeout(scrollToRandomResult, 160);
+      return;
+    }
+    if (entry.id.startsWith('local-')) {
+      setHistoryDetailError('この履歴は端末内の一時履歴です。アプリを開き直すと最新情報を取得できません。');
+      return;
+    }
+
+    setHistoryDetailError(null);
+    setHistoryDetailLoadingId(entry.id);
+    try {
+      const detail = await randishApi.getRandomHistoryRestaurant(apiBaseUrlCandidates, entry.id);
+      syncWorkingApiBaseUrl();
+      const normalized = normalizeRestaurant(detail);
+      setDrawHistories((current) => current.map((item) => (
+        item.id === entry.id ? { ...item, restaurant: normalized } : item
+      )));
+      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+      setSelectedRestaurant(normalized);
+      setActiveTab('random');
+      setMessage('履歴から店舗情報を再取得しました。');
+      setTimeout(scrollToRandomResult, 160);
+    } catch {
+      setHistoryDetailError('店舗情報を取得できませんでした。必要なときだけ再取得する設計なので、少し時間をおいてもう一度押してください。');
+    } finally {
+      setHistoryDetailLoadingId(null);
+    }
+  }, [apiBaseUrlCandidates, scrollToRandomResult, syncWorkingApiBaseUrl]);
+
+  const resetMapRouletteView = () => {
+    setMapRouletteStatus('idle');
+    setMapRouletteTarget(null);
+    setMapRouletteError(null);
+    mapPinProgress.setValue(0);
+    mapPinBounce.setValue(0);
+  };
+
   const updateGenre = (value: string) => {
     setGenre(value);
     setDrawMode('condition');
@@ -4240,6 +5690,7 @@ export default function App() {
     setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, genre: false }));
     setSelectedRestaurant(null);
+    resetMapRouletteView();
   };
 
   const updateArea = (value: string) => {
@@ -4264,6 +5715,7 @@ export default function App() {
     setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, area: false }));
     setSelectedRestaurant(null);
+    resetMapRouletteView();
   };
 
   const updateBudgetMin = (value: string) => {
@@ -4273,6 +5725,7 @@ export default function App() {
     setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, budget: false }));
     setSelectedRestaurant(null);
+    resetMapRouletteView();
   };
 
   const updateBudgetMax = (value: string) => {
@@ -4283,6 +5736,7 @@ export default function App() {
     setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, budget: false }));
     setSelectedRestaurant(null);
+    resetMapRouletteView();
   };
 
   const updateDistance = (value: string) => {
@@ -4292,6 +5746,7 @@ export default function App() {
     setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, distance: false }));
     setSelectedRestaurant(null);
+    resetMapRouletteView();
   };
 
   const markConditionRandom = useCallback((field: ConditionRandomField) => {
@@ -4300,7 +5755,12 @@ export default function App() {
     setTravelDisplayArea(null);
     setConditionRandom((current) => ({ ...current, [field]: !current[field] }));
     setSelectedRestaurant(null);
-  }, []);
+    setMapRouletteStatus('idle');
+    setMapRouletteTarget(null);
+    setMapRouletteError(null);
+    mapPinProgress.setValue(0);
+    mapPinBounce.setValue(0);
+  }, [mapPinBounce, mapPinProgress]);
 
   const openRandomTab = useCallback(() => {
     setDrawMode('condition');
@@ -4308,8 +5768,11 @@ export default function App() {
     setTravelDisplayArea(null);
     setActiveTab('random');
     setMessage('抽選カードを押すとスタートします。');
+    if (locationIntroState === 'completed' && areaRef.current.trim() === '現在地') {
+      void requestCurrentLocation('background');
+    }
     scrollToContentTop();
-  }, [scrollToContentTop]);
+  }, [locationIntroState, requestCurrentLocation, scrollToContentTop]);
 
   const handleFooterPress = useCallback((tab: TabKey) => {
     if (tab === 'random') {
@@ -4322,6 +5785,7 @@ export default function App() {
 
   const enterMain = useCallback((nextUserId = APP_USER_ID, nextProfileName?: string) => {
     setUserId(nextUserId);
+    setFreshOAuthSessionPreferred(false);
     if (nextUserId === APP_USER_ID) {
       setProfileName('RANDISH Guest');
       setProfileImageUri(null);
@@ -4329,6 +5793,39 @@ export default function App() {
       setProfileName(nextProfileName.trim());
     }
     setStage('main');
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    randishApi.setAuthToken(null);
+    setFreshOAuthSessionPreferred(true);
+    void Linking.getInitialURL()
+      .then((url) => {
+        if (url && isOAuthCallbackUrl(url)) {
+          consumedOAuthCallbackUrls.add(url);
+        }
+      })
+      .catch(() => undefined);
+    userIdRef.current = APP_USER_ID;
+    didAskLocation.current = false;
+    savedDetailCacheRef.current.clear();
+    setUserId(APP_USER_ID);
+    setProfileName('RANDISH Guest');
+    setProfileImageUri(null);
+    setActiveTab('home');
+    setRestaurants([]);
+    setSelectedRestaurant(null);
+    setRandomHistory([]);
+    setDrawHistories([]);
+    setSavedRestaurants([]);
+    setAlbumPhotos([]);
+    setSavedDetail(null);
+    setSavedDetailLoadingId(null);
+    setSavedDetailError(null);
+    setHistoryDetailLoadingId(null);
+    setHistoryDetailError(null);
+    setIsLoading(false);
+    setMessage('条件を選んで、今日の一店を決めましょう。');
+    setStage('loggedOut');
   }, []);
 
   if (stage === 'splash') {
@@ -4351,8 +5848,30 @@ export default function App() {
         apiBaseUrlCandidates={apiBaseUrlCandidates}
         uiText={UI_TEXT[appLanguage]}
         locationStatus={locationStatus}
+        freshSessionPreferred={freshOAuthSessionPreferred}
         onApiConnected={syncWorkingApiBaseUrl}
         onStart={enterMain}
+      />
+    );
+  }
+
+  if (stage === 'loggedOut') {
+    return (
+      <LoggedOutScreen
+        uiText={UI_TEXT[appLanguage]}
+        onLogin={() => setStage('login')}
+        onGuest={() => enterMain()}
+      />
+    );
+  }
+
+  if (stage === 'main' && locationIntroState !== 'completed') {
+    return (
+      <LocationIntroScreen
+        loading={locationIntroState === 'loading' || locationIntroWorking}
+        onUseCurrentLocation={useCurrentLocationFromIntro}
+        onManualArea={chooseManualAreaFromIntro}
+        onLater={skipLocationIntroForNow}
       />
     );
   }
@@ -4411,6 +5930,7 @@ export default function App() {
             onAreaRandomPress={openAreaRandomConditions}
             onLocationPress={requestCurrentLocation}
             onRequireRegistration={() => setStage('login')}
+            onLogout={handleLogout}
           />
         )}
         {activeTab === 'search' && (
@@ -4453,6 +5973,10 @@ export default function App() {
             isLoading={isLoading}
             selectedRestaurant={selectedRestaurant}
             userLocation={userLocation}
+            mapCandidates={mapCandidates}
+            mapRouletteTarget={mapRouletteTarget}
+            mapRouletteStatus={mapRouletteStatus}
+            mapRouletteError={mapRouletteError}
             history={randomHistory}
             conditionRandom={conditionRandom}
             travelRevealStep={travelRevealStep}
@@ -4461,6 +5985,8 @@ export default function App() {
             drawMode={drawMode}
             mealTicketState={mealTicketState}
             spinValue={spinValue}
+            mapPinProgress={mapPinProgress}
+            mapPinBounce={mapPinBounce}
             resultRevealValue={resultRevealValue}
             onTabLayout={(offsetY) => {
               randomTabOffsetRef.current = offsetY;
@@ -4471,6 +5997,18 @@ export default function App() {
             onRandomPress={startPreparedDraw}
             onSavePress={saveSelectedRestaurant}
             onGoPress={openMap}
+            onChangeConditions={() => setActiveTab('search')}
+            onExpandDistance={() => {
+              const currentIndex = DISTANCE_OPTIONS.indexOf(distance);
+              updateDistance(DISTANCE_OPTIONS[Math.min(currentIndex + 1, DISTANCE_OPTIONS.length - 1)] ?? '3km');
+              setActiveTab('search');
+            }}
+            onRelaxConditions={() => {
+              updateGenre('すべて');
+              updateBudgetMax('');
+              setConditionRandom((current) => ({ ...current, budget: false, genre: false }));
+              setActiveTab('search');
+            }}
             isSelectedRestaurantSaved={selectedRestaurant ? isRestaurantSaved(selectedRestaurant) : false}
           />
         )}
@@ -4479,16 +6017,21 @@ export default function App() {
             savedRestaurants={savedRestaurants}
             albumPhotos={albumPhotos}
             history={randomHistory}
+            drawHistories={drawHistories}
             uiText={UI_TEXT[appLanguage]}
             savedDetail={savedDetail}
             savedDetailLoadingId={savedDetailLoadingId}
             savedDetailError={savedDetailError}
+            historyDetailLoadingId={historyDetailLoadingId}
+            historyDetailError={historyDetailError}
             userLocation={userLocation}
             isRegisteredUser={isRegisteredUser}
             isPro={subscription.isPro}
             onSavedPress={openSavedRestaurant}
+            onHistoryPress={openHistoryRestaurant}
             onSavedMapPress={openSavedMap}
             onAttachPhoto={attachSavedFoodPhoto}
+            onUploadAlbumPhoto={uploadAlbumPhoto}
             onCaptureAlbumPhoto={captureAlbumPhoto}
             onRequireRegistration={() => setStage('login')}
           />
@@ -4496,6 +6039,8 @@ export default function App() {
         {activeTab === 'analytics' && (
           <AnalyticsTab
             uiText={UI_TEXT[appLanguage]}
+            userId={userId}
+            apiBaseUrlCandidates={apiBaseUrlCandidates}
             area={area}
             locationStatus={locationStatus}
             restaurants={visibleRestaurants}
@@ -4504,6 +6049,7 @@ export default function App() {
             savedRestaurants={savedRestaurants}
             isPro={subscription.isPro}
             onStartPro={subscription.startProPurchase}
+            onRestorePro={subscription.restoreProPurchase}
             onAreaPress={() => setActiveTab('home')}
           />
         )}
@@ -4537,16 +6083,100 @@ function AppHeader({
   );
 }
 
+function LocationIntroScreen({
+  loading,
+  onUseCurrentLocation,
+  onManualArea,
+  onLater,
+}: {
+  loading: boolean;
+  onUseCurrentLocation: () => void;
+  onManualArea: () => void;
+  onLater: () => void;
+}) {
+  return (
+    <SafeAreaView style={styles.locationIntroScreen}>
+      <StatusBar barStyle="dark-content" />
+      <View style={styles.locationIntroContainer}>
+        <Image source={RANDISH_LOGO} style={styles.locationIntroLogo} resizeMode="contain" />
+        <Text style={styles.locationIntroKicker}>LOCATION SETUP</Text>
+        <Text style={styles.locationIntroTitle}>Randishは、今いる場所の近くから今日のお店を選びます</Text>
+        <Text style={styles.locationIntroLead}>位置情報は近くのお店を探すために使用します。</Text>
+        <View style={styles.locationIntroNotice}>
+          <Ionicons name="shield-checkmark-outline" size={20} color={ORANGE} />
+          <Text style={styles.locationIntroNoticeText}>
+            正確な現在地はサーバーへ保存せず、この端末内の短期キャッシュと検索条件にだけ使います。
+          </Text>
+        </View>
+        <Pressable
+          style={[styles.locationIntroPrimaryButton, loading && styles.locationIntroButtonDisabled]}
+          onPress={onUseCurrentLocation}
+          disabled={loading}
+        >
+          {loading ? <ActivityIndicator color="#ffffff" /> : <Ionicons name="navigate" size={20} color="#ffffff" />}
+          <Text style={styles.locationIntroPrimaryText}>現在地を使用する</Text>
+        </Pressable>
+        <Pressable style={styles.locationIntroSecondaryButton} onPress={onManualArea} disabled={loading}>
+          <Ionicons name="map-outline" size={18} color={ORANGE} />
+          <Text style={styles.locationIntroSecondaryText}>エリアを手動で選ぶ</Text>
+        </Pressable>
+        <Pressable style={styles.locationIntroTextButton} onPress={onLater} disabled={loading}>
+          <Text style={styles.locationIntroTextButtonLabel}>後で設定する</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function LoggedOutScreen({
+  uiText,
+  onLogin,
+  onGuest,
+}: {
+  uiText: Record<string, string>;
+  onLogin: () => void;
+  onGuest: () => void;
+}) {
+  return (
+    <SafeAreaView style={styles.loggedOutScreen}>
+      <StatusBar barStyle="dark-content" />
+      <View style={styles.loggedOutContainer}>
+        <Image source={RANDISH_LOGO} style={styles.loggedOutLogo} resizeMode="contain" />
+        <Text style={styles.loggedOutTitle}>ログアウトしました</Text>
+        <Text style={styles.loggedOutLead}>
+          この端末に残っていたログイン情報を消しました。別のGoogleアカウントやメールアドレスで登録できます。
+        </Text>
+        <View style={styles.loggedOutNotice}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={ORANGE} />
+          <Text style={styles.loggedOutNoticeText}>
+            この画面では古い認証URLを処理しません。次に選んだ方法だけでログインします。
+          </Text>
+        </View>
+        <Pressable style={styles.loggedOutPrimaryButton} onPress={onLogin}>
+          <Ionicons name="person-add-outline" size={18} color="#ffffff" />
+          <Text style={styles.loggedOutPrimaryText}>別のアカウントでログイン・登録</Text>
+        </Pressable>
+        <Pressable style={styles.loggedOutSecondaryButton} onPress={onGuest}>
+          <Ionicons name="restaurant-outline" size={18} color={ORANGE} />
+          <Text style={styles.loggedOutSecondaryText}>{uiText.guestStart}</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
+  );
+}
+
 function LoginScreen({
   apiBaseUrlCandidates,
   uiText,
   locationStatus,
+  freshSessionPreferred,
   onApiConnected,
   onStart,
 }: {
   apiBaseUrlCandidates: string[];
   uiText: Record<string, string>;
   locationStatus: string;
+  freshSessionPreferred: boolean;
   onApiConnected: () => void;
   onStart: (userId?: string, displayName?: string) => void;
 }) {
@@ -4555,10 +6185,11 @@ function LoginScreen({
   const handledOAuthUrlRef = useRef<string | null>(null);
 
   const completeOAuthSession = useCallback(async (url: string | null) => {
-    if (!url || !isOAuthCallbackUrl(url) || handledOAuthUrlRef.current === url) {
+    if (!url || !isOAuthCallbackUrl(url) || handledOAuthUrlRef.current === url || consumedOAuthCallbackUrls.has(url)) {
       return;
     }
     handledOAuthUrlRef.current = url;
+    consumedOAuthCallbackUrls.add(url);
     const params = parseOAuthCallbackParams(url);
     if (params.error || params.error_description) {
       setAuthNotice(`外部ログインを完了できませんでした。${params.error_description || params.error}`);
@@ -4616,7 +6247,7 @@ function LoginScreen({
       onApiConnected();
       const result = await WebBrowser.openAuthSessionAsync(authUrl.authorizationUrl, oauthRedirectUri, {
         dismissButtonStyle: 'cancel',
-        preferEphemeralSession: false,
+        preferEphemeralSession: freshSessionPreferred,
       });
 
       if (result.type === 'success') {
@@ -4730,7 +6361,7 @@ function RegisterAppleButton({
         <AppleAuthentication.AppleAuthenticationButton
           buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
           buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
-          cornerRadius={14}
+          cornerRadius={22}
           style={styles.registerAppleButtonNative}
           onPress={onPress}
         />
@@ -4914,6 +6545,7 @@ function HomeTab({
   onAreaRandomPress,
   onLocationPress,
   onRequireRegistration,
+  onLogout,
 }: {
   area: string;
   genre: string;
@@ -4949,6 +6581,7 @@ function HomeTab({
   onAreaRandomPress: () => void;
   onLocationPress: () => void;
   onRequireRegistration: () => void;
+  onLogout: () => void;
 }) {
   return (
     <View>
@@ -4978,6 +6611,7 @@ function HomeTab({
             onConditionRandomPress={onRandomPress}
             onSubmit={onLoadRestaurants}
             onRequireRegistration={onRequireRegistration}
+            onLogout={onLogout}
           />
     </View>
   );
@@ -5035,6 +6669,7 @@ function HomeLocationPanel({
   onConditionRandomPress,
   onSubmit,
   onRequireRegistration,
+  onLogout,
 }: {
   area: string;
   genre: string;
@@ -5061,12 +6696,14 @@ function HomeLocationPanel({
   onConditionRandomPress: () => void;
   onSubmit: () => void;
   onRequireRegistration: () => void;
+  onLogout: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [showAllFavorites, setShowAllFavorites] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
+  const [logoutSheetOpen, setLogoutSheetOpen] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState(profileName);
   const t = UI_TEXT[appLanguage];
   const currentLanguage = LANGUAGE_OPTIONS.find((item) => item.key === appLanguage) ?? LANGUAGE_OPTIONS[0];
@@ -5128,7 +6765,9 @@ function HomeLocationPanel({
   }));
   const accountMenuItems: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }[] = [
     { icon: 'notifications-outline', label: t.notifications, value: t.notificationsValue },
-    { icon: 'ticket-outline', label: t.dailyAccess, value: `${mealTicketState.usedFreeCount}/${mealTicketState.totalFreeCount} FREE` },
+    ...(FEATURE_MEAL_TICKETS_ENABLED
+      ? [{ icon: 'ticket-outline' as keyof typeof Ionicons.glyphMap, label: t.dailyAccess, value: `${mealTicketState.usedFreeCount}/${mealTicketState.totalFreeCount} FREE` }]
+      : []),
     { icon: 'shield-checkmark-outline', label: t.creditTerms, value: t.creditTermsValue },
   ];
   const currentLocationTitle = userLocation ? t.currentLocation : t.currentLocationFallback;
@@ -5210,6 +6849,24 @@ function HomeLocationPanel({
     ]);
   };
 
+  const confirmLogout = () => {
+    if (!isRegisteredUser) {
+      promptRegistration();
+      return;
+    }
+    Keyboard.dismiss();
+    setProfileEditorOpen(false);
+    setLanguageMenuOpen(false);
+    setAccountMenuOpen(false);
+    setLogoutSheetOpen(true);
+  };
+
+  const runLogout = () => {
+    Keyboard.dismiss();
+    setLogoutSheetOpen(false);
+    onLogout();
+  };
+
   const pickProfileImage = async () => {
     if (!isRegisteredUser) {
       promptRegistration();
@@ -5236,6 +6893,36 @@ function HomeLocationPanel({
 
   return (
     <View style={styles.homeLocationPanel}>
+      <Modal
+        visible={logoutSheetOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLogoutSheetOpen(false)}
+      >
+        <View style={styles.logoutModalOverlay}>
+          <View style={styles.logoutSheet}>
+            <View style={styles.logoutSheetIcon}>
+              <Ionicons name="log-out-outline" size={28} color="#d7472f" />
+            </View>
+            <Text style={styles.logoutSheetTitle}>{t.logoutConfirmTitle}</Text>
+            <Text style={styles.logoutSheetLead}>
+              この端末に残っているログイン情報だけを消します。サーバーのトークン確認は使わず、別のアカウントで登録・ログインできます。
+            </Text>
+            <View style={styles.logoutSheetNotice}>
+              <Ionicons name="phone-portrait-outline" size={17} color={ORANGE} />
+              <Text style={styles.logoutSheetNoticeText}>保存済みの外部店舗情報は再ログイン後に必要な時だけ取得します。</Text>
+            </View>
+            <View style={styles.logoutSheetActions}>
+              <Pressable style={styles.logoutSheetCancelButton} onPress={() => setLogoutSheetOpen(false)}>
+                <Text style={styles.logoutSheetCancelText}>{t.logoutConfirmCancel}</Text>
+              </Pressable>
+              <Pressable style={styles.logoutSheetActionButton} onPress={runLogout}>
+                <Text style={styles.logoutSheetActionText}>{t.logoutConfirmAction}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <View style={styles.homeTopBar}>
         <View style={styles.homeLogoButton}>
           <Image source={RANDISH_LOGO} style={styles.homeLogoImage} resizeMode="contain" />
@@ -5351,6 +7038,18 @@ function HomeLocationPanel({
                   <Ionicons name="chevron-forward" size={16} color="#afa69b" />
                 </Pressable>
               ))}
+              {isRegisteredUser && (
+                <Pressable style={[styles.homeAccountMenuItem, styles.homeAccountLogoutItem]} onPress={confirmLogout}>
+                  <View style={[styles.homeAccountMenuIcon, styles.homeAccountLogoutIcon]}>
+                    <Ionicons name="log-out-outline" size={18} color="#d7472f" />
+                  </View>
+                  <View style={styles.homeAccountMenuText}>
+                    <Text style={[styles.homeAccountMenuLabel, styles.homeAccountLogoutLabel]}>{t.logout}</Text>
+                    <Text style={[styles.homeAccountMenuValue, styles.homeAccountLogoutValue]}>{t.logoutValue}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#d9a195" />
+                </Pressable>
+              )}
               <View style={styles.homeAccountMenuFooter}>
                 <Pressable
                   style={styles.homeAccountCloseButton}
@@ -5377,7 +7076,7 @@ function HomeLocationPanel({
         </View>
         <HomeMapIllustration />
       </View>
-      <MealTicketPanel state={mealTicketState} uiText={t} />
+      {FEATURE_MEAL_TICKETS_ENABLED && <MealTicketPanel state={mealTicketState} uiText={t} />}
 
       <View style={styles.homeSearchBox}>
         <Ionicons name="search" size={28} color={INK} />
@@ -6300,7 +7999,6 @@ function SearchTab({
           onSavePress={() => onRestaurantSave(restaurant)}
         />
       ))}
-      {restaurants.length > 0 && <HotPepperCredit />}
     </View>
   );
 }
@@ -6316,6 +8014,10 @@ function RandomTab({
   isLoading,
   selectedRestaurant,
   userLocation,
+  mapCandidates,
+  mapRouletteTarget,
+  mapRouletteStatus,
+  mapRouletteError,
   history,
   conditionRandom,
   travelRevealStep,
@@ -6324,12 +8026,17 @@ function RandomTab({
   drawMode,
   mealTicketState,
   spinValue,
+  mapPinProgress,
+  mapPinBounce,
   resultRevealValue,
   onTabLayout,
   onResultLayout,
   onRandomPress,
   onSavePress,
   onGoPress,
+  onChangeConditions,
+  onExpandDistance,
+  onRelaxConditions,
   isSelectedRestaurantSaved,
 }: {
   uiText: Record<string, string>;
@@ -6342,6 +8049,10 @@ function RandomTab({
   isLoading: boolean;
   selectedRestaurant: Restaurant | null;
   userLocation: UserLocation | null;
+  mapCandidates: CandidatePlace[];
+  mapRouletteTarget: CandidatePlace | null;
+  mapRouletteStatus: MapRouletteStatus;
+  mapRouletteError: string | null;
   history: Restaurant[];
   conditionRandom: ConditionRandomState;
   travelRevealStep: TravelRevealStep;
@@ -6350,12 +8061,17 @@ function RandomTab({
   drawMode: DrawMode;
   mealTicketState: MealTicketState;
   spinValue: Animated.Value;
+  mapPinProgress: Animated.Value;
+  mapPinBounce: Animated.Value;
   resultRevealValue: Animated.Value;
   onTabLayout: (offsetY: number) => void;
   onResultLayout: (offsetY: number) => void;
   onRandomPress: () => void;
   onSavePress: () => void;
   onGoPress: () => void;
+  onChangeConditions: () => void;
+  onExpandDistance: () => void;
+  onRelaxConditions: () => void;
   isSelectedRestaurantSaved: boolean;
 }) {
   const isEverythingRandom = drawMode === 'everything';
@@ -6369,8 +8085,8 @@ function RandomTab({
   const displayBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax, uiText);
   const displayDistance = isEverythingRandom || conditionRandom.distance || (isTravelDraw && !canShowTravelArea) ? '？' : distance;
   const currentTicket = mealTicketState.current;
-  const ticketAvailable = currentTicket.available;
-  const statusText = !ticketAvailable
+  const ticketAvailable = !FEATURE_MEAL_TICKETS_ENABLED || currentTicket.available;
+  const statusText = FEATURE_MEAL_TICKETS_ENABLED && !ticketAvailable
     ? 'NEXT DRAW LOCKED'
     : isLoading
     ? drawAnimation.activeStatus
@@ -6379,7 +8095,7 @@ function RandomTab({
       : isTravelDraw
         ? 'TRAVEL READY'
       : 'READY TO DRAW';
-  const startText = !ticketAvailable
+  const startText = FEATURE_MEAL_TICKETS_ENABLED && !ticketAvailable
     ? currentTicket.proOnly && !mealTicketState.isProUser
       ? '深夜はPro限定'
       : '次の抽選を待つ'
@@ -6463,116 +8179,16 @@ function RandomTab({
               <Text style={styles.rouletteStatusText}>{statusText}</Text>
             </View>
           </View>
-          <View style={styles.rouletteMapCanvas}>
-            <View style={[styles.rouletteMapCanvasPark, styles.rouletteMapCanvasParkOne]} />
-            <View style={[styles.rouletteMapCanvasPark, styles.rouletteMapCanvasParkTwo]} />
-            <View style={[styles.rouletteMapCanvasRiver, styles.rouletteMapCanvasRiverOne]} />
-            <View style={[styles.rouletteMapCanvasRiver, styles.rouletteMapCanvasRiverTwo]} />
-            <View style={[styles.rouletteMapDistrictLabel, styles.rouletteMapDistrictLabelOne]}>
-              <Text style={styles.rouletteMapDistrictText}>駅前</Text>
-            </View>
-            <View style={[styles.rouletteMapDistrictLabel, styles.rouletteMapDistrictLabelTwo]}>
-              <Text style={styles.rouletteMapDistrictText}>商店街</Text>
-            </View>
-            <View style={[styles.rouletteMapRailLine, styles.rouletteMapRailLineOne]} />
-            <View style={[styles.rouletteMapRailLine, styles.rouletteMapRailLineTwo]} />
-            <View style={[styles.rouletteMapStationDot, styles.rouletteMapStationDotOne]}>
-              <Ionicons name="train-outline" size={13} color="#6f7f8a" />
-            </View>
-            <View style={[styles.rouletteMapStationDot, styles.rouletteMapStationDotTwo]}>
-              <Ionicons name="business-outline" size={12} color="#6f7f8a" />
-            </View>
-            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadOne]} />
-            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadTwo]} />
-            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadThree]} />
-            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadFour]} />
-            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadFive]} />
-            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadSix]} />
-            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadSeven]} />
-            <View style={[styles.rouletteMapFineRoad, styles.rouletteMapFineRoadEight]} />
-            <View style={[styles.rouletteMapArterialRoad, styles.rouletteMapArterialRoadOne]} />
-            <View style={[styles.rouletteMapArterialRoad, styles.rouletteMapArterialRoadTwo]} />
-            <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadOne]} />
-            <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadTwo]} />
-            <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadThree]} />
-            <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadFour]} />
-            <View style={[styles.rouletteMapBridge, styles.rouletteMapBridgeOne]} />
-            <View style={[styles.rouletteMapBridge, styles.rouletteMapBridgeTwo]} />
-            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockOne]} />
-            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockTwo]} />
-            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockThree]} />
-            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockFour]} />
-            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockFive]} />
-            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockSix]} />
-            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockSeven]} />
-            <View style={[styles.rouletteMapBlock, styles.rouletteMapBlockEight]} />
-            <View style={[styles.rouletteRouteSegment, styles.rouletteRouteSegmentOne]} />
-            <View style={[styles.rouletteRouteSegment, styles.rouletteRouteSegmentTwo]} />
-            <View style={[styles.rouletteRouteSegment, styles.rouletteRouteSegmentThree]} />
-            <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotOne]} />
-            <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotTwo]} />
-            <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotThree]} />
-            <View style={[styles.rouletteRouteDot, styles.rouletteRouteDotFour]} />
-            <View style={[styles.rouletteMapCandidatePin, styles.rouletteMapCandidatePinOne]}>
-              <Text style={styles.rouletteMapCandidatePinText}>1</Text>
-            </View>
-            <View style={[styles.rouletteMapCandidatePin, styles.rouletteMapCandidatePinTwo]}>
-              <Text style={styles.rouletteMapCandidatePinText}>2</Text>
-            </View>
-            <View style={[styles.rouletteMapCandidatePin, styles.rouletteMapCandidatePinThree]}>
-              <Text style={styles.rouletteMapCandidatePinText}>3</Text>
-            </View>
-            <View style={[styles.rouletteMapCandidatePin, styles.rouletteMapCandidatePinFour]}>
-              <Text style={styles.rouletteMapCandidatePinText}>4</Text>
-            </View>
-            <Animated.View style={[styles.rouletteMapPulse, { opacity: radarPulseOpacity, transform: [{ scale: radarPulseScale }] }]} />
-            <View style={styles.rouletteMapPin}>
-              <Ionicons name="location" size={44} color={ORANGE} />
-              <View style={styles.rouletteMapPinDot} />
-            </View>
-            {rouletteMapBubbles.map((bubble) => (
-              <View
-                key={`${bubble.label}-${bubble.icon}`}
-                style={[styles.rouletteMapBubble, bubble.style, { borderColor: hexToRgba(bubble.color, 0.2) }]}
-              >
-                <Ionicons name={bubble.icon} size={17} color={bubble.color} />
-                <Text style={[styles.rouletteMapBubbleText, { color: bubble.color }]} numberOfLines={1}>{bubble.label}</Text>
-              </View>
-            ))}
-            {drawAnimationKey === 'radar' && (
-              <Animated.View style={[styles.rouletteMapRadarSweep, { transform: [{ rotate: radarRotate }] }]} />
-            )}
-            {drawAnimationKey === 'lottery' && (
-              <Animated.View style={[styles.lotteryMotionLayer, { opacity: ticketOpacity, transform: [{ translateY: ticketLift }, { rotate: ticketRotate }] }]}>
-                <View style={[styles.lotteryTicket, styles.lotteryTicketBackLeft]} />
-                <View style={[styles.lotteryTicket, styles.lotteryTicketBackRight]} />
-                <View style={styles.lotteryTicketFront}>
-                  <Text style={styles.lotteryTicketLabel}>RANDISH</Text>
-                  <Text style={styles.lotteryTicketTitle}>今日の一店</Text>
-                </View>
-              </Animated.View>
-            )}
-            {drawAnimationKey === 'shuffle' && (
-              <View style={styles.shuffleMotionLayer}>
-                <Animated.View style={[styles.shuffleCard, styles.shuffleCardOne, { transform: [{ translateX: shuffleOneX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '-8deg' }] }]}>
-                  <Text style={styles.shuffleCardLabel}>AREA</Text>
-                  <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayArea}</Text>
-                </Animated.View>
-                <Animated.View style={[styles.shuffleCard, styles.shuffleCardTwo, { transform: [{ translateX: shuffleTwoX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '5deg' }] }]}>
-                  <Text style={styles.shuffleCardLabel}>GENRE</Text>
-                  <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayGenre}</Text>
-                </Animated.View>
-                <Animated.View style={[styles.shuffleCard, styles.shuffleCardThree, { transform: [{ translateX: shuffleThreeX }, { translateY: shuffleCardY }, { scale: shuffleCardScale }, { rotate: '10deg' }] }]}>
-                  <Text style={styles.shuffleCardLabel}>PRICE</Text>
-                  <Text style={styles.shuffleCardValue} numberOfLines={1}>{displayBudget}</Text>
-                </Animated.View>
-              </View>
-            )}
-            <View style={styles.rouletteMapLoadingPill}>
-              {isLoading ? <ActivityIndicator size="small" color={ORANGE} /> : <Ionicons name="map-outline" size={18} color={ORANGE} />}
-              <Text style={styles.rouletteMapLoadingText}>{isLoading ? 'いま抽選中...' : '地図から候補を探す'}</Text>
-            </View>
-          </View>
+          <RouletteMapView
+            center={userLocation}
+            candidates={mapCandidates}
+            target={mapRouletteTarget}
+            status={mapRouletteStatus}
+            progress={mapPinProgress}
+            bounce={mapPinBounce}
+            loading={isLoading}
+            fallbackLabel={displayArea}
+          />
           <View style={styles.rouletteHintRow}>
             <Text style={styles.rouletteHintText}>{drawAnimation.hint}</Text>
             <Text style={styles.rouletteHintAccent}>{drawAnimation.accent}</Text>
@@ -6650,10 +8266,17 @@ function RandomTab({
             onMapPress={onGoPress}
             onFavoritePress={onSavePress}
             isFavorite={isSelectedRestaurantSaved}
+            allowExternalPhoto
           />
           <View style={styles.resultActions}>
             <Pressable style={styles.secondaryAction} onPress={onRandomPress}>
               <Text style={styles.secondaryActionText}>{uiText.drawAgain}</Text>
+            </Pressable>
+            <Pressable style={[styles.secondaryAction, isSelectedRestaurantSaved && styles.secondaryActionDisabled]} onPress={onSavePress} disabled={isSelectedRestaurantSaved}>
+              <Text style={styles.secondaryActionText}>{isSelectedRestaurantSaved ? '保存済み' : '保存'}</Text>
+            </Pressable>
+            <Pressable style={styles.secondaryAction} onPress={onChangeConditions}>
+              <Text style={styles.secondaryActionText}>条件を変える</Text>
             </Pressable>
             <Pressable style={styles.primaryAction} onPress={onGoPress}>
               <Text style={styles.primaryActionText}>{uiText.goThisShop}</Text>
@@ -6662,12 +8285,189 @@ function RandomTab({
         </Animated.View>
       ) : (
         <View style={styles.emptyPanel}>
-          <Text style={styles.emptyTitle}>{uiText.emptyResultTitle}</Text>
-          <Text style={styles.emptyText}>{uiText.emptyResultText}</Text>
+          <Text style={styles.emptyTitle}>{mapRouletteStatus === 'empty' ? '近くの候補が見つかりません' : uiText.emptyResultTitle}</Text>
+          <Text style={styles.emptyText}>{mapRouletteError ?? uiText.emptyResultText}</Text>
+          {(mapRouletteStatus === 'empty' || mapRouletteStatus === 'error') && (
+            <View style={styles.emptyActionRow}>
+              <Pressable style={styles.emptyActionButton} onPress={onExpandDistance}>
+                <Text style={styles.emptyActionText}>検索距離を広げる</Text>
+              </Pressable>
+              <Pressable style={styles.emptyActionButton} onPress={onRelaxConditions}>
+                <Text style={styles.emptyActionText}>条件を減らす</Text>
+              </Pressable>
+              <Pressable style={styles.emptyActionButton} onPress={onChangeConditions}>
+                <Text style={styles.emptyActionText}>エリアを変更する</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       )}
       <HistorySection history={history} uiText={uiText} />
-      {!selectedRestaurant && history.length > 0 && <HotPepperCredit />}
+    </View>
+  );
+}
+
+function RouletteMapView({
+  center,
+  candidates,
+  target,
+  status,
+  progress,
+  bounce,
+  loading,
+  fallbackLabel,
+}: {
+  center: UserLocation | null;
+  candidates: CandidatePlace[];
+  target: CandidatePlace | null;
+  status: MapRouletteStatus;
+  progress: Animated.Value;
+  bounce: Animated.Value;
+  loading: boolean;
+  fallbackLabel: string;
+}) {
+  const [canvasSize, setCanvasSize] = useState({ width: 320, height: 318 });
+  const MapModule = useMemo(getNativeMapModule, []);
+  const mapCenter = useMemo(() => {
+    if (center) {
+      return center;
+    }
+    const reference = target ?? candidates[0];
+    if (reference) {
+      return { latitude: reference.latitude, longitude: reference.longitude, label: fallbackLabel || '現在地周辺' };
+    }
+    return { latitude: 35.681236, longitude: 139.767125, label: fallbackLabel || '現在地周辺' };
+  }, [candidates, center, fallbackLabel, target]);
+
+  const region = useMemo(() => {
+    const latitudes = [mapCenter.latitude, ...candidates.map((candidate) => candidate.latitude)];
+    const longitudes = [mapCenter.longitude, ...candidates.map((candidate) => candidate.longitude)];
+    const latitudeDelta = Math.max(0.012, (Math.max(...latitudes) - Math.min(...latitudes)) * 2.4 || 0.012);
+    const longitudeDelta = Math.max(0.012, (Math.max(...longitudes) - Math.min(...longitudes)) * 2.4 || 0.012);
+    return {
+      latitude: mapCenter.latitude,
+      longitude: mapCenter.longitude,
+      latitudeDelta,
+      longitudeDelta,
+    };
+  }, [candidates, mapCenter.latitude, mapCenter.longitude]);
+
+  const toPoint = useCallback((latitude: number, longitude: number) => {
+    const width = Math.max(canvasSize.width, 1);
+    const height = Math.max(canvasSize.height, 1);
+    const longitudeRatio = (longitude - (region.longitude - region.longitudeDelta / 2)) / region.longitudeDelta;
+    const latitudeRatio = ((region.latitude + region.latitudeDelta / 2) - latitude) / region.latitudeDelta;
+    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+    return {
+      x: clamp(longitudeRatio, 0.08, 0.92) * width,
+      y: clamp(latitudeRatio, 0.12, 0.86) * height,
+    };
+  }, [canvasSize.height, canvasSize.width, region.latitude, region.latitudeDelta, region.longitude, region.longitudeDelta]);
+
+  const displayCandidates = candidates.slice(0, 18);
+  const routeCandidates = useMemo(() => {
+    if (target) {
+      const beforeTarget = candidates.filter((candidate) => candidate.id !== target.id).slice(0, 5);
+      return beforeTarget.length ? [...beforeTarget, target] : [target, target];
+    }
+    return candidates.slice(0, 6);
+  }, [candidates, target]);
+  const routePoints = (routeCandidates.length ? routeCandidates : [{ latitude: mapCenter.latitude, longitude: mapCenter.longitude }]).map((candidate) =>
+    toPoint(candidate.latitude, candidate.longitude));
+  const safeRoutePoints = routePoints.length > 1 ? routePoints : [routePoints[0], routePoints[0]];
+  const inputRange = safeRoutePoints.map((_, index) => index / (safeRoutePoints.length - 1));
+  const pinX = progress.interpolate({
+    inputRange,
+    outputRange: safeRoutePoints.map((point) => point.x - 18),
+  });
+  const pinY = progress.interpolate({
+    inputRange,
+    outputRange: safeRoutePoints.map((point) => point.y - 40),
+  });
+  const bounceY = bounce.interpolate({ inputRange: [0, 0.45, 1], outputRange: [0, -18, 0] });
+  const statusLabel = status === 'searching'
+    ? '候補を取得中'
+    : status === 'spinning'
+      ? '赤ピン巡回中'
+      : status === 'result'
+        ? '決定'
+        : candidates.length
+          ? `${candidates.length}件の候補`
+          : '候補待ち';
+  const canRenderNativeMap = MapModule && Platform.OS !== 'web';
+  const MapView = MapModule?.default;
+  const Marker = MapModule?.Marker;
+
+  return (
+    <View
+      style={styles.rouletteMapCanvas}
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        if (width > 0 && height > 0) {
+          setCanvasSize({ width, height });
+        }
+      }}
+    >
+      {canRenderNativeMap && MapView && Marker ? (
+        <MapView
+          provider={MapModule?.PROVIDER_GOOGLE}
+          style={styles.mapRouletteNativeMap}
+          region={region}
+          scrollEnabled={false}
+          zoomEnabled={false}
+          pitchEnabled={false}
+          rotateEnabled={false}
+          toolbarEnabled={false}
+          loadingEnabled
+        >
+          <Marker coordinate={{ latitude: mapCenter.latitude, longitude: mapCenter.longitude }}>
+            <View style={styles.mapRouletteCurrentMarker} />
+          </Marker>
+          {displayCandidates.map((candidate) => (
+            <Marker key={candidate.id} coordinate={{ latitude: candidate.latitude, longitude: candidate.longitude }}>
+              <View style={styles.mapRouletteCandidateMarker} />
+            </Marker>
+          ))}
+        </MapView>
+      ) : (
+        <View style={styles.mapRouletteFallback}>
+          <View style={[styles.rouletteMapCanvasPark, styles.rouletteMapCanvasParkOne]} />
+          <View style={[styles.rouletteMapCanvasPark, styles.rouletteMapCanvasParkTwo]} />
+          <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadOne]} />
+          <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadTwo]} />
+          <View style={[styles.rouletteMapCanvasRoad, styles.rouletteMapCanvasRoadThree]} />
+          <Text style={styles.mapRouletteFallbackLabel} numberOfLines={1}>{fallbackLabel}</Text>
+        </View>
+      )}
+      <View pointerEvents="none" style={styles.mapRouletteOverlay}>
+        <View style={[styles.mapRouletteCurrentDot, { left: toPoint(mapCenter.latitude, mapCenter.longitude).x - 8, top: toPoint(mapCenter.latitude, mapCenter.longitude).y - 8 }]} />
+        {displayCandidates.map((candidate, index) => {
+          const point = toPoint(candidate.latitude, candidate.longitude);
+          return (
+            <View key={`${candidate.id}-overlay`} style={[styles.mapRouletteCandidateDot, { left: point.x - 5, top: point.y - 5 }]}>
+              {index < 9 && <Text style={styles.mapRouletteCandidateDotText}>{index + 1}</Text>}
+            </View>
+          );
+        })}
+        <Animated.View
+          style={[
+            styles.mapRouletteRedPin,
+            {
+              transform: [
+                { translateX: pinX },
+                { translateY: pinY },
+                { translateY: bounceY },
+              ],
+            },
+          ]}
+        >
+          <Ionicons name="location" size={42} color="#e3322b" />
+        </Animated.View>
+      </View>
+      <View style={styles.rouletteMapLoadingPill}>
+        {loading ? <ActivityIndicator size="small" color={ORANGE} /> : <Ionicons name="map-outline" size={18} color={ORANGE} />}
+        <Text style={styles.rouletteMapLoadingText}>{statusLabel}</Text>
+      </View>
     </View>
   );
 }
@@ -6676,40 +8476,59 @@ function SaveTab({
   savedRestaurants,
   albumPhotos,
   history,
+  drawHistories,
   uiText,
   savedDetail,
   savedDetailLoadingId,
   savedDetailError,
+  historyDetailLoadingId,
+  historyDetailError,
   userLocation,
   isRegisteredUser,
   isPro,
   onSavedPress,
+  onHistoryPress,
   onSavedMapPress,
   onAttachPhoto,
+  onUploadAlbumPhoto,
   onCaptureAlbumPhoto,
   onRequireRegistration,
 }: {
   savedRestaurants: SavedRestaurant[];
   albumPhotos: AlbumPhotoEntry[];
   history: Restaurant[];
+  drawHistories: DrawHistoryEntry[];
   uiText: Record<string, string>;
   savedDetail: { favorite: SavedRestaurant; restaurant: Restaurant } | null;
   savedDetailLoadingId: string | null;
   savedDetailError: string | null;
+  historyDetailLoadingId: string | null;
+  historyDetailError: string | null;
   userLocation: UserLocation | null;
   isRegisteredUser: boolean;
   isPro: boolean;
   onSavedPress: (favorite: SavedRestaurant) => void;
+  onHistoryPress: (entry: DrawHistoryEntry) => void;
   onSavedMapPress: (restaurant: Restaurant) => void;
   onAttachPhoto: (favoriteId: string) => void;
+  onUploadAlbumPhoto: () => void;
   onCaptureAlbumPhoto: () => void;
   onRequireRegistration: () => void;
 }) {
   const [previewPhoto, setPreviewPhoto] = useState<AlbumPhotoPreview | null>(null);
   const [selectedAlbumMonth, setSelectedAlbumMonth] = useState('all');
-  const showHotPepperCredit =
-    history.some((restaurant) => restaurant.externalProvider === 'HOTPEPPER') ||
-    savedRestaurants.some((favorite) => favorite.provider === 'HOTPEPPER' || favorite.snapshot?.externalProvider === 'HOTPEPPER');
+  const [activeAlbumView, setActiveAlbumView] = useState<AlbumViewKey>('photos');
+  const [slideshowIndex, setSlideshowIndex] = useState(0);
+  const [slideshowPlaying, setSlideshowPlaying] = useState(false);
+  const albumHistory = useMemo(
+    () => {
+      const hydratedHistory = drawHistories
+        .map((entry) => entry.restaurant)
+        .filter((restaurant): restaurant is Restaurant => Boolean(restaurant));
+      return hydratedHistory.length ? hydratedHistory : history;
+    },
+    [drawHistories, history],
+  );
   const savedPhotoEntries = useMemo(
     () => savedRestaurants.filter((favorite) => Boolean(favorite.photoUri)),
     [savedRestaurants],
@@ -6755,12 +8574,62 @@ function SaveTab({
     ? monthKeys
     : monthKeys.filter((key) => key === selectedAlbumMonth);
   const diaryCount = diaryItems.length;
+  const demoSlideshowItems = useMemo(() => createDemoAlbumSlideItems(), []);
+  const showingDemoSlides = diaryItems.length === 0;
+  const slideshowBaseItems = showingDemoSlides ? demoSlideshowItems : diaryItems;
+  const slideshowItems = useMemo(
+    () => selectedAlbumMonth === 'all' || showingDemoSlides
+      ? slideshowBaseItems
+      : slideshowBaseItems.filter((item) => getAlbumMonthKey(item.createdAt) === selectedAlbumMonth),
+    [selectedAlbumMonth, showingDemoSlides, slideshowBaseItems],
+  );
+  const slideshowDisplayIndex = slideshowItems.length ? Math.min(slideshowIndex, slideshowItems.length - 1) : 0;
+  const slideshowItem = slideshowItems.length
+    ? slideshowItems[slideshowDisplayIndex]
+    : null;
+  const slideshowMonthLabel = selectedAlbumMonth === 'all' || showingDemoSlides
+    ? formatAlbumMonthLabel(getAlbumMonthKey(slideshowItems[0]?.createdAt ?? new Date().toISOString()))
+    : formatAlbumMonthLabel(selectedAlbumMonth);
+  const slideshowGenreCount = useMemo(
+    () => new Set(slideshowItems.map((item) => getAlbumDiaryGenreLabel(item))).size,
+    [slideshowItems],
+  );
+  const slideshowProgress = slideshowItems.length
+    ? Math.round(((slideshowDisplayIndex + 1) / slideshowItems.length) * 100)
+    : 0;
+  const slideshowHeroGenre = getAlbumDiaryGenreLabel(slideshowItem);
+  const slideshowHeroVisual = getGenreVisual(slideshowHeroGenre);
+  const slideshowMoodLine = slideshowItem
+    ? getAlbumSlideshowMoodLine(slideshowItem, slideshowDisplayIndex, slideshowItems.length)
+    : '';
+  const albumViews = [
+    { key: 'photos', label: '写真', count: `${diaryCount}枚`, icon: 'images-outline' },
+    { key: 'slideshow', label: 'スライド', count: `${slideshowBaseItems.length}枚`, icon: 'play-circle-outline' },
+    { key: 'favorites', label: 'お気に入り', count: `${savedRestaurants.length}件`, icon: 'heart-outline' },
+    { key: 'history', label: '履歴', count: `${drawHistories.length || history.length}件`, icon: 'time-outline' },
+  ] as const;
 
   useEffect(() => {
     if (selectedAlbumMonth !== 'all' && !monthKeys.includes(selectedAlbumMonth)) {
       setSelectedAlbumMonth('all');
     }
   }, [monthKeys, selectedAlbumMonth]);
+
+  useEffect(() => {
+    if (slideshowIndex >= slideshowItems.length) {
+      setSlideshowIndex(0);
+    }
+  }, [slideshowIndex, slideshowItems.length]);
+
+  useEffect(() => {
+    if (!slideshowPlaying || slideshowItems.length <= 1) {
+      return undefined;
+    }
+    const timer = setInterval(() => {
+      setSlideshowIndex((current) => (current + 1) % slideshowItems.length);
+    }, 2600);
+    return () => clearInterval(timer);
+  }, [slideshowItems.length, slideshowPlaying]);
 
   if (!isRegisteredUser) {
     return (
@@ -6793,10 +8662,10 @@ function SaveTab({
           <Image source={ALBUM_FOOTER_ICON} style={styles.albumCameraIcon} resizeMode="contain" />
         </View>
         <View style={styles.albumCameraBody}>
-          <Text style={styles.albumCameraKicker}>FOOD LOG</Text>
-          <Text style={styles.albumCameraTitle}>今日の一枚を残す</Text>
+          <Text style={styles.albumCameraKicker}>PHOTO</Text>
+          <Text style={styles.albumCameraTitle}>写真を撮って残す</Text>
           <Text style={styles.albumCameraText} numberOfLines={2}>
-            撮った一枚をフードログにそのまま追加できます。
+            食べたものやお店の雰囲気を一枚で残せます。
           </Text>
           <View style={styles.albumCameraStatsRow}>
             <View style={styles.albumCameraStatChip}>
@@ -6804,160 +8673,375 @@ function SaveTab({
               <Text style={styles.albumCameraStatText}>{diaryCount}枚</Text>
             </View>
             <View style={styles.albumCameraStatChip}>
-              <Ionicons name="bookmark-outline" size={14} color="#81776b" />
+              <Ionicons name="heart-outline" size={14} color="#81776b" />
               <Text style={styles.albumCameraStatText}>{savedRestaurants.length}件</Text>
             </View>
+            <View style={styles.albumCameraStatChip}>
+              <Ionicons name="time-outline" size={14} color="#81776b" />
+              <Text style={styles.albumCameraStatText}>{albumHistory.length}件</Text>
+            </View>
           </View>
         </View>
-        <Pressable
-          style={styles.albumCameraButton}
-          onPress={onCaptureAlbumPhoto}
-        >
-          <Ionicons name="camera" size={25} color="#ffffff" />
-          <Text style={styles.albumCameraButtonText}>撮る</Text>
-        </Pressable>
-      </View>
-      {hiddenByPlanCount > 0 && (
-        <View style={styles.albumRetentionNote}>
-          <Ionicons name="time-outline" size={16} color={ORANGE} />
-          <Text style={styles.albumRetentionText}>
-            Freeプランでは直近3か月分を表示します。古い写真 {hiddenByPlanCount} 枚はProで見返せます。
-          </Text>
-        </View>
-      )}
-      {savedRestaurants.length === 0 ? (
-        <View style={styles.emptyPanel}>
-          <Text style={styles.emptyTitle}>{uiText.savedEmptyTitle}</Text>
-          <Text style={styles.emptyText}>{uiText.savedEmptyText}</Text>
-        </View>
-      ) : (
-        <View style={styles.savedListBlock}>
-          <SectionHeader title={uiText.favoriteListTitle} action={`${savedRestaurants.length}件`} />
-          <View style={styles.savedList}>
-            {savedRestaurants.map((favorite) => (
-              <SavedPlaceCard
-                key={`${favorite.id}-saved`}
-                favorite={favorite}
-                loading={savedDetailLoadingId === favorite.id}
-                selected={savedDetail?.favorite.id === favorite.id}
-                onPress={() => onSavedPress(favorite)}
-                onPhotoPress={() => onAttachPhoto(favorite.id)}
-              />
-            ))}
-          </View>
-        </View>
-      )}
-      {diaryCount > 0 && (
-        <View style={styles.albumDiarySection}>
-          <SectionHeader title="フードログ" action={`${diaryCount}枚`} />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.albumMonthChipRow}
+        <View style={styles.albumCameraActions}>
+          <Pressable
+            style={styles.albumCameraUploadButton}
+            onPress={onUploadAlbumPhoto}
           >
+            <Ionicons name="image-outline" size={20} color={ORANGE} />
+            <Text style={styles.albumCameraUploadText}>追加</Text>
+          </Pressable>
+          <Pressable
+            style={styles.albumCameraButton}
+            onPress={onCaptureAlbumPhoto}
+          >
+            <Ionicons name="camera" size={25} color="#ffffff" />
+            <Text style={styles.albumCameraButtonText}>撮影</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.albumViewTabs}>
+        {albumViews.map((item) => {
+          const active = activeAlbumView === item.key;
+          return (
             <Pressable
-              style={[styles.albumMonthChip, selectedAlbumMonth === 'all' && styles.albumMonthChipActive]}
-              onPress={() => setSelectedAlbumMonth('all')}
+              key={item.key}
+              accessibilityRole="button"
+              style={[styles.albumViewTab, active && styles.albumViewTabActive]}
+              onPress={() => setActiveAlbumView(item.key)}
             >
-              <Text style={[styles.albumMonthChipTitle, selectedAlbumMonth === 'all' && styles.albumMonthChipTitleActive]}>
-                すべて表示
+              <Ionicons name={item.icon} size={18} color={active ? '#ffffff' : ORANGE} />
+              <Text style={[styles.albumViewTabLabel, active && styles.albumViewTabLabelActive]} numberOfLines={1}>
+                {item.label}
               </Text>
-              <Text style={[styles.albumMonthChipCount, selectedAlbumMonth === 'all' && styles.albumMonthChipCountActive]}>
-                {diaryCount}枚
+              <Text style={[styles.albumViewTabCount, active && styles.albumViewTabCountActive]} numberOfLines={1}>
+                {item.count}
               </Text>
             </Pressable>
-            {monthKeys.map((monthKey) => {
-              const monthCount = diaryItems.filter((item) => getAlbumMonthKey(item.createdAt) === monthKey).length;
-              const active = selectedAlbumMonth === monthKey;
-              return (
-                <Pressable
-                  key={monthKey}
-                  style={[styles.albumMonthChip, active && styles.albumMonthChipActive]}
-                  onPress={() => setSelectedAlbumMonth(monthKey)}
-                >
-                  <Text style={[styles.albumMonthChipTitle, active && styles.albumMonthChipTitleActive]}>
-                    {formatAlbumMonthLabel(monthKey)}のアルバム
-                  </Text>
-                  <Text style={[styles.albumMonthChipCount, active && styles.albumMonthChipCountActive]}>
-                    {monthCount}枚
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          {visibleMonthKeys.map((monthKey) => {
-            const monthItems = diaryItems.filter((item) => getAlbumMonthKey(item.createdAt) === monthKey);
-            return (
-              <View key={monthKey} style={styles.albumMonthSection}>
-                <View style={styles.albumMonthHeader}>
-                  <Text style={styles.albumMonthTitle}>{formatAlbumMonthLabel(monthKey)}</Text>
-                  <Text style={styles.albumMonthCount}>{monthItems.length}枚</Text>
-                </View>
-                <View style={styles.albumDiaryGrid}>
-                  {monthItems.map((item) => (
-                    <AlbumMemoryCard
-                      key={item.id}
-                      item={item}
-                      onPress={() => setPreviewPhoto({
-                        photoUri: item.photoUri,
-                        title: item.title,
-                        subtitle: item.subtitle,
-                        dateLabel: formatShortDateTime(item.createdAt) || '今日',
-                      })}
-                    />
-                  ))}
-                </View>
-              </View>
-            );
-          })}
-          {visibleMonthKeys.length === 0 && (
-            <View style={styles.albumEmptyMonthCard}>
-              <Text style={styles.albumEmptyMonthTitle}>この月の写真はまだありません</Text>
-              <Text style={styles.albumEmptyMonthText}>撮った写真はここに4列のアルバムで並びます。</Text>
+          );
+        })}
+      </View>
+
+      {activeAlbumView === 'photos' && (
+        <View style={styles.albumViewPanel}>
+          {hiddenByPlanCount > 0 && (
+            <View style={styles.albumRetentionNote}>
+              <Ionicons name="time-outline" size={16} color={ORANGE} />
+              <Text style={styles.albumRetentionText}>
+                Freeプランでは直近3か月分を表示します。古い写真 {hiddenByPlanCount} 枚はProで見返せます。
+              </Text>
             </View>
           )}
-        </View>
-      )}
-      {savedDetailError && (
-        <View style={styles.savedErrorNotice}>
-          <Ionicons name="alert-circle-outline" size={18} color={ORANGE} />
-          <Text style={styles.savedErrorText}>{savedDetailError}</Text>
-        </View>
-      )}
-      {savedDetail && (
-        <View style={styles.savedDetailBlock}>
-          <SectionHeader title="アルバム詳細" action={savedDetail.favorite.photoUri ? '写真あり' : '写真なし'} />
-          {savedDetail.favorite.photoUri ? (
-            <View style={styles.savedPhotoHero}>
-              <Image source={{ uri: savedDetail.favorite.photoUri }} style={styles.savedPhotoHeroImage} />
-              <View style={styles.savedPhotoHeroBadge}>
-                <Ionicons name="camera" size={14} color="#ffffff" />
-                <Text style={styles.savedPhotoHeroBadgeText}>ごはん写真</Text>
-              </View>
+          {diaryCount === 0 ? (
+            <View style={styles.emptyPanel}>
+              <Text style={styles.emptyTitle}>写真はまだありません</Text>
+              <Text style={styles.emptyText}>上の撮影ボタンから、食べたものをアルバムに残せます。</Text>
             </View>
           ) : (
-            <View style={styles.savedPhotoEmpty}>
-              <Image source={ALBUM_FOOD_ICON} style={styles.savedPhotoEmptyIcon} />
-              <Text style={styles.savedPhotoEmptyTitle}>この店の一枚を残せます</Text>
-              <Text style={styles.savedPhotoEmptyText}>行ったときのごはん写真を撮ると、アルバムらしく見返せます。</Text>
+            <View style={styles.albumDiarySection}>
+              <SectionHeader title="写真アルバム" action={`${diaryCount}枚`} />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.albumMonthChipRow}
+              >
+                <Pressable
+                  style={[styles.albumMonthChip, selectedAlbumMonth === 'all' && styles.albumMonthChipActive]}
+                  onPress={() => setSelectedAlbumMonth('all')}
+                >
+                  <Text style={[styles.albumMonthChipTitle, selectedAlbumMonth === 'all' && styles.albumMonthChipTitleActive]}>
+                    すべて表示
+                  </Text>
+                  <Text style={[styles.albumMonthChipCount, selectedAlbumMonth === 'all' && styles.albumMonthChipCountActive]}>
+                    {diaryCount}枚
+                  </Text>
+                </Pressable>
+                {monthKeys.map((monthKey) => {
+                  const monthCount = diaryItems.filter((item) => getAlbumMonthKey(item.createdAt) === monthKey).length;
+                  const active = selectedAlbumMonth === monthKey;
+                  return (
+                    <Pressable
+                      key={monthKey}
+                      style={[styles.albumMonthChip, active && styles.albumMonthChipActive]}
+                      onPress={() => setSelectedAlbumMonth(monthKey)}
+                    >
+                      <Text style={[styles.albumMonthChipTitle, active && styles.albumMonthChipTitleActive]}>
+                        {formatAlbumMonthLabel(monthKey)}
+                      </Text>
+                      <Text style={[styles.albumMonthChipCount, active && styles.albumMonthChipCountActive]}>
+                        {monthCount}枚
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              {visibleMonthKeys.map((monthKey) => {
+                const monthItems = diaryItems.filter((item) => getAlbumMonthKey(item.createdAt) === monthKey);
+                return (
+                  <View key={monthKey} style={styles.albumMonthSection}>
+                    <View style={styles.albumMonthHeader}>
+                      <Text style={styles.albumMonthTitle}>{formatAlbumMonthLabel(monthKey)}</Text>
+                      <Text style={styles.albumMonthCount}>{monthItems.length}枚</Text>
+                    </View>
+                    <View style={styles.albumDiaryGrid}>
+                      {monthItems.map((item) => (
+                        <AlbumMemoryCard
+                          key={item.id}
+                          item={item}
+                          onPress={() => setPreviewPhoto({
+                            photoUri: item.photoUri,
+                            imageSource: getAlbumDiaryImageSource(item),
+                            title: item.title,
+                            subtitle: item.subtitle,
+                            dateLabel: formatShortDateTime(item.createdAt) || '今日',
+                          })}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                );
+              })}
+              {visibleMonthKeys.length === 0 && (
+                <View style={styles.albumEmptyMonthCard}>
+                  <Text style={styles.albumEmptyMonthTitle}>この月の写真はまだありません</Text>
+                  <Text style={styles.albumEmptyMonthText}>撮った写真はここに4列のアルバムで並びます。</Text>
+                </View>
+              )}
             </View>
           )}
-          <Pressable style={styles.savedPhotoButton} onPress={() => onAttachPhoto(savedDetail.favorite.id)}>
-            <Ionicons name="camera-outline" size={19} color={ORANGE} />
-            <Text style={styles.savedPhotoButtonText}>{savedDetail.favorite.photoUri ? '写真を撮り直す' : 'ごはん写真を撮る'}</Text>
-          </Pressable>
-          <SectionHeader title="最新情報" action="APIから取得" />
-          <ResultCard
-            restaurant={savedDetail.restaurant}
-            userLocation={userLocation}
-            preferredArea={savedDetail.favorite.savedArea}
+        </View>
+      )}
+
+      {activeAlbumView === 'slideshow' && (
+        <View style={styles.albumViewPanel}>
+          {slideshowItems.length === 0 ? (
+            <View style={styles.emptyPanel}>
+              <Text style={styles.emptyTitle}>スライドはまだありません</Text>
+              <Text style={styles.emptyText}>写真を追加すると、ごはんの思い出をスライドで見返せます。</Text>
+            </View>
+          ) : (
+            <View style={styles.albumSlideshowCard}>
+              <View style={styles.albumSlideshowHeader}>
+                <View style={styles.albumSlideshowHeaderText}>
+                  <Text style={styles.albumSlideshowKicker}>{showingDemoSlides ? 'DEMO FOOD MOVIE' : 'MONTHLY FOOD MOVIE'}</Text>
+                  <Text style={styles.albumSlideshowHeading} numberOfLines={1}>{slideshowMonthLabel}のごはん記録</Text>
+                </View>
+                <Text style={styles.albumSlideshowCounter} numberOfLines={1}>
+                  {slideshowItems.length ? slideshowDisplayIndex + 1 : 0}/{slideshowItems.length}
+                </Text>
+              </View>
+              <View style={styles.albumSlideshowDigest}>
+                <View style={styles.albumSlideshowDigestMain}>
+                  <Text style={styles.albumSlideshowDigestKicker}>DIGEST</Text>
+                  <Text style={styles.albumSlideshowDigestTitle} numberOfLines={1}>
+                    {showingDemoSlides ? '展示用プレビュー' : '今月の食べた記録'}
+                  </Text>
+                </View>
+                <View style={styles.albumSlideshowDigestStats}>
+                  <View style={styles.albumSlideshowStatPill}>
+                    <Ionicons name="images-outline" size={13} color={ORANGE} />
+                    <Text style={styles.albumSlideshowStatText}>{slideshowItems.length}枚</Text>
+                  </View>
+                  <View style={styles.albumSlideshowStatPill}>
+                    <Ionicons name="restaurant-outline" size={13} color="#4f7f58" />
+                    <Text style={styles.albumSlideshowStatText}>{slideshowGenreCount}ジャンル</Text>
+                  </View>
+                </View>
+              </View>
+              <View style={styles.albumSlideshowProgressTrack}>
+                <View style={[styles.albumSlideshowProgressFill, { width: `${slideshowProgress}%` }]} />
+              </View>
+              {slideshowItem ? (
+                <>
+                  <Pressable
+                    style={[
+                      styles.albumSlideshowHero,
+                      showingDemoSlides && { backgroundColor: hexToRgba(slideshowHeroVisual.color, 0.13) },
+                    ]}
+                    onPress={() => setPreviewPhoto({
+                      photoUri: slideshowItem.photoUri,
+                      imageSource: getAlbumDiaryImageSource(slideshowItem),
+                      title: slideshowItem.title,
+                      subtitle: slideshowItem.subtitle,
+                      dateLabel: formatShortDateTime(slideshowItem.createdAt) || '今日',
+                    })}
+                  >
+                    {showingDemoSlides && (
+                      <View
+                        pointerEvents="none"
+                        style={[
+                          styles.albumSlideshowHeroGlow,
+                          { backgroundColor: hexToRgba(slideshowHeroVisual.color, 0.18) },
+                        ]}
+                      />
+                    )}
+                    <Image
+                      source={getAlbumDiaryImageSource(slideshowItem)}
+                      style={[styles.albumSlideshowImage, showingDemoSlides && styles.albumSlideshowImageDemo]}
+                      resizeMode={showingDemoSlides ? 'contain' : 'cover'}
+                    />
+                    <View style={styles.albumSlideshowScrim} />
+                    <View style={styles.albumSlideshowPosterBadge}>
+                      <Ionicons name="sparkles-outline" size={13} color="#ffffff" />
+                      <Text style={styles.albumSlideshowPosterBadgeText} numberOfLines={1}>
+                        {showingDemoSlides ? 'DEMO PREVIEW' : 'SAVED MEMORY'}
+                      </Text>
+                    </View>
+                    <View style={styles.albumSlideshowGenrePill}>
+                      <Text style={styles.albumSlideshowGenrePillText} numberOfLines={1}>{slideshowHeroGenre}</Text>
+                    </View>
+                    <View style={styles.albumSlideshowOverlay}>
+                      <Text style={styles.albumSlideshowDate} numberOfLines={1}>
+                        {formatShortDateTime(slideshowItem.createdAt) || '今日'}
+                      </Text>
+                      <Text style={styles.albumSlideshowTitle} numberOfLines={2}>{slideshowItem.title}</Text>
+                      <Text style={styles.albumSlideshowMood} numberOfLines={2}>{slideshowMoodLine}</Text>
+                      <Text style={styles.albumSlideshowSubtitle} numberOfLines={1}>{slideshowItem.subtitle}</Text>
+                    </View>
+                  </Pressable>
+                  <View style={styles.albumSlideshowStoryCard}>
+                    <View style={styles.albumSlideshowStoryIcon}>
+                      <Ionicons name="film-outline" size={18} color={ORANGE} />
+                    </View>
+                    <View style={styles.albumSlideshowStoryBody}>
+                      <Text style={styles.albumSlideshowStoryKicker}>FOOD MEMORY</Text>
+                      <Text style={styles.albumSlideshowStoryText}>{slideshowMoodLine}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.albumSlideshowControls}>
+                    <Pressable
+                      style={[styles.albumSlideshowButton, slideshowItems.length <= 1 && styles.albumSlideshowButtonDisabled]}
+                      disabled={slideshowItems.length <= 1}
+                      onPress={() => setSlideshowIndex((current) => (current - 1 + slideshowItems.length) % slideshowItems.length)}
+                    >
+                      <Ionicons name="chevron-back" size={20} color={INK} />
+                    </Pressable>
+                    <Pressable
+                      style={styles.albumSlideshowPrimaryButton}
+                      onPress={() => setSlideshowPlaying((current) => !current)}
+                    >
+                      <Ionicons name={slideshowPlaying ? 'pause' : 'play'} size={18} color="#ffffff" />
+                      <Text style={styles.albumSlideshowButtonText} numberOfLines={1}>
+                        {slideshowPlaying ? '再生中' : 'ムービー再生'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.albumSlideshowButton, slideshowItems.length <= 1 && styles.albumSlideshowButtonDisabled]}
+                      disabled={slideshowItems.length <= 1}
+                      onPress={() => setSlideshowIndex((current) => (current + 1) % slideshowItems.length)}
+                    >
+                      <Ionicons name="chevron-forward" size={20} color={INK} />
+                    </Pressable>
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.albumSlideshowFilmstrip}
+                  >
+                    {slideshowItems.map((item, index) => {
+                      const active = index === slideshowDisplayIndex;
+                      return (
+                        <Pressable
+                          key={`${item.id}-slide-thumb`}
+                          style={[styles.albumSlideshowThumb, active && styles.albumSlideshowThumbActive]}
+                          onPress={() => setSlideshowIndex(index)}
+                        >
+                          <Image source={getAlbumDiaryImageSource(item)} style={styles.albumSlideshowThumbImage} resizeMode="cover" />
+                          <View style={styles.albumSlideshowThumbShade} />
+                          <Text style={styles.albumSlideshowThumbNumber}>{index + 1}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </>
+              ) : (
+                <View style={styles.albumSlideshowEmpty}>
+                  <Text style={styles.albumEmptyMonthTitle}>この月の写真はまだありません</Text>
+                  <Text style={styles.albumEmptyMonthText}>別の月か、すべて表示を選ぶとスライドを確認できます。</Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      )}
+
+      {activeAlbumView === 'favorites' && (
+        <View style={styles.albumViewPanel}>
+          {savedRestaurants.length === 0 ? (
+            <View style={styles.emptyPanel}>
+              <Text style={styles.emptyTitle}>{uiText.savedEmptyTitle}</Text>
+              <Text style={styles.emptyText}>{uiText.savedEmptyText}</Text>
+            </View>
+          ) : (
+            <View style={styles.savedListBlock}>
+              <SectionHeader title={uiText.favoriteListTitle} action={`${savedRestaurants.length}件`} />
+              <View style={styles.savedList}>
+                {savedRestaurants.map((favorite) => (
+                  <SavedPlaceCard
+                    key={`${favorite.id}-saved`}
+                    favorite={favorite}
+                    loading={savedDetailLoadingId === favorite.id}
+                    selected={savedDetail?.favorite.id === favorite.id}
+                    onPress={() => onSavedPress(favorite)}
+                    onPhotoPress={() => onAttachPhoto(favorite.id)}
+                  />
+                ))}
+              </View>
+            </View>
+          )}
+          {savedDetailError && (
+            <View style={styles.savedErrorNotice}>
+              <Ionicons name="alert-circle-outline" size={18} color={ORANGE} />
+              <Text style={styles.savedErrorText}>{savedDetailError}</Text>
+            </View>
+          )}
+          {savedDetail && (
+            <View style={styles.savedDetailBlock}>
+              <SectionHeader title="お気に入り詳細" action={savedDetail.favorite.photoUri ? '写真あり' : '写真なし'} />
+              {savedDetail.favorite.photoUri ? (
+                <View style={styles.savedPhotoHero}>
+                  <Image source={{ uri: savedDetail.favorite.photoUri }} style={styles.savedPhotoHeroImage} />
+                  <View style={styles.savedPhotoHeroBadge}>
+                    <Ionicons name="camera" size={14} color="#ffffff" />
+                    <Text style={styles.savedPhotoHeroBadgeText}>ごはん写真</Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.savedPhotoEmpty}>
+                  <Image source={ALBUM_FOOD_ICON} style={styles.savedPhotoEmptyIcon} />
+                  <Text style={styles.savedPhotoEmptyTitle}>この店の一枚を残せます</Text>
+                  <Text style={styles.savedPhotoEmptyText}>行ったときのごはん写真を撮ると、アルバムらしく見返せます。</Text>
+                </View>
+              )}
+              <Pressable style={styles.savedPhotoButton} onPress={() => onAttachPhoto(savedDetail.favorite.id)}>
+                <Ionicons name="camera-outline" size={19} color={ORANGE} />
+                <Text style={styles.savedPhotoButtonText}>{savedDetail.favorite.photoUri ? '写真を撮り直す' : 'ごはん写真を撮る'}</Text>
+              </Pressable>
+              <SectionHeader title="店舗情報" action="APIから取得" />
+              <ResultCard
+                restaurant={savedDetail.restaurant}
+                userLocation={userLocation}
+                preferredArea={savedDetail.favorite.savedArea}
+                uiText={uiText}
+                onMapPress={() => onSavedMapPress(savedDetail.restaurant)}
+              />
+            </View>
+          )}
+        </View>
+      )}
+
+      {activeAlbumView === 'history' && (
+        <View style={styles.albumViewPanel}>
+          <HistoryEntrySection
+            entries={drawHistories}
+            fallbackHistory={history}
             uiText={uiText}
-            onMapPress={() => onSavedMapPress(savedDetail.restaurant)}
+            loadingId={historyDetailLoadingId}
+            error={historyDetailError}
+            onEntryPress={onHistoryPress}
           />
         </View>
       )}
-      <HistorySection history={history} uiText={uiText} />
-      {showHotPepperCredit && <HotPepperCredit />}
       <Modal
         visible={Boolean(previewPhoto)}
         transparent
@@ -6977,7 +9061,7 @@ function SaveTab({
                   <Ionicons name="close" size={20} color={INK} />
                 </Pressable>
               </View>
-              <Image source={{ uri: previewPhoto.photoUri }} style={styles.albumPreviewImage} resizeMode="cover" />
+              <Image source={previewPhoto.imageSource ?? { uri: previewPhoto.photoUri }} style={styles.albumPreviewImage} resizeMode="cover" />
               <Text style={styles.albumPreviewSubtitle} numberOfLines={2}>{previewPhoto.subtitle}</Text>
             </View>
           )}
@@ -6992,7 +9076,7 @@ function AlbumMemoryCard({ item, onPress }: { item: AlbumDiaryItem; onPress: () 
 
   return (
     <Pressable style={styles.albumDiaryCard} onPress={onPress}>
-      <Image source={{ uri: item.photoUri }} style={styles.albumDiaryImage} resizeMode="cover" />
+      <Image source={getAlbumDiaryImageSource(item)} style={styles.albumDiaryImage} resizeMode="cover" />
       <View style={styles.albumDiaryScrim} />
       <View style={styles.albumDiaryDateBadge}>
         <Ionicons name="calendar-clear-outline" size={9} color="#ffffff" />
@@ -7017,6 +9101,22 @@ function AlbumMemoryCard({ item, onPress }: { item: AlbumDiaryItem; onPress: () 
   );
 }
 
+function GenreIconVisual({ genre }: { genre?: string | null }) {
+  const genreVisual = getGenreVisual(genre);
+  return (
+    <View
+      style={[
+        styles.restaurantVisual,
+        styles.restaurantVisualFrame,
+        { backgroundColor: hexToRgba(genreVisual.color, 0.09) },
+      ]}
+    >
+      <View style={[styles.genreVisualGlow, { backgroundColor: hexToRgba(genreVisual.color, 0.12) }]} />
+      <Image source={genreVisual.image} style={[styles.genreVisualImage, styles.genreVisualImageSmall]} resizeMode="contain" />
+    </View>
+  );
+}
+
 function SavedPlaceCard({
   favorite,
   loading,
@@ -7033,19 +9133,16 @@ function SavedPlaceCard({
   const savedDate = formatShortDate(favorite.createdAt);
   const providerLabel = getProviderLabel(favorite.provider);
   const snapshot = favorite.snapshot ?? null;
+  const savedGenre = favorite.savedGenre ?? snapshot?.genre ?? null;
   return (
     <Pressable style={[styles.savedPlaceCard, selected && styles.savedPlaceCardActive]} onPress={onPress}>
       {favorite.photoUri ? (
         <View style={styles.savedPlaceThumb}>
           <Image source={{ uri: favorite.photoUri }} style={styles.savedPlacePhoto} />
         </View>
-      ) : snapshot ? (
-        <View style={styles.savedPlaceThumb}>
-          <RestaurantVisual restaurant={snapshot} />
-        </View>
       ) : (
-        <View style={styles.savedPlaceIcon}>
-          <Image source={ALBUM_FOOD_ICON} style={styles.savedPlaceAlbumIcon} />
+        <View style={styles.savedPlaceThumb}>
+          <GenreIconVisual genre={savedGenre} />
         </View>
       )}
       <View style={styles.savedPlaceBody}>
@@ -7053,7 +9150,7 @@ function SavedPlaceCard({
           <Text style={styles.savedPlaceKicker}>{favorite.photoUri ? 'ごはん写真あり' : 'お気に入り'}</Text>
           <Text style={styles.savedPlaceProvider}>{providerLabel}</Text>
         </View>
-        <Text style={styles.savedPlaceTitle} numberOfLines={1}>{snapshot?.name ?? 'お気に入りのお店'}</Text>
+        <Text style={styles.savedPlaceTitle} numberOfLines={1}>{`${savedGenre ?? 'お店'}の候補`}</Text>
         <Text style={styles.savedPlaceMeta} numberOfLines={2}>{buildSavedMetaLine(favorite)}</Text>
         <Text style={styles.savedPlaceDate}>{savedDate ? `${savedDate}に追加` : 'お気に入り済み'}</Text>
       </View>
@@ -7189,17 +9286,609 @@ function ProMonthBars({ items }: { items: MonthlyAnalytics[] }) {
   );
 }
 
+function AiReportPlanner({
+  mealCount,
+  genrePlans,
+  budgetDrafts,
+  status,
+  isUsed,
+  onSelectMealCount,
+  onChangeGenreCount,
+  onSelectGenreBudget,
+  onChangeGenreBudgetText,
+  onCommitGenreBudget,
+  onOpen,
+}: {
+  mealCount: number;
+  genrePlans: AiReportGenrePlan[];
+  budgetDrafts: Record<string, string>;
+  status: AiReportStatus;
+  isUsed: boolean;
+  onSelectMealCount: (mealCount: number) => void;
+  onChangeGenreCount: (genre: string, delta: number) => void;
+  onSelectGenreBudget: (genre: string, visitIndex: number, budget: number) => void;
+  onChangeGenreBudgetText: (genre: string, visitIndex: number, value: string) => void;
+  onCommitGenreBudget: (genre: string, visitIndex: number) => void;
+  onOpen: () => void;
+}) {
+  const isLoading = status === 'loading';
+  const totalCount = getAiReportPlanTotal(genrePlans);
+  const selectedPlans = normalizeAiReportPlans(genrePlans);
+  const remainingCount = Math.max(0, mealCount - totalCount);
+  const projectedSpend = getAiReportPlanSpend(selectedPlans);
+  const isComplete = totalCount === mealCount;
+  const isDisabled = !isComplete || isLoading || isUsed;
+  const actionLabel = isLoading ? '作成中' : isUsed ? '作成済み' : 'レポートを開く';
+  const summaryLabel = isComplete
+    ? `${mealCount}回分を設定済み / 推定 ${formatYen(projectedSpend)}`
+    : `あと${remainingCount}回分をジャンルに追加`;
+
+  return (
+    <View style={styles.aiReportBuilderCard}>
+      <View style={styles.aiReportBuilderHeader}>
+        <View style={styles.aiReportBuilderHeaderText}>
+          <Text style={styles.aiReportBuilderKicker}>RANDISH PRO DEMO</Text>
+          <Text style={styles.aiReportBuilderTitle}>AIレポート体験</Text>
+        </View>
+        <View style={styles.aiReportBuilderBadge}>
+          <Ionicons name="person-circle-outline" size={15} color={ORANGE} />
+          <Text style={styles.aiReportBuilderBadgeText}>1人1回</Text>
+        </View>
+      </View>
+      <Text style={styles.aiReportBuilderLead}>
+        月の外食回数、ジャンル回数、ジャンル別予算から、AIレポートをその場で作ります。
+      </Text>
+      <View style={styles.aiReportBuilderNotice}>
+        <Ionicons name="information-circle-outline" size={17} color={ORANGE} />
+        <Text style={styles.aiReportBuilderNoticeText}>{AI_REPORT_LIMIT_NOTICE}</Text>
+      </View>
+
+      <Text style={styles.aiReportBuilderSectionLabel}>1. 月の外食回数</Text>
+      <View style={styles.aiReportMealCountRow}>
+        {AI_REPORT_MONTH_OPTIONS.map((option) => {
+          const active = mealCount === option;
+          return (
+            <Pressable
+              key={option}
+              style={[styles.aiReportMealCountChip, active && styles.aiReportMealCountChipActive, isUsed && styles.aiReportChipLocked]}
+              onPress={() => onSelectMealCount(option)}
+              disabled={isUsed || isLoading}
+            >
+              <Text style={[styles.aiReportMealCountNumber, active && styles.aiReportMealCountNumberActive]}>{option}</Text>
+              <Text style={[styles.aiReportMealCountText, active && styles.aiReportMealCountTextActive]}>回/月</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <View style={styles.aiReportStepHeader}>
+        <Text style={styles.aiReportBuilderSectionLabel}>2. ジャンル回数</Text>
+        <Text style={[styles.aiReportStepMeta, isComplete && styles.aiReportStepMetaComplete]}>{totalCount}/{mealCount}回</Text>
+      </View>
+      <View style={styles.aiReportGenreGrid}>
+        {AI_REPORT_GENRE_OPTIONS.map((genre) => {
+          const plan = genrePlans.find((item) => item.label === genre.label);
+          const count = plan?.count ?? 0;
+          const active = count > 0;
+          const canIncrement = !isUsed && !isLoading && totalCount < mealCount;
+          const canDecrement = !isUsed && !isLoading && count > 0;
+          return (
+            <View
+              key={genre.label}
+              style={[styles.aiReportGenrePlannerCard, active && styles.aiReportGenrePlannerCardActive, isUsed && styles.aiReportChipLocked]}
+            >
+              <Image source={genre.image} style={styles.aiReportGenreIcon} resizeMode="contain" />
+              <Text style={[styles.aiReportGenrePlannerLabel, active && styles.aiReportGenrePlannerLabelActive]} numberOfLines={1}>
+                {genre.label}
+              </Text>
+              <View style={styles.aiReportGenreCounter}>
+                <Pressable
+                  style={[styles.aiReportCounterButton, !canIncrement && styles.aiReportCounterButtonDisabled]}
+                  onPress={() => onChangeGenreCount(genre.label, 1)}
+                  disabled={!canIncrement}
+                >
+                  <Ionicons name="chevron-up" size={16} color={canIncrement ? ORANGE : '#b9afa5'} />
+                </Pressable>
+                <Text style={styles.aiReportCounterValue}>{count}</Text>
+                <Pressable
+                  style={[styles.aiReportCounterButton, !canDecrement && styles.aiReportCounterButtonDisabled]}
+                  onPress={() => onChangeGenreCount(genre.label, -1)}
+                  disabled={!canDecrement}
+                >
+                  <Ionicons name="chevron-down" size={16} color={canDecrement ? ORANGE : '#b9afa5'} />
+                </Pressable>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+
+      <View style={styles.aiReportStepHeader}>
+        <Text style={styles.aiReportBuilderSectionLabel}>3. ジャンル別予算</Text>
+        <Text style={styles.aiReportStepMeta}>{selectedPlans.length ? '選択中だけ設定' : 'ジャンルを追加'}</Text>
+      </View>
+      <View style={styles.aiReportPriceList}>
+        {selectedPlans.length ? selectedPlans.map((plan) => {
+          const genre = getAiReportGenreVisual(plan.label);
+          const visitBudgets = getAiReportPlanBudgets(plan);
+          return (
+            <View key={plan.label} style={styles.aiReportPriceCard}>
+              <View style={styles.aiReportPriceHeader}>
+                <Image source={genre.image} style={styles.aiReportPriceIcon} resizeMode="contain" />
+                <View style={styles.aiReportPriceTitleBox}>
+                  <Text style={styles.aiReportPriceTitle} numberOfLines={1}>{plan.label}</Text>
+                  <Text style={styles.aiReportPriceSub}>{plan.count}回分</Text>
+                </View>
+              </View>
+              <View style={styles.aiReportVisitBudgetList}>
+                {visitBudgets.map((visitBudget, visitIndex) => {
+                  const draftKey = getAiReportBudgetDraftKey(plan.label, visitIndex);
+                  return (
+                    <View key={`${plan.label}-${visitIndex}`} style={styles.aiReportVisitBudgetCard}>
+                      <Text style={styles.aiReportVisitBudgetTitle}>{visitIndex + 1}回目</Text>
+                      <View style={styles.aiReportBudgetRow}>
+                        {AI_REPORT_BUDGET_OPTIONS.map((option) => {
+                          const active = visitBudget === option;
+                          return (
+                            <Pressable
+                              key={`${plan.label}-${visitIndex}-${option}`}
+                              style={[styles.aiReportBudgetChip, active && styles.aiReportBudgetChipActive, isUsed && styles.aiReportChipLocked]}
+                              onPress={() => onSelectGenreBudget(plan.label, visitIndex, option)}
+                              disabled={isUsed || isLoading}
+                            >
+                              <Text style={[styles.aiReportBudgetChipText, active && styles.aiReportBudgetChipTextActive]} numberOfLines={1}>
+                                {formatYen(option)}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                      <View style={styles.aiReportCustomBudgetRow}>
+                        <Text style={styles.aiReportCustomBudgetLabel} numberOfLines={1}>手入力</Text>
+                        <TextInput
+                          value={budgetDrafts[draftKey] ?? String(visitBudget)}
+                          onChangeText={(value) => onChangeGenreBudgetText(plan.label, visitIndex, value)}
+                          onEndEditing={() => onCommitGenreBudget(plan.label, visitIndex)}
+                          style={styles.aiReportCustomBudgetInput}
+                          keyboardType="number-pad"
+                          returnKeyType="done"
+                          blurOnSubmit={false}
+                          maxLength={6}
+                          editable={!isUsed && !isLoading}
+                          placeholder="例 6500"
+                          placeholderTextColor="#b8ada2"
+                        />
+                        <Text style={styles.aiReportCustomBudgetSuffix}>円</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          );
+        }) : (
+          <View style={styles.aiReportPriceEmpty}>
+            <Ionicons name="arrow-up-circle-outline" size={18} color={ORANGE} />
+            <Text style={styles.aiReportPriceEmptyText}>上のジャンルで回数を増やすと、ここで価格を設定できます。</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.aiReportBuilderSummary}>
+        <Text style={styles.aiReportBuilderSummaryText} numberOfLines={1}>{summaryLabel}</Text>
+      </View>
+
+      <Pressable
+        style={[styles.aiReportOpenButton, isDisabled && styles.aiReportOpenButtonDisabled]}
+        onPress={onOpen}
+        disabled={isDisabled}
+      >
+        {isLoading ? <ActivityIndicator size="small" color="#ffffff" /> : <Ionicons name="document-text-outline" size={18} color="#ffffff" />}
+        <Text style={styles.aiReportOpenButtonText}>{actionLabel}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function AiMonthlyReportEntryCard({
+  analytics,
+  status,
+  hasReport,
+  isPro,
+  isSamplePreview,
+  onOpen,
+  onToggleSample,
+}: {
+  analytics: MonthlyAnalytics;
+  status: AiReportStatus;
+  hasReport: boolean;
+  isPro: boolean;
+  isSamplePreview: boolean;
+  onOpen: () => void;
+  onToggleSample: () => void;
+}) {
+  const isLoading = status === 'loading';
+  const hasHistory = analytics.drawCount > 0;
+  const estimatedSpendLabel = analytics.budgetSampleCount ? `約${formatYen(analytics.estimatedSpend)}` : '未計測';
+  const actionLabel = isLoading ? '作成中' : !isPro ? 'Proで作成' : hasReport ? 'レポートを見る' : '月次レポートを作成';
+  const disabled = isLoading || !hasHistory;
+
+  return (
+    <View style={styles.aiReportBuilderCard}>
+      <View style={styles.aiReportBuilderHeader}>
+        <View style={styles.aiReportBuilderHeaderText}>
+          <Text style={styles.aiReportBuilderKicker}>{isSamplePreview ? 'RANDISH PRO SAMPLE' : 'RANDISH PRO'}</Text>
+          <Text style={styles.aiReportBuilderTitle}>月次AIレポート</Text>
+        </View>
+        <View style={styles.aiReportBuilderBadge}>
+          <Ionicons name="calendar-outline" size={15} color={ORANGE} />
+          <Text style={styles.aiReportBuilderBadgeText}>{analytics.monthLabel}</Text>
+        </View>
+      </View>
+      <Text style={styles.aiReportBuilderLead}>
+        ルーレットで出たお店のジャンル・予算・回数をもとに、1か月ごとの食傾向をまとめます。
+      </Text>
+      <View style={styles.aiReportBuilderNotice}>
+        <Ionicons name="information-circle-outline" size={17} color={ORANGE} />
+        <Text style={styles.aiReportBuilderNoticeText}>{AI_REPORT_MONTHLY_NOTICE}</Text>
+      </View>
+
+      <View style={styles.aiReportAutoStats}>
+        <View style={styles.aiReportAutoStat}>
+          <Text style={styles.aiReportAutoStatLabel}>今月のルーレット</Text>
+          <Text style={styles.aiReportAutoStatValue}>{analytics.drawCount}回</Text>
+        </View>
+        <View style={styles.aiReportAutoStat}>
+          <Text style={styles.aiReportAutoStatLabel}>推定外食費</Text>
+          <Text style={styles.aiReportAutoStatValue}>{estimatedSpendLabel}</Text>
+        </View>
+        <View style={styles.aiReportAutoStat}>
+          <Text style={styles.aiReportAutoStatLabel}>多いジャンル</Text>
+          <Text style={styles.aiReportAutoStatValue}>{analytics.topGenre}</Text>
+        </View>
+      </View>
+
+      <View style={styles.aiReportBuilderSummary}>
+        <Text style={styles.aiReportBuilderSummaryText} numberOfLines={2}>
+          {hasHistory
+            ? isSamplePreview
+              ? '10回分のサンプル外食履歴で、スマホ上の見え方を確認しています。'
+              : '自分でジャンルや金額を選ばず、ルーレット履歴からレポートに反映します。'
+            : 'ルーレット結果が入ると、ここから月次AIレポートを作成できます。'}
+        </Text>
+      </View>
+
+      <Pressable style={styles.aiReportSampleButton} onPress={onToggleSample} disabled={isLoading}>
+        <Ionicons name={isSamplePreview ? 'refresh-outline' : 'phone-portrait-outline'} size={16} color={ORANGE} />
+        <Text style={styles.aiReportSampleButtonText}>
+          {isSamplePreview ? '実データに戻す' : `${AI_REPORT_SAMPLE_MEAL_COUNT}回サンプルで確認`}
+        </Text>
+      </Pressable>
+
+      <Pressable
+        style={[styles.aiReportOpenButton, disabled && styles.aiReportOpenButtonDisabled]}
+        onPress={onOpen}
+        disabled={disabled}
+      >
+        {isLoading ? <ActivityIndicator size="small" color="#ffffff" /> : <Ionicons name="document-text-outline" size={18} color="#ffffff" />}
+        <Text style={styles.aiReportOpenButtonText}>{actionLabel}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function AiMonthlyReportCard({
+  report,
+  analytics,
+  status,
+  onRefresh,
+  canRefresh = true,
+  limitNotice,
+}: {
+  report: AiMonthlyReport;
+  analytics?: MonthlyAnalytics;
+  status: AiReportStatus;
+  onRefresh: () => void;
+  canRefresh?: boolean;
+  limitNotice?: string;
+}) {
+  const sourceLabel = report.source === 'gemini'
+    ? 'AI生成'
+    : report.source === 'fallback'
+      ? 'ローカル生成'
+      : '端末生成';
+  const generatedDate = formatShortDateTime(report.generatedAt);
+  const isLoading = status === 'loading';
+
+  return (
+    <View style={styles.aiReportCard}>
+      <View style={styles.aiReportHeader}>
+        <View style={styles.aiReportHeaderText}>
+          <Text style={styles.aiReportKicker}>AI MONTHLY REPORT</Text>
+          <Text style={styles.aiReportTitle}>{report.title}</Text>
+        </View>
+        <View style={styles.aiReportBadge}>
+          <Text style={styles.aiReportBadgeText}>{sourceLabel}</Text>
+        </View>
+      </View>
+      <Text style={styles.aiReportMood}>{report.mood}</Text>
+      <Text style={styles.aiReportSummary}>{report.summary}</Text>
+      {limitNotice ? (
+        <View style={styles.aiReportLimitNotice}>
+          <Ionicons name="lock-closed-outline" size={14} color={ORANGE} />
+          <Text style={styles.aiReportLimitNoticeText}>{limitNotice}</Text>
+        </View>
+      ) : null}
+
+      {analytics ? (
+        <View style={styles.aiReportGraphSection}>
+          <Text style={styles.aiReportSectionTitle}>グラフで見る</Text>
+          <Text style={styles.aiReportGraphLead}>
+            ジャンルの回数と、ジャンルごとの支出割合を分けて表示します。
+          </Text>
+          <GenreSpendDonut
+            items={analytics.genreAnalytics}
+            totalLabel={`${analytics.drawCount}回`}
+            metric="count"
+            kicker="GENRE COUNT"
+            summaryText="ジャンルごとの回数を円グラフ化。どの食べ方が多かったかを先に見られます。"
+            emptyText="ジャンル回数のデータがまだありません。"
+          />
+          <GenreSpendDonut
+            items={analytics.genreAnalytics}
+            totalLabel={`約${formatYen(analytics.estimatedSpend)}`}
+            metric="spend"
+            kicker="SPEND SHARE"
+            summaryText="ジャンル → 推定支出の順で、どこに外食費が寄っているかを表示します。"
+            emptyText="支出割合を出せる予算データがまだありません。"
+            showSpendArrow
+          />
+        </View>
+      ) : null}
+
+      <View style={styles.aiReportSection}>
+        <Text style={styles.aiReportSectionTitle}>今月のポイント</Text>
+        {report.highlights.map((item, index) => (
+          <View key={`${item}-${index}`} style={styles.aiReportListRow}>
+            <Ionicons name="sparkles-outline" size={15} color={ORANGE} />
+            <Text style={styles.aiReportListText}>{item}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.aiReportSection}>
+        <Text style={styles.aiReportSectionTitle}>AIからの提案</Text>
+        {report.recommendations.map((item, index) => (
+          <View key={`${item}-${index}`} style={styles.aiReportListRow}>
+            <Ionicons name="bulb-outline" size={15} color="#4f7f58" />
+            <Text style={styles.aiReportListText}>{item}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.aiReportSavingBox}>
+        <Text style={styles.aiReportSavingTitle}>節約のコツ</Text>
+        {report.savingsTips.map((item, index) => (
+          <View key={`${item}-${index}`} style={styles.aiReportListRow}>
+            <Ionicons name="wallet-outline" size={15} color="#4f7f58" />
+            <Text style={styles.aiReportListText}>{item}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.aiReportNextBox}>
+        <Ionicons name="arrow-forward-circle-outline" size={18} color={INK} />
+        <Text style={styles.aiReportNextText}>{report.nextAction}</Text>
+      </View>
+
+      <View style={styles.aiReportClosingBox}>
+        <Text style={styles.aiReportClosingTitle}>最後にひとこと</Text>
+        <Text style={styles.aiReportClosingParagraph}>
+          {report.closingNotes.filter(Boolean).join('\n')}
+        </Text>
+      </View>
+
+      <View style={styles.aiReportFooter}>
+        <Text style={styles.aiReportGenerated}>{generatedDate || '生成済み'}</Text>
+        {canRefresh ? (
+          <Pressable style={styles.aiReportRefreshButton} onPress={onRefresh} disabled={isLoading}>
+            {isLoading ? <ActivityIndicator size="small" color={ORANGE} /> : <Ionicons name="refresh" size={14} color={ORANGE} />}
+            <Text style={styles.aiReportRefreshText}>{isLoading ? '更新中' : '再生成'}</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.aiReportLimitPill}>
+            <Ionicons name="checkmark-circle-outline" size={14} color={ORANGE} />
+            <Text style={styles.aiReportLimitPillText}>1人1回まで</Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function YearlyWrappedCard({
+  analytics,
+  report,
+  open,
+  now,
+  isDemoPreview,
+  isPro,
+  onToggle,
+  onToggleDemo,
+  onOpenPro,
+}: {
+  analytics: YearlyAnalytics;
+  report: YearlyWrappedReport;
+  open: boolean;
+  now: Date;
+  isDemoPreview: boolean;
+  isPro: boolean;
+  onToggle: () => void;
+  onToggleDemo: () => void;
+  onOpenPro: () => void;
+}) {
+  const isYearEndWindow = now.getMonth() === 11 && now.getDate() >= 31;
+  const releaseLabel = isDemoPreview ? 'デモ表示' : isYearEndWindow ? '公開中' : '12/31公開';
+  const activeMonthsLabel = analytics.activeMonthCount ? `${analytics.activeMonthCount}か月分` : '記録待ち';
+  const demoRangeLabel = `${now.getMonth() + 1}/${now.getDate()}〜12/31`;
+  const freeHighlights = report.highlights.slice(0, 3);
+  const proHighlights = report.highlights.slice(3);
+  const proFeatureLines = [
+    '節約のコツと来年の食べ方ミッション',
+    '月別のピーク・価格帯・ジャンル偏り',
+    'アルバム/スライドショーと過去年度保存',
+  ];
+
+  return (
+    <View style={styles.yearWrappedCard}>
+      <View style={styles.yearWrappedHeader}>
+        <View style={styles.yearWrappedHeaderText}>
+          <Text style={styles.yearWrappedKicker}>Year Review</Text>
+          <Text style={styles.yearWrappedTitle}>{report.title}</Text>
+        </View>
+        <View style={styles.yearWrappedBadge}>
+          <Ionicons name="sparkles-outline" size={14} color="#fff2df" />
+          <Text style={styles.yearWrappedBadgeText}>{releaseLabel}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.yearWrappedSubtitle}>{report.subtitle}</Text>
+      <Text style={styles.yearWrappedSourceText}>
+        {isDemoPreview ? `${demoRangeLabel}のデモ外食ログで表示中` : '実際のルーレット履歴から年末まとめを作成します。'}
+      </Text>
+      <Text style={styles.yearWrappedHero}>{report.heroLine}</Text>
+
+      <View style={styles.yearWrappedMetricGrid}>
+        <View style={styles.yearWrappedMetric}>
+          <Text style={styles.yearWrappedMetricLabel}>外食ログ</Text>
+          <Text style={styles.yearWrappedMetricValue}>{report.totalMealsLabel}</Text>
+        </View>
+        <View style={styles.yearWrappedMetric}>
+          <Text style={styles.yearWrappedMetricLabel}>推定外食費</Text>
+          <Text style={styles.yearWrappedMetricValue}>{report.totalSpendLabel}</Text>
+        </View>
+        <View style={styles.yearWrappedMetric}>
+          <Text style={styles.yearWrappedMetricLabel}>トップジャンル</Text>
+          <Text style={styles.yearWrappedMetricValue}>{report.topGenreLabel}</Text>
+        </View>
+        <View style={styles.yearWrappedMetric}>
+          <Text style={styles.yearWrappedMetricLabel}>よく行った県</Text>
+          <Text style={styles.yearWrappedMetricValue}>{report.topAreaLabel}</Text>
+        </View>
+        <View style={styles.yearWrappedMetric}>
+          <Text style={styles.yearWrappedMetricLabel}>一番濃い月</Text>
+          <Text style={styles.yearWrappedMetricValue}>{report.topMonthLabel}</Text>
+        </View>
+        <View style={styles.yearWrappedMetric}>
+          <Text style={styles.yearWrappedMetricLabel}>平均単価</Text>
+          <Text style={styles.yearWrappedMetricValue}>{report.averageBudgetLabel}</Text>
+        </View>
+      </View>
+
+      <View style={styles.yearWrappedMiniRow}>
+        <View style={styles.yearWrappedMiniPill}>
+          <Ionicons name="calendar-outline" size={13} color="#f6b27d" />
+          <Text style={styles.yearWrappedMiniText}>{activeMonthsLabel}</Text>
+        </View>
+        <View style={styles.yearWrappedMiniPill}>
+          <Ionicons name="restaurant-outline" size={13} color="#9bd37f" />
+          <Text style={styles.yearWrappedMiniText}>{analytics.genreAnalytics.length}ジャンル</Text>
+        </View>
+        <View style={styles.yearWrappedMiniPill}>
+          <Ionicons name="map-outline" size={13} color="#a7c7ff" />
+          <Text style={styles.yearWrappedMiniText}>{analytics.areaAnalytics.length}県</Text>
+        </View>
+      </View>
+
+      <View style={styles.yearWrappedActionRow}>
+        <Pressable
+          style={[styles.yearWrappedGhostButton, isDemoPreview && styles.yearWrappedGhostButtonActive]}
+          onPress={onToggleDemo}
+        >
+          <Ionicons name="sparkles-outline" size={15} color={isDemoPreview ? '#15120f' : '#f2c27f'} />
+          <Text style={[styles.yearWrappedGhostText, isDemoPreview && styles.yearWrappedGhostTextActive]}>
+            {isDemoPreview ? '実データに戻す' : '年末デモを見る'}
+          </Text>
+        </Pressable>
+        <Pressable style={styles.yearWrappedToggleButton} onPress={onToggle}>
+          <Text style={styles.yearWrappedToggleText}>{open ? '閉じる' : '詳細を見る'}</Text>
+          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color="#16130f" />
+        </Pressable>
+      </View>
+
+      {open ? (
+        <View style={styles.yearWrappedDetail}>
+          <Text style={styles.yearWrappedSectionTitle}>無料で見られるまとめ</Text>
+          {freeHighlights.map((item, index) => (
+            <View key={`${item}-${index}`} style={styles.yearWrappedHighlightRow}>
+              <Text style={styles.yearWrappedHighlightIndex}>{index + 1}</Text>
+              <Text style={styles.yearWrappedHighlightText}>{item}</Text>
+            </View>
+          ))}
+
+          {isPro ? (
+            <>
+              <View style={styles.yearWrappedProHeader}>
+                <Text style={styles.yearWrappedSectionTitle}>Proの深掘り</Text>
+                <ProBadge label="Pro" dark />
+              </View>
+              {proHighlights.map((item, index) => (
+                <View key={`${item}-${index}`} style={styles.yearWrappedHighlightRow}>
+                  <Text style={styles.yearWrappedHighlightIndex}>{freeHighlights.length + index + 1}</Text>
+                  <Text style={styles.yearWrappedHighlightText}>{item}</Text>
+                </View>
+              ))}
+              <View style={styles.yearWrappedMissionBox}>
+                <Ionicons name="flag-outline" size={18} color="#d8b77d" />
+                <Text style={styles.yearWrappedMissionText}>{report.nextYearMission}</Text>
+              </View>
+            </>
+          ) : (
+            <Pressable style={styles.yearWrappedProLockBox} onPress={onOpenPro}>
+              <View style={styles.yearWrappedProLockTop}>
+                <View style={styles.yearWrappedProLockIcon}>
+                  <Ionicons name="lock-closed-outline" size={17} color="#16130f" />
+                </View>
+                <View style={styles.yearWrappedProLockCopy}>
+                  <Text style={styles.yearWrappedProLockTitle}>深掘り年間レポートはPro</Text>
+                  <Text style={styles.yearWrappedProLockText}>
+                    無料では年1回の基本まとめまで。Proなら節約・月別比較・保存まで見られます。
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.yearWrappedProList}>
+                {proFeatureLines.map((line) => (
+                  <View key={line} style={styles.yearWrappedProListRow}>
+                    <Ionicons name="checkmark-circle-outline" size={15} color="#d8b77d" />
+                    <Text style={styles.yearWrappedProListText}>{line}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.yearWrappedProButton}>
+                <Text style={styles.yearWrappedProButtonText}>Proで深掘りを見る</Text>
+                <Ionicons name="arrow-forward" size={15} color="#16130f" />
+              </View>
+            </Pressable>
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function ProPaywall({
   visible,
   title,
   message,
   onStartPro,
+  onRestorePro,
   onClose,
 }: {
   visible: boolean;
   title?: string;
   message?: string;
   onStartPro: () => void;
+  onRestorePro: () => void;
   onClose: () => void;
 }) {
   const features = ['先月との差がわかる', '過去月の分析を保存', 'ジャンル別の傾向を確認', '価格帯ごとの傾向を確認', 'お気に入り店を分析'];
@@ -7238,6 +9927,15 @@ function ProPaywall({
           >
             <Text style={styles.proPaywallPrimaryText}>RANDISH PROを始める</Text>
           </Pressable>
+          <Pressable
+            style={styles.proPaywallRestoreButton}
+            onPress={() => {
+              onRestorePro();
+              onClose();
+            }}
+          >
+            <Text style={styles.proPaywallRestoreText}>購入を復元</Text>
+          </Pressable>
           <Pressable style={styles.proPaywallSecondaryButton} onPress={onClose}>
             <Text style={styles.proPaywallSecondaryText}>あとで</Text>
           </Pressable>
@@ -7248,71 +9946,128 @@ function ProPaywall({
 }
 
 const ANALYSIS_DONUT_COLORS = ['#f05a28', '#f2a51a', '#9b6b43', '#4f7f58', '#d89a68'];
+type DonutMetricMode = 'auto' | 'count' | 'spend';
 
 function GenreSpendDonut({
   items,
   totalLabel,
+  metric = 'auto',
+  kicker = 'GENRE PIE',
+  summaryText,
+  emptyText = '推定できる予算データがまだありません。',
+  showSpendArrow = false,
 }: {
   items: AnalyticsTrendItem[];
   totalLabel: string;
+  metric?: DonutMetricMode;
+  kicker?: string;
+  summaryText?: string;
+  emptyText?: string;
+  showSpendArrow?: boolean;
 }) {
-  const spendItems = items
-    .filter((item) => item.estimatedSpend > 0)
-    .sort((a, b) => b.estimatedSpend - a.estimatedSpend);
-  const topItems = spendItems.slice(0, 4);
-  const restSpend = spendItems.slice(4).reduce((total, item) => total + item.estimatedSpend, 0);
-  const chartItems = restSpend > 0
-    ? [...topItems, { label: 'その他', count: 0, estimatedSpend: restSpend }]
+  const shouldUseSpend = metric === 'spend'
+    || (metric === 'auto' && items.some((item) => item.estimatedSpend > 0));
+  const getMetric = (item: AnalyticsTrendItem) => shouldUseSpend ? item.estimatedSpend : item.count;
+  const sourceItems = items
+    .filter((item) => item.count > 0 || item.estimatedSpend > 0)
+    .filter((item) => getMetric(item) > 0)
+    .sort((a, b) => getMetric(b) - getMetric(a));
+  const topItems = sourceItems.slice(0, 4);
+  const restItems = sourceItems.slice(4);
+  const restMetric = restItems.reduce((total, item) => total + getMetric(item), 0);
+  const restSpend = restItems.reduce((total, item) => total + item.estimatedSpend, 0);
+  const restCount = restItems.reduce((total, item) => total + item.count, 0);
+  const chartItems = restMetric > 0
+    ? [...topItems, { label: 'その他', count: restCount, estimatedSpend: restSpend }]
     : topItems;
-  const totalSpend = chartItems.reduce((total, item) => total + item.estimatedSpend, 0);
+  const totalMetric = chartItems.reduce((total, item) => total + getMetric(item), 0);
+  const totalCount = chartItems.reduce((total, item) => total + item.count, 0);
 
-  if (!totalSpend) {
+  if (!totalMetric) {
     return (
       <View style={styles.analysisDonutEmpty}>
         <Ionicons name="pie-chart-outline" size={28} color={ORANGE} />
-        <Text style={styles.analysisDonutEmptyText}>推定できる予算データがまだありません。</Text>
+        <Text style={styles.analysisDonutEmptyText}>{emptyText}</Text>
       </View>
     );
   }
 
-  const primaryColor = ANALYSIS_DONUT_COLORS[0];
-  const primaryPercent = Math.round((chartItems[0].estimatedSpend / totalSpend) * 100);
+  const chartSize = 138;
+  const strokeWidth = 32;
+  const radius = (chartSize - strokeWidth) / 2;
+  const center = chartSize / 2;
+  const circumference = 2 * Math.PI * radius;
+  let segmentOffset = 0;
+  const primaryPercent = Math.round((getMetric(chartItems[0]) / totalMetric) * 100);
 
   return (
     <View style={styles.analysisDonutPanel}>
-      <View style={styles.analysisDonutChart}>
-        <View style={[styles.analysisDonutRing, { borderColor: primaryColor }]}>
-          {chartItems.slice(1, 4).map((item, index) => (
-            <View
-              key={`${item.label}-${index}`}
-              style={[
-                styles.analysisDonutAccent,
-                index === 0 && styles.analysisDonutAccentOne,
-                index === 1 && styles.analysisDonutAccentTwo,
-                index === 2 && styles.analysisDonutAccentThree,
-                { backgroundColor: ANALYSIS_DONUT_COLORS[(index + 1) % ANALYSIS_DONUT_COLORS.length] },
-              ]}
-            />
-          ))}
+      <View style={styles.analysisDonutTop}>
+        <View style={styles.analysisDonutChart}>
+          <Svg width={chartSize} height={chartSize}>
+            <G rotation={-90} originX={center} originY={center}>
+              <Circle
+                cx={center}
+                cy={center}
+                r={radius}
+                stroke="#efe5db"
+                strokeWidth={strokeWidth}
+                fill="none"
+              />
+              {chartItems.map((item, index) => {
+                const itemMetric = getMetric(item);
+                const fullDash = (itemMetric / totalMetric) * circumference;
+                const dash = chartItems.length > 1 ? Math.max(0, fullDash - 2) : fullDash;
+                const offset = segmentOffset;
+                segmentOffset += fullDash;
+                return (
+                  <Circle
+                    key={`${item.label}-${index}`}
+                    cx={center}
+                    cy={center}
+                    r={radius}
+                    stroke={ANALYSIS_DONUT_COLORS[index % ANALYSIS_DONUT_COLORS.length]}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={`${dash} ${circumference}`}
+                    strokeDashoffset={-offset}
+                    strokeLinecap="butt"
+                    fill="none"
+                  />
+                );
+              })}
+            </G>
+          </Svg>
+          <View style={styles.analysisDonutCenter}>
+            <Text style={styles.analysisDonutCenterLabel}>今月</Text>
+            <Text style={styles.analysisDonutCenterValue} numberOfLines={1}>{shouldUseSpend ? totalLabel : `${totalCount}回`}</Text>
+          </View>
+          <View style={styles.analysisDonutShareBadge}>
+            <Text style={styles.analysisDonutShareText}>{primaryPercent}%</Text>
+          </View>
         </View>
-        <View style={styles.analysisDonutCenter}>
-          <Text style={styles.analysisDonutCenterLabel}>今月</Text>
-          <Text style={styles.analysisDonutCenterValue} numberOfLines={1}>{totalLabel}</Text>
-        </View>
-        <View style={styles.analysisDonutShareBadge}>
-          <Text style={styles.analysisDonutShareText}>{primaryPercent}%</Text>
+        <View style={styles.analysisDonutSummary}>
+          <Text style={styles.analysisDonutSummaryKicker}>{kicker}</Text>
+          <Text style={styles.analysisDonutSummaryTitle}>{chartItems[0].label}</Text>
+          <Text style={styles.analysisDonutSummaryText}>
+            {summaryText ?? '今月いちばん多いジャンル。下に結果のgenre・回数・割合を表示します。'}
+          </Text>
         </View>
       </View>
       <View style={styles.analysisDonutLegend}>
         {chartItems.map((item, index) => {
           const color = ANALYSIS_DONUT_COLORS[index % ANALYSIS_DONUT_COLORS.length];
-          const percent = Math.round((item.estimatedSpend / totalSpend) * 100);
+          const percent = Math.round((getMetric(item) / totalMetric) * 100);
+          const spendLabel = item.estimatedSpend > 0 ? `約${formatYen(item.estimatedSpend)}` : '未計測';
           return (
             <View key={`${item.label}-${index}`} style={styles.analysisDonutLegendRow}>
               <View style={[styles.analysisDonutLegendDot, { backgroundColor: color }]} />
               <View style={styles.analysisDonutLegendBody}>
                 <Text style={styles.analysisDonutLegendLabel} numberOfLines={1}>{item.label}</Text>
-                <Text style={styles.analysisDonutLegendMeta}>{percent}% / 約{formatYen(item.estimatedSpend)}</Text>
+                <Text style={styles.analysisDonutLegendMeta}>
+                  {shouldUseSpend && showSpendArrow
+                    ? `支出 → ${spendLabel} / ${percent}% / ${item.count}回`
+                    : `${item.count}回 / ${percent}%${shouldUseSpend && item.estimatedSpend > 0 ? ` / ${spendLabel}` : ''}`}
+                </Text>
                 <View style={styles.analysisDonutLegendTrack}>
                   <View style={[styles.analysisDonutLegendFill, { width: `${percent}%`, backgroundColor: color }]} />
                 </View>
@@ -7399,6 +10154,8 @@ function AnalysisDigestCard({
 
 function AnalyticsTab({
   uiText,
+  userId,
+  apiBaseUrlCandidates,
   area,
   locationStatus,
   restaurants,
@@ -7407,9 +10164,12 @@ function AnalyticsTab({
   savedRestaurants,
   isPro,
   onStartPro,
+  onRestorePro,
   onAreaPress,
 }: {
   uiText: Record<string, string>;
+  userId: string;
+  apiBaseUrlCandidates: readonly string[];
   area: string;
   locationStatus: string;
   restaurants: Restaurant[];
@@ -7418,10 +10178,18 @@ function AnalyticsTab({
   savedRestaurants: SavedRestaurant[];
   isPro: boolean;
   onStartPro: () => void;
+  onRestorePro: () => void;
   onAreaPress: () => void;
 }) {
   const [paywallContext, setPaywallContext] = useState<{ title: string; message: string } | null>(null);
   const [spendOpen, setSpendOpen] = useState(false);
+  const [aiReportOpen, setAiReportOpen] = useState(false);
+  const [aiReportStatus, setAiReportStatus] = useState<AiReportStatus>('idle');
+  const [aiReport, setAiReport] = useState<AiMonthlyReport | null>(null);
+  const [aiReportUsed, setAiReportUsed] = useState(false);
+  const [aiReportSamplePreview, setAiReportSamplePreview] = useState(false);
+  const [yearlyWrappedOpen, setYearlyWrappedOpen] = useState(false);
+  const [yearlyWrappedDemoPreview, setYearlyWrappedDemoPreview] = useState(false);
   const now = useMemo(() => new Date(), []);
 
   const analyticsEntries = useMemo(() => {
@@ -7431,18 +10199,54 @@ function AnalyticsTab({
     const createdAt = new Date().toISOString();
     return history.map((restaurant, index) => ({
       id: `session-${restaurant.id}-${index}`,
+      provider: (restaurant.externalProvider || 'RANDISH_SEED').toUpperCase(),
+      providerPlaceId: getProviderPlaceId(restaurant),
+      restaurantId: shouldPersistRestaurantId(restaurant) ? restaurant.id : null,
       restaurant,
+      area: restaurant.area ?? null,
+      genre: restaurant.genre ?? null,
+      budgetMin: toOptionalNumber(restaurant.budgetMin) ?? null,
+      budgetMax: toOptionalNumber(restaurant.budgetMax) ?? null,
+      rangeMeters: null,
       createdAt,
     }));
   }, [drawHistories, history]);
 
   const currentAnalytics = useMemo(() => getCurrentMonthAnalytics(analyticsEntries, now), [analyticsEntries, now]);
+  const yearlyDemoEntries = useMemo(() => buildDemoYearlyWrappedEntries(now), [now]);
+  const yearlyWrappedEntries = yearlyWrappedDemoPreview ? yearlyDemoEntries : analyticsEntries;
+  const yearlyAnalytics = useMemo(() => getYearlyAnalytics(yearlyWrappedEntries, now), [now, yearlyWrappedEntries]);
+  const yearlyWrappedReport = useMemo(() => buildYearlyWrappedReport(yearlyAnalytics), [yearlyAnalytics]);
   const comparison = useMemo(() => getPreviousMonthComparison(analyticsEntries, now), [analyticsEntries, now]);
   const savedAnalytics = useMemo(() => getSavedRestaurantAnalytics(savedRestaurants), [savedRestaurants]);
+  const sampleReportAnalytics = useMemo(
+    () => buildDemoAiReportAnalytics(AI_REPORT_SAMPLE_GENRE_PLANS, AI_REPORT_SAMPLE_MEAL_COUNT, area, now),
+    [area, now],
+  );
+  const reportAnalytics = aiReportSamplePreview ? sampleReportAnalytics : currentAnalytics;
+  const localAiReportPreview = useMemo(() => buildLocalAiReport(reportAnalytics, savedAnalytics), [reportAnalytics, savedAnalytics]);
+  const reportDataSignature = useMemo(
+    () => [
+      reportAnalytics.monthLabel,
+      reportAnalytics.drawCount,
+      reportAnalytics.estimatedSpend,
+      reportAnalytics.genreAnalytics.map((item) => `${item.label}:${item.count}:${item.estimatedSpend}`).join(','),
+      savedAnalytics.totalSaved,
+      aiReportSamplePreview ? 'sample' : 'live',
+    ].join('|'),
+    [aiReportSamplePreview, reportAnalytics, savedAnalytics],
+  );
   const monthSeries = useMemo(
     () => [5, 4, 3, 2, 1, 0].map((offset) => getMonthlyAnalytics(analyticsEntries, addMonthsToStart(now, -offset))),
     [analyticsEntries, now],
   );
+
+  useEffect(() => {
+    setAiReportOpen(false);
+    setAiReport(null);
+    setAiReportStatus('idle');
+    setAiReportUsed(false);
+  }, [reportDataSignature]);
 
   const monthlyTotalLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.estimatedSpend)}` : '0円';
   const averageBudgetLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.averageBudget)}` : '0円';
@@ -7460,6 +10264,50 @@ function AnalyticsTab({
       '過去の抽選から、よく出るジャンル・価格帯・お気に入り傾向を確認できます。',
     );
   }, [openPaywall]);
+
+  const toggleAiReportSamplePreview = useCallback(() => {
+    setAiReportSamplePreview((current) => !current);
+  }, []);
+
+  const toggleYearlyWrapped = useCallback(() => {
+    setYearlyWrappedOpen((current) => !current);
+  }, []);
+
+  const toggleYearlyWrappedDemoPreview = useCallback(() => {
+    setYearlyWrappedDemoPreview((current) => !current);
+    setYearlyWrappedOpen(true);
+  }, []);
+
+  const loadAiReport = useCallback(async () => {
+    if (aiReportStatus === 'loading' || reportAnalytics.drawCount === 0) {
+      return;
+    }
+    setAiReportOpen(false);
+    setAiReportStatus('loading');
+    const nextReport = await requestAiMonthlyReport(reportAnalytics, savedAnalytics, apiBaseUrlCandidates, userId);
+    setAiReport(nextReport);
+    setAiReportUsed(true);
+    setAiReportStatus(nextReport.source === 'fallback' ? 'error' : 'ready');
+    setAiReportOpen(true);
+  }, [aiReportStatus, apiBaseUrlCandidates, reportAnalytics, savedAnalytics, userId]);
+
+  const openAiReport = useCallback(() => {
+    if (!isPro) {
+      openPaywall(
+        '月次AIレポートはPro機能です。',
+        'ルーレット履歴から外食傾向、節約のヒント、次の選び方までまとめます。',
+      );
+      return;
+    }
+    if (aiReportUsed && aiReport) {
+      setAiReportOpen(true);
+      return;
+    }
+    if (!aiReportUsed && aiReportStatus === 'idle') {
+      void loadAiReport();
+      return;
+    }
+  }, [aiReport, aiReportStatus, aiReportUsed, isPro, loadAiReport, openPaywall]);
 
   const trendGenres: Array<{ label: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }> = [
     { label: 'ラーメン', icon: 'noodles' },
@@ -7479,6 +10327,39 @@ function AnalyticsTab({
         </View>
         <Text style={styles.analysisLead}>{uiText.analyticsLead}</Text>
       </View>
+
+      <AiMonthlyReportEntryCard
+        analytics={reportAnalytics}
+        status={aiReportStatus}
+        hasReport={Boolean(aiReport)}
+        isPro={isPro}
+        isSamplePreview={aiReportSamplePreview}
+        onOpen={openAiReport}
+        onToggleSample={toggleAiReportSamplePreview}
+      />
+
+      {aiReportOpen && (
+        <AiMonthlyReportCard
+          report={aiReport ?? localAiReportPreview}
+          analytics={reportAnalytics}
+          status={aiReportStatus}
+          onRefresh={loadAiReport}
+          canRefresh={false}
+          limitNotice={AI_REPORT_MONTHLY_NOTICE}
+        />
+      )}
+
+      <YearlyWrappedCard
+        analytics={yearlyAnalytics}
+        report={yearlyWrappedReport}
+        open={yearlyWrappedOpen}
+        now={now}
+        isDemoPreview={yearlyWrappedDemoPreview}
+        isPro={isPro}
+        onToggle={toggleYearlyWrapped}
+        onToggleDemo={toggleYearlyWrappedDemoPreview}
+        onOpenPro={() => openPaywall('年末Wrappedの深掘りはPro機能です。', '無料では年1回の基本まとめまで。Proなら節約のコツ、月別比較、アルバム/スライドショー、過去年度保存まで見られます。')}
+      />
 
       <AnalysisDigestCard
         analytics={currentAnalytics}
@@ -7515,7 +10396,7 @@ function AnalyticsTab({
         {spendOpen && (
           <>
             <Text style={styles.analysisFreeText}>
-              抽選で出た店の平均予算を自動で合計しています。手入力なしで、ざっくり支出を見られます。
+              抽選時の条件から平均予算を自動で合計しています。手入力なしで、ざっくり支出を見られます。
             </Text>
 
             <GenreSpendDonut items={currentAnalytics.genreAnalytics} totalLabel={monthlyTotalLabel} />
@@ -7527,7 +10408,7 @@ function AnalyticsTab({
               </View>
               <View style={styles.analysisFreeMetaItem}>
                 <Text style={styles.analysisFreeMetaLabel}>対象</Text>
-                <Text style={styles.analysisFreeMetaValue}>{currentAnalytics.monthLabel}の抽選結果</Text>
+                <Text style={styles.analysisFreeMetaValue}>{currentAnalytics.monthLabel}の履歴</Text>
               </View>
             </View>
           </>
@@ -7572,11 +10453,11 @@ function AnalyticsTab({
         <ProFeatureCard
           icon="cash-outline"
           title="価格帯の傾向"
-          description="抽選された店の価格帯を月ごとに確認できます。"
+          description="抽選時の価格帯を月ごとに確認できます。"
           value={topPriceRange}
           detailLines={currentAnalytics.priceRangeAnalytics.slice(0, 3).map((item) => `${item.label}: ${item.count}回`)}
           isPro={isPro}
-          onPress={() => openPaywall('価格帯の傾向はPro機能です。', '抽選された店の価格帯を月ごとに確認できます。')}
+          onPress={() => openPaywall('価格帯の傾向はPro機能です。', '抽選時の価格帯を月ごとに確認できます。')}
         />
         <ProFeatureCard
           icon="bookmark-outline"
@@ -7591,13 +10472,13 @@ function AnalyticsTab({
 
       <AnalysisSectionHeader
         kicker="THIS MONTH"
-        title="最近引いた店"
-        lead="今月の抽選結果だけはFreeでも残ります。"
+        title="最近の履歴"
+        lead="今月の抽選条件だけはFreeでも残ります。"
       />
 
       <View style={styles.analysisHistoryCard}>
         <View style={styles.analysisHistoryHeader}>
-          <Text style={styles.analysisHistoryTitle}>今月の抽選結果</Text>
+          <Text style={styles.analysisHistoryTitle}>今月の履歴</Text>
           {isPro ? <ProBadge label="Pro保存中" /> : (
             <Pressable style={styles.analysisProMark} onPress={() => openPaywall('過去月の履歴保存はPro機能です。', 'Freeでは今月分だけ。Proなら過去月の抽選履歴を見返せます。')}>
               <Ionicons name="lock-closed-outline" size={15} color={INK} />
@@ -7609,17 +10490,25 @@ function AnalyticsTab({
         {currentAnalytics.recentDraws.length === 0 ? (
           <View style={styles.analysisHistoryEmpty}>
             <Ionicons name="receipt-outline" size={28} color="#9a9187" />
-            <Text style={styles.analysisHistoryEmptyText}>今月の抽選結果が入ると、ここに推定予算が並びます。</Text>
+            <Text style={styles.analysisHistoryEmptyText}>今月の履歴が入ると、ここに推定予算が並びます。</Text>
           </View>
         ) : (
           currentAnalytics.recentDraws.map((entry, index) => {
-            const budget = getEstimatedBudget(entry.restaurant);
+            const displayEntry = {
+              ...entry,
+              area: entry.area ?? entry.restaurant?.area ?? null,
+              genre: entry.genre ?? entry.restaurant?.genre ?? null,
+              budgetMin: entry.budgetMin ?? toOptionalNumber(entry.restaurant?.budgetMin) ?? null,
+              budgetMax: entry.budgetMax ?? toOptionalNumber(entry.restaurant?.budgetMax) ?? null,
+            };
+            const budget = getHistoryEstimatedBudget(displayEntry);
+            const title = `${displayEntry.genre ?? 'お店'}の履歴`;
             return (
               <View key={`${entry.id}-${index}`} style={styles.analysisHistoryRow}>
                 <Text style={styles.analysisHistoryDate}>{formatShortDate(entry.createdAt)}</Text>
                 <View style={styles.analysisHistoryBody}>
-                  <Text style={styles.analysisHistoryName} numberOfLines={1}>{entry.restaurant.name}</Text>
-                  <Text style={styles.analysisHistoryMeta} numberOfLines={1}>{entry.restaurant.genre} / {entry.restaurant.area}</Text>
+                  <Text style={styles.analysisHistoryName} numberOfLines={1}>{title}</Text>
+                  <Text style={styles.analysisHistoryMeta} numberOfLines={1}>{buildHistoryMetaLine(displayEntry)}</Text>
                 </View>
                 <Text style={styles.analysisHistoryBudget}>{budget == null ? '未計測' : `約${formatYen(budget)}`}</Text>
               </View>
@@ -7675,6 +10564,7 @@ function AnalyticsTab({
         title={paywallContext?.title}
         message={paywallContext?.message}
         onStartPro={onStartPro}
+        onRestorePro={onRestorePro}
         onClose={() => setPaywallContext(null)}
       />
     </View>
@@ -7702,6 +10592,7 @@ function ResultCard({
   onMapPress,
   onFavoritePress,
   isFavorite = false,
+  allowExternalPhoto = false,
 }: {
   restaurant: Restaurant;
   userLocation: UserLocation | null;
@@ -7710,6 +10601,7 @@ function ResultCard({
   onMapPress: () => void;
   onFavoritePress?: () => void;
   isFavorite?: boolean;
+  allowExternalPhoto?: boolean;
 }) {
   const stationAccessItems = getNearestStationAccessItems(restaurant);
   const preferredStation = getPreferredStationAccessItem(restaurant, preferredArea);
@@ -7725,7 +10617,7 @@ function ResultCard({
 
   return (
     <View style={styles.resultCard}>
-      <RestaurantVisual restaurant={restaurant} large />
+      <RestaurantVisual restaurant={restaurant} large allowExternalPhoto={allowExternalPhoto} />
       <View style={styles.resultContent}>
         <View style={styles.resultTitleRow}>
           <Text style={styles.resultName}>{restaurant.name}</Text>
@@ -7773,7 +10665,7 @@ function ResultCard({
         </View>
         <MiniGoogleMap restaurant={restaurant} distanceLabel={miniMapDistanceLabel} onPress={onMapPress} />
         {!!restaurant.note && <Text style={styles.restaurantNote}>{restaurant.note}</Text>}
-        {restaurant.externalProvider === 'HOTPEPPER' && <HotPepperCredit compact />}
+        {allowExternalPhoto && restaurant.externalProvider === 'HOTPEPPER' && <HotPepperCredit compact />}
       </View>
     </View>
   );
@@ -7905,19 +10797,22 @@ function CandidateCard({ restaurant, uiText = UI_TEXT.ja }: { restaurant: Restau
 function RestaurantVisual({
   restaurant,
   large = false,
+  allowExternalPhoto = false,
 }: {
   restaurant: Restaurant;
   large?: boolean;
+  allowExternalPhoto?: boolean;
 }) {
   const genreVisual = getGenreVisual(restaurant.genre);
-  const imageCredit = restaurant.externalProvider === 'GOOGLE_PLACES'
-    ? '画像提供：Google Places'
-    : '画像提供：ホットペッパー グルメ';
+  const imageCredit = '画像提供：ホットペッパー グルメ';
+  const hotPepperPhotoUrl = allowExternalPhoto && restaurant.externalProvider === 'HOTPEPPER'
+    ? restaurant.photoUrl
+    : null;
 
-  if (restaurant.photoUrl) {
+  if (hotPepperPhotoUrl) {
     return (
       <View style={[large ? styles.restaurantVisualLarge : styles.restaurantVisual, styles.restaurantVisualFrame]}>
-        <Image source={{ uri: restaurant.photoUrl }} style={styles.restaurantVisualPhoto} resizeMode="cover" />
+        <Image source={{ uri: hotPepperPhotoUrl }} style={styles.restaurantVisualPhoto} resizeMode="cover" />
         {large && (
           <Text style={styles.hotpepperImageCredit} numberOfLines={1}>
             {imageCredit}
@@ -7952,14 +10847,126 @@ function RestaurantVisual({
   );
 }
 
-function HistorySection({ history, uiText }: { history: Restaurant[]; uiText: Record<string, string> }) {
+function HistoryEntrySection({
+  entries,
+  fallbackHistory,
+  uiText,
+  loadingId,
+  error,
+  onEntryPress,
+}: {
+  entries: DrawHistoryEntry[];
+  fallbackHistory: Restaurant[];
+  uiText: Record<string, string>;
+  loadingId: string | null;
+  error: string | null;
+  onEntryPress: (entry: DrawHistoryEntry) => void;
+}) {
+  if (entries.length === 0) {
+    return <HistorySection history={fallbackHistory} uiText={uiText} showAll />;
+  }
+
+  return (
+    <View>
+      <SectionHeader title={uiText.recentHistory} action={`${entries.length}件`} />
+      {!!error && (
+        <View style={styles.savedErrorNotice}>
+          <Ionicons name="alert-circle-outline" size={18} color={ORANGE} />
+          <Text style={styles.savedErrorText}>{error}</Text>
+        </View>
+      )}
+      {entries.map((entry, index) => {
+        const loading = loadingId === entry.id;
+        const displayEntry = {
+          ...entry,
+          area: entry.area ?? entry.restaurant?.area ?? null,
+          genre: entry.genre ?? entry.restaurant?.genre ?? null,
+          budgetMin: entry.budgetMin ?? toOptionalNumber(entry.restaurant?.budgetMin) ?? null,
+          budgetMax: entry.budgetMax ?? toOptionalNumber(entry.restaurant?.budgetMax) ?? null,
+        };
+        return (
+          <View key={`${entry.id}-history-lookup-${index}`} style={styles.historyLookupCard}>
+            <View style={styles.historyLookupTopRow}>
+              <View style={styles.historyLookupIcon}>
+                <GenreIconVisual genre={displayEntry.genre} />
+              </View>
+              <View style={styles.historyLookupBody}>
+                <Text style={styles.historyLookupTitle}>{displayEntry.genre ?? 'お店'}の履歴</Text>
+                <Text style={styles.historyLookupMeta} numberOfLines={1}>
+                  {buildHistoryMetaLine(displayEntry)}
+                </Text>
+                <Text style={styles.historyLookupId} numberOfLines={1}>
+                  {getProviderLabel(entry.provider)} / {formatShortDateTime(entry.createdAt) || '履歴'}
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              style={[styles.historyLookupButton, loading && styles.historyLookupButtonDisabled]}
+              onPress={() => onEntryPress(entry)}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#ffffff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="cloud-download-outline" size={16} color="#ffffff" />
+                  <Text style={styles.historyLookupButtonText}>{entry.restaurant ? '詳細画面で見る' : '最新情報を取得'}</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function HistorySection({
+  history,
+  uiText,
+  showAll = false,
+}: {
+  history: Restaurant[];
+  uiText: Record<string, string>;
+  showAll?: boolean;
+}) {
+  const displayedHistory = showAll ? history : history.slice(0, 5);
   return (
     <View>
       <SectionHeader title={uiText.recentHistory} action={history.length ? `${history.length}件` : uiText.noHistory} />
       {history.length === 0 ? (
         <Text style={styles.mutedText}>{uiText.historyEmpty}</Text>
       ) : (
-        history.slice(0, 5).map((restaurant) => <RestaurantCard key={`${restaurant.id}-history`} restaurant={restaurant} uiText={uiText} />)
+        displayedHistory.map((restaurant, index) => {
+          const provider = (restaurant.externalProvider || 'RANDISH_SEED').toUpperCase();
+          const entry: DrawHistoryEntry = {
+            id: `fallback-${restaurant.id}-${index}`,
+            provider,
+            providerPlaceId: getProviderPlaceId(restaurant),
+            restaurantId: shouldPersistRestaurantId(restaurant) ? restaurant.id : null,
+            restaurant: null,
+            area: restaurant.area ?? null,
+            genre: restaurant.genre ?? null,
+            budgetMin: toOptionalNumber(restaurant.budgetMin) ?? null,
+            budgetMax: toOptionalNumber(restaurant.budgetMax) ?? null,
+            rangeMeters: null,
+            createdAt: new Date().toISOString(),
+          };
+          return (
+            <View key={`${restaurant.id}-history-safe-${index}`} style={styles.historyLookupCard}>
+              <View style={styles.historyLookupTopRow}>
+                <View style={styles.historyLookupIcon}>
+                  <GenreIconVisual genre={entry.genre} />
+                </View>
+                <View style={styles.historyLookupBody}>
+                  <Text style={styles.historyLookupTitle}>{entry.genre ?? 'お店'}の履歴</Text>
+                  <Text style={styles.historyLookupMeta} numberOfLines={1}>{buildHistoryMetaLine(entry)}</Text>
+                  <Text style={styles.historyLookupId} numberOfLines={1}>{getProviderLabel(provider)}</Text>
+                </View>
+              </View>
+            </View>
+          );
+        })
       )}
     </View>
   );

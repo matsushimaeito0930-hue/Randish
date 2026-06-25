@@ -40,6 +40,7 @@ public class FavoriteService {
     String provider = validationService.optionalProvider(request.provider());
     String providerPlaceId = validationService.optionalProviderPlaceId(request.providerPlaceId());
     validationService.validateBudget(request.savedBudgetMin(), request.savedBudgetMax());
+    Integer savedRangeMeters = validationService.optionalPositiveInteger("savedRangeMeters", request.savedRangeMeters());
 
     if (restaurantId != null) {
       restaurantId = validationService.requireRestaurantId(restaurantId);
@@ -72,6 +73,7 @@ public class FavoriteService {
         validationService.optionalSearchText("savedGenre", request.savedGenre()),
         request.savedBudgetMin(),
         request.savedBudgetMax(),
+        savedRangeMeters,
         validationService.optionalNote("userMemo", request.userMemo()),
         validationService.optionalNote("userTags", request.userTags()),
         Instant.now());

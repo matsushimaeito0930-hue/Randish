@@ -275,7 +275,13 @@ public class RestaurantQueryService {
   }
 
   public void cacheForUserAction(Restaurant restaurant) {
-    restaurantRepository.saveAll(List.of(restaurant));
+    if (shouldPersistRestaurant(restaurant)) {
+      restaurantRepository.saveAll(List.of(restaurant));
+    }
+  }
+
+  public boolean shouldPersistRestaurant(Restaurant restaurant) {
+    return restaurant != null && "RANDISH_SEED".equalsIgnoreCase(restaurant.externalProvider());
   }
 
   public Optional<Restaurant> findExternalByProviderPlaceId(

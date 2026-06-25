@@ -24,13 +24,20 @@
         }
       ],
       "expo-apple-authentication",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "近くのお店を探して地図ルーレットを回すために現在地を使用します。"
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "ごはんの写真を撮ってアルバムに残すためにカメラを使用します。",
+        "NSLocationWhenInUseUsageDescription": "近くのお店を探して地図ルーレットを回すために現在地を使用します。",
         "NSPhotoLibraryUsageDescription": "プロフィール画像やごはんの写真を選ぶために写真へのアクセスを使用します。",
         "NSPhotoLibraryAddUsageDescription": "撮影したごはんの写真をアルバムに残すために写真ライブラリを使用します。"
       }
@@ -38,6 +45,8 @@
     "android": {
       "permissions": [
         "CAMERA",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
         "READ_MEDIA_IMAGES",
         "READ_EXTERNAL_STORAGE"
       ],

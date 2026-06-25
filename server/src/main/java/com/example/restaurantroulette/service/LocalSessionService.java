@@ -37,6 +37,13 @@ public class LocalSessionService {
     return session.userId();
   }
 
+  public void revokeSession(String authorizationHeader) {
+    if (authorizationHeader == null || authorizationHeader.isBlank()) {
+      return;
+    }
+    sessions.remove(stripBearerToken(authorizationHeader));
+  }
+
   private String stripBearerToken(String value) {
     if (value == null || value.isBlank()) {
       throw new UnauthorizedException("Authorization bearer token is required.");

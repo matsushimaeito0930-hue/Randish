@@ -21,12 +21,12 @@ public class FavoriteRestaurantRepository {
     jdbcClient.sql("""
         INSERT INTO favorite_restaurants (
           id, user_id, provider, provider_place_id, restaurant_id,
-          saved_area, saved_genre, saved_budget_min, saved_budget_max,
+          saved_area, saved_genre, saved_budget_min, saved_budget_max, saved_range_meters,
           user_memo, user_tags, created_at
         )
         VALUES (
           :id, :userId, :provider, :providerPlaceId, :restaurantId,
-          :savedArea, :savedGenre, :savedBudgetMin, :savedBudgetMax,
+          :savedArea, :savedGenre, :savedBudgetMin, :savedBudgetMax, :savedRangeMeters,
           :userMemo, :userTags, :createdAt
         )
         """)
@@ -39,6 +39,7 @@ public class FavoriteRestaurantRepository {
         .param("savedGenre", favorite.savedGenre())
         .param("savedBudgetMin", favorite.savedBudgetMin())
         .param("savedBudgetMax", favorite.savedBudgetMax())
+        .param("savedRangeMeters", favorite.savedRangeMeters())
         .param("userMemo", favorite.userMemo())
         .param("userTags", favorite.userTags())
         .param("createdAt", Timestamp.from(favorite.createdAt()))
@@ -55,7 +56,7 @@ public class FavoriteRestaurantRepository {
   public List<FavoriteRestaurant> findByUserId(String userId) {
     return jdbcClient.sql("""
         SELECT id, user_id, provider, provider_place_id, restaurant_id,
-               saved_area, saved_genre, saved_budget_min, saved_budget_max,
+               saved_area, saved_genre, saved_budget_min, saved_budget_max, saved_range_meters,
                user_memo, user_tags, created_at
         FROM favorite_restaurants
         WHERE user_id = :userId
@@ -69,7 +70,7 @@ public class FavoriteRestaurantRepository {
   public Optional<FavoriteRestaurant> findById(String id) {
     return jdbcClient.sql("""
         SELECT id, user_id, provider, provider_place_id, restaurant_id,
-               saved_area, saved_genre, saved_budget_min, saved_budget_max,
+               saved_area, saved_genre, saved_budget_min, saved_budget_max, saved_range_meters,
                user_memo, user_tags, created_at
         FROM favorite_restaurants
         WHERE id = :id
@@ -82,7 +83,7 @@ public class FavoriteRestaurantRepository {
   public Optional<FavoriteRestaurant> findByUserIdAndRestaurantId(String userId, String restaurantId) {
     return jdbcClient.sql("""
         SELECT id, user_id, provider, provider_place_id, restaurant_id,
-               saved_area, saved_genre, saved_budget_min, saved_budget_max,
+               saved_area, saved_genre, saved_budget_min, saved_budget_max, saved_range_meters,
                user_memo, user_tags, created_at
         FROM favorite_restaurants
         WHERE user_id = :userId AND restaurant_id = :restaurantId
@@ -96,7 +97,7 @@ public class FavoriteRestaurantRepository {
   public Optional<FavoriteRestaurant> findByUserIdAndProviderPlaceId(String userId, String provider, String providerPlaceId) {
     return jdbcClient.sql("""
         SELECT id, user_id, provider, provider_place_id, restaurant_id,
-               saved_area, saved_genre, saved_budget_min, saved_budget_max,
+               saved_area, saved_genre, saved_budget_min, saved_budget_max, saved_range_meters,
                user_memo, user_tags, created_at
         FROM favorite_restaurants
         WHERE user_id = :userId AND provider = :provider AND provider_place_id = :providerPlaceId
@@ -119,6 +120,7 @@ public class FavoriteRestaurantRepository {
         resultSet.getString("saved_genre"),
         getNullableInteger(resultSet, "saved_budget_min"),
         getNullableInteger(resultSet, "saved_budget_max"),
+        getNullableInteger(resultSet, "saved_range_meters"),
         resultSet.getString("user_memo"),
         resultSet.getString("user_tags"),
         resultSet.getTimestamp("created_at").toInstant());

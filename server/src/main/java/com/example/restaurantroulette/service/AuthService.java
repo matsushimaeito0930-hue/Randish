@@ -96,6 +96,10 @@ public class AuthService {
     return new AuthResponse(user, null);
   }
 
+  public void logout(String authorizationHeader) {
+    localSessionService.revokeSession(authorizationHeader);
+  }
+
   private String normalizeEmail(String email) {
     if (email == null || email.isBlank()) {
       throw new BadRequestException("email is required.");

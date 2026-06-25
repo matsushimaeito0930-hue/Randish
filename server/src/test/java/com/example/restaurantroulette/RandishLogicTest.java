@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
+import com.example.restaurantroulette.dto.ApiDtos.CandidatePlaceResponse;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteCreateRequest;
+import com.example.restaurantroulette.dto.ApiDtos.NearbyPlacesRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
@@ -17,7 +19,9 @@ import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.repository.AppUserRepository;
 import com.example.restaurantroulette.repository.FavoriteRestaurantRepository;
 import com.example.restaurantroulette.repository.PendingEmailRegistrationRepository;
+import com.example.restaurantroulette.repository.PremiumRepository;
 import com.example.restaurantroulette.repository.RandomHistoryRepository;
+import com.example.restaurantroulette.repository.RevenueCatWebhookRepository;
 import com.example.restaurantroulette.repository.RestaurantRepository;
 import com.example.restaurantroulette.repository.StampRepository;
 import com.example.restaurantroulette.repository.VisitCollectionRepository;
@@ -27,9 +31,12 @@ import com.example.restaurantroulette.service.DtoMapper;
 import com.example.restaurantroulette.service.EmailRegistrationService;
 import com.example.restaurantroulette.service.FavoriteService;
 import com.example.restaurantroulette.service.LocalSessionService;
+import com.example.restaurantroulette.service.NearbyPlacesService;
 import com.example.restaurantroulette.service.PasswordHashService;
+import com.example.restaurantroulette.service.PremiumService;
 import com.example.restaurantroulette.service.RandomHistoryService;
 import com.example.restaurantroulette.service.RandomRestaurantService;
+import com.example.restaurantroulette.service.RevenueCatWebhookService;
 import com.example.restaurantroulette.service.RestaurantQueryService;
 import com.example.restaurantroulette.service.StampService;
 import com.example.restaurantroulette.service.StatisticsService;
@@ -38,6 +45,7 @@ import com.example.restaurantroulette.service.UserService;
 import com.example.restaurantroulette.service.ValidationService;
 import com.example.restaurantroulette.service.VisitCollectionService;
 import com.example.restaurantroulette.service.external.ExternalRestaurantProvider;
+import com.example.restaurantroulette.service.external.GooglePlacesEnrichmentService;
 import com.example.restaurantroulette.service.external.HotPepperRestaurantProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.reflect.Method;
@@ -80,6 +88,7 @@ class RandishLogicTest {
   private final FavoriteService favoriteService = new FavoriteService(new FavoriteRestaurantRepository(jdbcClient), restaurantQueryService, mapper, validationService);
   private final PasswordHashService passwordHashService = new PasswordHashService();
   private final UserService userService = new UserService(new AppUserRepository(jdbcClient), mapper, passwordHashService);
+  private final PremiumService premiumService = new PremiumService(new PremiumRepository(jdbcClient));
   private final StampService stampService = new StampService(new StampRepository(jdbcClient), mapper, validationService);
   private final VisitCollectionService visitCollectionService = new VisitCollectionService(new VisitCollectionRepository(jdbcClient), restaurantQueryService, stampService, mapper, validationService);
   private final StatisticsService statisticsService = new StatisticsService(visitCollectionService, restaurantQueryService, favoriteService, validationService);
@@ -108,7 +117,7 @@ class RandishLogicTest {
 
   @Test
   void randomSavesHistory() {
-    var selected = randomRestaurantService.choose(new RandomRestaurantRequest("user-1", "梅田", null, null, null, null, null, null));
+    var selected = randomRestaurantService.choose(new RandomRestaurantRequest("user-1", "梅田", null, null, null, null, null, null, null));
     var histories = randomHistoryService.findByUserId("user-1");
 
     assertThat(selected.id()).isNotBlank();
@@ -149,6 +158,138 @@ class RandishLogicTest {
   }
 
   @Test
+  void premiumStatusUsesActiveGrant() {
+    UserResponse user = userService.register(new UserCreateRequest("premium-grant@example.com", "password123", "Premium Grant"));
+    jdbcClient.sql("""
+        INSERT INTO premium_grants (
+          id, user_id, entitlement_key, grant_type, status, starts_at, ends_at, note
+        )
+        VALUES (
+          'grant-active-test', :userId, 'premium', 'BETA', 'active', :startsAt, :endsAt, 'test grant'
+        )
+        """)
+        .param("userId", user.id())
+        .param("startsAt", java.sql.Timestamp.from(Instant.now().minusSeconds(60)))
+        .param("endsAt", java.sql.Timestamp.from(Instant.now().plusSeconds(3600)))
+        .update();
+
+    var status = premiumService.status(user.id());
+
+    assertThat(status.isPro()).isTrue();
+    assertThat(status.source()).isEqualTo("GRANT");
+    assertThat(status.entitlementKey()).isEqualTo("premium");
+  }
+
+  @Test
+  void premiumStatusIgnoresExpiredGrant() {
+    UserResponse user = userService.register(new UserCreateRequest("premium-expired@example.com", "password123", "Premium Expired"));
+    jdbcClient.sql("""
+        INSERT INTO premium_grants (
+          id, user_id, entitlement_key, grant_type, status, starts_at, ends_at, note
+        )
+        VALUES (
+          'grant-expired-test', :userId, 'premium', 'BETA', 'active', :startsAt, :endsAt, 'expired grant'
+        )
+        """)
+        .param("userId", user.id())
+        .param("startsAt", java.sql.Timestamp.from(Instant.now().minusSeconds(7200)))
+        .param("endsAt", java.sql.Timestamp.from(Instant.now().minusSeconds(3600)))
+        .update();
+
+    var status = premiumService.status(user.id());
+
+    assertThat(status.isPro()).isFalse();
+    assertThat(status.source()).isEqualTo("FREE");
+  }
+
+  @Test
+  void revenueCatWebhookActivatesPremiumSubscriptionIdempotently() throws Exception {
+    System.setProperty("REVENUECAT_WEBHOOK_AUTHORIZATION", "Bearer revenuecat-test-secret");
+    try {
+      UserResponse user = userService.register(new UserCreateRequest("revenuecat-paid@example.com", "password123", "RevenueCat Paid"));
+      ObjectMapper objectMapper = new ObjectMapper();
+      RevenueCatWebhookService webhookService = new RevenueCatWebhookService(
+          new RevenueCatWebhookRepository(jdbcClient),
+          objectMapper);
+      long nowMs = Instant.now().toEpochMilli();
+      long expirationMs = Instant.now().plusSeconds(3600).toEpochMilli();
+      var payload = objectMapper.readTree("""
+          {
+            "api_version": "1.0",
+            "event": {
+              "id": "event-paid-1",
+              "type": "INITIAL_PURCHASE",
+              "app_user_id": "%s",
+              "original_app_user_id": "%s",
+              "aliases": [],
+              "store": "APP_STORE",
+              "environment": "SANDBOX",
+              "entitlement_id": "premium",
+              "entitlement_ids": ["premium"],
+              "product_id": "randish_pro_monthly",
+              "period_type": "NORMAL",
+              "event_timestamp_ms": %d,
+              "purchased_at_ms": %d,
+              "expiration_at_ms": %d,
+              "transaction_id": "txn-paid-1",
+              "original_transaction_id": "orig-paid-1"
+            }
+          }
+          """.formatted(user.id(), user.id(), nowMs, nowMs, expirationMs));
+
+      webhookService.handle("Bearer revenuecat-test-secret", payload);
+      webhookService.handle("Bearer revenuecat-test-secret", payload);
+
+      var status = premiumService.status(user.id());
+      Long subscriptionRows = jdbcClient.sql("SELECT COUNT(*) FROM subscriptions WHERE user_id = :userId")
+          .param("userId", user.id())
+          .query(Long.class)
+          .single();
+      Long eventRows = jdbcClient.sql("SELECT COUNT(*) FROM payment_events WHERE provider_event_id = 'event-paid-1'")
+          .query(Long.class)
+          .single();
+
+      assertThat(status.isPro()).isTrue();
+      assertThat(status.source()).isEqualTo("SUBSCRIPTION");
+      assertThat(status.provider()).isEqualTo("APP_STORE");
+      assertThat(status.environment()).isEqualTo("SANDBOX");
+      assertThat(subscriptionRows).isEqualTo(1);
+      assertThat(eventRows).isEqualTo(1);
+    } finally {
+      System.clearProperty("REVENUECAT_WEBHOOK_AUTHORIZATION");
+    }
+  }
+
+  @Test
+  void revenueCatWebhookRejectsWrongAuthorization() throws Exception {
+    System.setProperty("REVENUECAT_WEBHOOK_AUTHORIZATION", "Bearer revenuecat-test-secret");
+    try {
+      RevenueCatWebhookService webhookService = new RevenueCatWebhookService(
+          new RevenueCatWebhookRepository(jdbcClient),
+          new ObjectMapper());
+      var payload = new ObjectMapper().readTree("""
+          {
+            "api_version": "1.0",
+            "event": {
+              "id": "event-unauthorized",
+              "type": "INITIAL_PURCHASE",
+              "app_user_id": "missing",
+              "store": "APP_STORE",
+              "environment": "SANDBOX",
+              "entitlement_ids": ["premium"],
+              "transaction_id": "txn-unauthorized"
+            }
+          }
+          """);
+
+      assertThatThrownBy(() -> webhookService.handle("Bearer wrong", payload))
+          .isInstanceOf(UnauthorizedException.class);
+    } finally {
+      System.clearProperty("REVENUECAT_WEBHOOK_AUTHORIZATION");
+    }
+  }
+
+  @Test
   void localAuthCanLoginWhenSupabaseIsNotConfigured() {
     UserResponse registered = userService.register(new UserCreateRequest("local-login@example.com", "password123", "Local User"));
     AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
@@ -161,6 +302,21 @@ class RandishLogicTest {
     assertThat(loggedIn.user().email()).isEqualTo("local-login@example.com");
     assertThat(loggedIn.accessToken()).isNotBlank();
     assertThat(authService.me("Bearer " + loggedIn.accessToken()).user().id()).isEqualTo(registered.id());
+  }
+
+  @Test
+  void localAuthLogoutRevokesSession() {
+    userService.register(new UserCreateRequest("local-logout@example.com", "password123", "Local User"));
+    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
+
+    AuthResponse loggedIn = authService.login(new com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest(
+        "local-logout@example.com",
+        "password123"));
+
+    authService.logout("Bearer " + loggedIn.accessToken());
+
+    assertThatThrownBy(() -> authService.me("Bearer " + loggedIn.accessToken()))
+        .isInstanceOf(UnauthorizedException.class);
   }
 
   @Test
@@ -337,7 +493,7 @@ class RandishLogicTest {
   @Test
   void mobileInitialGenreCatalogIsCuratedAndUnique() throws Exception {
     String source = Files.readString(Path.of("..", "mobile", "App.tsx"));
-    String catalog = source.substring(source.indexOf("const GENRES"), source.indexOf("const LEGACY_GENRE_VISUAL_LABELS"));
+    String catalog = source.substring(source.indexOf("const GENRES"), source.indexOf("const AI_REPORT_MONTH_OPTIONS"));
     var matcher = Pattern.compile("\\{ label: '([^']+)'").matcher(catalog);
     var labels = new ArrayList<String>();
     while (matcher.find()) {
@@ -469,7 +625,7 @@ class RandishLogicTest {
 
   @Test
   void guestRandomDoesNotPersistUserHistory() {
-    var selected = randomRestaurantService.choose(new RandomRestaurantRequest(ValidationService.GUEST_USER_ID, null, null, null, null, null, null, null));
+    var selected = randomRestaurantService.choose(new RandomRestaurantRequest(ValidationService.GUEST_USER_ID, null, null, null, null, null, null, null, null));
     Long guestRows = jdbcClient.sql("SELECT COUNT(*) FROM random_histories WHERE user_id = 'guest'")
         .query(Long.class)
         .single();
@@ -518,6 +674,44 @@ class RandishLogicTest {
     assertThat(restaurants).extracting("id").containsExactly("keyword-joetsu-ramen");
   }
 
+  @Test
+  void nearbyPlacesCacheAvoidsRepeatedProviderCallsForSamePool() {
+    var provider = new CountingNearbyPlacesProvider();
+    var service = new NearbyPlacesService(provider, validationService, 600, 300, false, false, 20);
+    var request = new NearbyPlacesRequest(35.681236, 139.767125, 1500, "ラーメン", null, false);
+
+    var first = service.search(request);
+    var second = service.search(new NearbyPlacesRequest(35.681336, 139.767225, 1500, "ラーメン", null, false));
+
+    assertThat(first.cacheHit()).isFalse();
+    assertThat(second.cacheHit()).isTrue();
+    assertThat(provider.nearbyCallCount).isEqualTo(1);
+    assertThat(second.places()).extracting("id").containsExactly("nearby-test-1");
+  }
+
+  @Test
+  void nearbyPlacesConditionChangeRefreshesCandidates() {
+    var provider = new CountingNearbyPlacesProvider();
+    var service = new NearbyPlacesService(provider, validationService, 600, 300, false, false, 20);
+
+    service.search(new NearbyPlacesRequest(35.681236, 139.767125, 1500, "ラーメン", null, false));
+    service.search(new NearbyPlacesRequest(35.681236, 139.767125, 1500, "カフェ", null, false));
+
+    assertThat(provider.nearbyCallCount).isEqualTo(2);
+  }
+
+  @Test
+  void nearbyPlacesRejectsInvalidInputBeforeProviderCall() {
+    var provider = new CountingNearbyPlacesProvider();
+    var service = new NearbyPlacesService(provider, validationService, 600, 300, false, false, 20);
+
+    assertThatThrownBy(() -> service.search(new NearbyPlacesRequest(91.0, 139.767125, 1500, "ラーメン", null, false)))
+        .isInstanceOf(BadRequestException.class);
+    assertThatThrownBy(() -> service.search(new NearbyPlacesRequest(35.681236, 139.767125, 50, "ラーメン", null, false)))
+        .isInstanceOf(BadRequestException.class);
+    assertThat(provider.nearbyCallCount).isZero();
+  }
+
   private static class CoordinateFallbackProvider implements ExternalRestaurantProvider {
     private int coordinateSearchCalls;
     private int keywordSearchCalls;
@@ -550,6 +744,36 @@ class RandishLogicTest {
           "test",
           null,
           null));
+    }
+  }
+
+  private static class CountingNearbyPlacesProvider extends GooglePlacesEnrichmentService {
+    private int nearbyCallCount;
+
+    private CountingNearbyPlacesProvider() {
+      super(RestClient.builder());
+    }
+
+    @Override
+    public boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    public List<CandidatePlaceResponse> searchNearbyCandidates(NearbyPlacesRequest request, int maxCandidates) {
+      nearbyCallCount++;
+      return List.of(new CandidatePlaceResponse(
+          "nearby-test-1",
+          "Nearby Test",
+          request.latitude(),
+          request.longitude(),
+          List.of(request.category() == null ? "飲食店" : request.category()),
+          4.3,
+          2,
+          true,
+          "東京都千代田区丸の内",
+          0,
+          "https://www.google.com/maps/search/?api=1&query=Nearby%20Test"));
     }
   }
 

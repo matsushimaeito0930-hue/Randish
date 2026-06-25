@@ -285,7 +285,9 @@ CREATE TABLE IF NOT EXISTS restaurant_enrichments (
 CREATE TABLE IF NOT EXISTS random_histories (
   id VARCHAR(120) PRIMARY KEY,
   user_id VARCHAR(120) NOT NULL,
-  restaurant_id VARCHAR(120) NOT NULL,
+  restaurant_id VARCHAR(120),
+  provider VARCHAR(80) NOT NULL DEFAULT 'RANDISH_SEED',
+  provider_place_id VARCHAR(255) NOT NULL DEFAULT '',
   area VARCHAR(120),
   genre VARCHAR(120),
   budget_min INT,
@@ -312,6 +314,7 @@ CREATE TABLE IF NOT EXISTS favorite_restaurants (
   saved_genre VARCHAR(120),
   saved_budget_min INT,
   saved_budget_max INT,
+  saved_range_meters INT,
   user_memo VARCHAR(1000),
   user_tags VARCHAR(1000),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -319,6 +322,9 @@ CREATE TABLE IF NOT EXISTS favorite_restaurants (
     FOREIGN KEY (restaurant_id) REFERENCES restaurants(id),
   CONSTRAINT ck_favorite_budget CHECK (
     saved_budget_min IS NULL OR saved_budget_max IS NULL OR saved_budget_min <= saved_budget_max
+  ),
+  CONSTRAINT ck_favorite_range CHECK (
+    saved_range_meters IS NULL OR saved_range_meters > 0
   )
 );
 
@@ -380,12 +386,25 @@ ALTER TABLE app_users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(40) NOT NUL
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS range_meters INT;
+ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS provider VARCHAR(80) NOT NULL DEFAULT 'RANDISH_SEED';
+ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS provider_place_id VARCHAR(255) NOT NULL DEFAULT '';
+UPDATE random_histories
+SET provider = COALESCE((SELECT restaurants.external_provider FROM restaurants WHERE restaurants.id = random_histories.restaurant_id), provider)
+WHERE restaurant_id IS NOT NULL;
+UPDATE random_histories
+SET provider_place_id = COALESCE((SELECT restaurants.external_id FROM restaurants WHERE restaurants.id = random_histories.restaurant_id), provider_place_id)
+WHERE restaurant_id IS NOT NULL AND (provider_place_id IS NULL OR provider_place_id = '');
+ALTER TABLE random_histories ALTER COLUMN restaurant_id DROP NOT NULL;
+UPDATE random_histories
+SET restaurant_id = NULL
+WHERE provider <> 'RANDISH_SEED';
 ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS provider VARCHAR(80) NOT NULL DEFAULT 'RANDISH_SEED';
 ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS provider_place_id VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS saved_area VARCHAR(120);
 ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS saved_genre VARCHAR(120);
 ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS saved_budget_min INT;
 ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS saved_budget_max INT;
+ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS saved_range_meters INT;
 ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS user_memo VARCHAR(1000);
 ALTER TABLE favorite_restaurants ADD COLUMN IF NOT EXISTS user_tags VARCHAR(1000);
 ALTER TABLE favorite_restaurants ALTER COLUMN restaurant_id DROP NOT NULL;

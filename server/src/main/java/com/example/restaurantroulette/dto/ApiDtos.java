@@ -41,7 +41,8 @@ public final class ApiDtos {
       Integer budgetMax,
       Double latitude,
       Double longitude,
-      Integer range) {
+      Integer range,
+      Integer distanceMeters) {
   }
 
   public record RandomRestaurantRequest(
@@ -52,26 +53,65 @@ public final class ApiDtos {
       Integer budgetMax,
       Double latitude,
       Double longitude,
-      Integer range) {
+      Integer range,
+      Integer distanceMeters) {
+  }
+
+  public record NearbyPlacesRequest(
+      Double latitude,
+      Double longitude,
+      Integer radius,
+      String category,
+      String priceRange,
+      Boolean openNow) {
+  }
+
+  public record CandidatePlaceResponse(
+      String id,
+      String name,
+      Double latitude,
+      Double longitude,
+      List<String> categories,
+      Double rating,
+      Integer priceLevel,
+      Boolean openNow,
+      String address,
+      Integer distanceMeters,
+      String googleMapsUri) {
+  }
+
+  public record NearbyPlacesResponse(
+      List<CandidatePlaceResponse> places,
+      boolean cacheHit,
+      String source,
+      Instant fetchedAt,
+      String message) {
   }
 
   public record RandomHistoryCreateRequest(
       String userId,
       String restaurantId,
+      String provider,
+      String providerPlaceId,
       String area,
       String genre,
       Integer budgetMin,
-      Integer budgetMax) {
+      Integer budgetMax,
+      Integer rangeMeters) {
   }
 
   public record RandomHistoryResponse(
       String id,
       String userId,
+      String provider,
+      String providerPlaceId,
+      String restaurantId,
       RestaurantResponse restaurant,
       String area,
       String genre,
       Integer budgetMin,
       Integer budgetMax,
+      Integer rangeMeters,
       Instant createdAt) {
   }
 
@@ -115,6 +155,15 @@ public final class ApiDtos {
       String accessToken) {
   }
 
+  public record PremiumStatusResponse(
+      boolean isPro,
+      String entitlementKey,
+      String source,
+      Instant activeUntil,
+      String provider,
+      String environment) {
+  }
+
   public record FavoriteCreateRequest(
       String userId,
       String restaurantId,
@@ -124,10 +173,11 @@ public final class ApiDtos {
       String savedGenre,
       Integer savedBudgetMin,
       Integer savedBudgetMax,
+      Integer savedRangeMeters,
       String userMemo,
       String userTags) {
     public FavoriteCreateRequest(String userId, String restaurantId) {
-      this(userId, restaurantId, null, null, null, null, null, null, null, null);
+      this(userId, restaurantId, null, null, null, null, null, null, null, null, null);
     }
   }
 
@@ -141,6 +191,7 @@ public final class ApiDtos {
       String savedGenre,
       Integer savedBudgetMin,
       Integer savedBudgetMax,
+      Integer savedRangeMeters,
       String userMemo,
       String userTags,
       RestaurantResponse restaurant,

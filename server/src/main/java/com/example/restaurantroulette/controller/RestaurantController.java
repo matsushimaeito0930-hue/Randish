@@ -52,7 +52,8 @@ public class RestaurantController {
       @RequestParam(required = false) Integer budgetMax,
       @RequestParam(required = false) Double latitude,
       @RequestParam(required = false) Double longitude,
-      @RequestParam(required = false) Integer range) {
+      @RequestParam(required = false) Integer range,
+      @RequestParam(required = false) Integer distanceMeters) {
     String effectiveUserId = userId == null || userId.isBlank() ? ValidationService.GUEST_USER_ID : userId.trim();
     if (!authenticatedUserService.isGuestUserId(effectiveUserId)) {
       authenticatedUserService.requireSameUser(authorizationHeader, effectiveUserId);
@@ -65,7 +66,8 @@ public class RestaurantController {
         budgetMax,
         latitude,
         longitude,
-        range));
+        range,
+        distanceMeters));
   }
 
   @GetMapping("/{id}")

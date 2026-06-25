@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -54,6 +55,12 @@ public class AuthController {
   @PostMapping("/login")
   public AuthResponse login(@RequestBody UserLoginRequest request) {
     return authService.login(request);
+  }
+
+  @PostMapping("/logout")
+  public ResponseEntity<Void> logout(@RequestHeader(value = "Authorization", required = false) String authorizationHeader) {
+    authService.logout(authorizationHeader);
+    return ResponseEntity.noContent().build();
   }
 
   @GetMapping("/oauth/{provider}/authorize")
