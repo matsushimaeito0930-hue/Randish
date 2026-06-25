@@ -95,6 +95,25 @@ public class SupabaseAuthService {
     }
   }
 
+  public SupabaseAuthResult refreshSession(String refreshToken) {
+    requireConfigured();
+    if (refreshToken == null || refreshToken.isBlank()) {
+      throw new UnauthorizedException("Supabase refresh token is required.");
+    }
+    try {
+      SupabaseAuthApiResponse response = client().post()
+          .uri("/auth/v1/token?grant_type=refresh_token")
+          .header("apikey", anonKey)
+          .header("Authorization", "Bearer " + anonKey)
+          .body(Map.of("refresh_token", refreshToken.trim()))
+          .retrieve()
+          .body(SupabaseAuthApiResponse.class);
+      return toResult(response);
+    } catch (RestClientResponseException exception) {
+      throw new UnauthorizedException(supabaseErrorMessage(exception, "Supabase refresh failed."));
+    }
+  }
+
   public SupabaseAuthUser getUser(String bearerToken) {
     requireConfigured();
     String token = stripBearerToken(bearerToken);
@@ -125,7 +144,10 @@ public class SupabaseAuthService {
     String accessToken = response.accessToken() != null
         ? response.accessToken()
         : response.session() == null ? null : response.session().accessToken();
-    return new SupabaseAuthResult(user, accessToken);
+    String refreshToken = response.refreshToken() != null
+        ? response.refreshToken()
+        : response.session() == null ? null : response.session().refreshToken();
+    return new SupabaseAuthResult(user, accessToken, refreshToken);
   }
 
   private RestClient client() {
@@ -200,12 +222,13 @@ public class SupabaseAuthService {
     return null;
   }
 
-  public record SupabaseAuthResult(SupabaseAuthUser user, String accessToken) {
+  public record SupabaseAuthResult(SupabaseAuthUser user, String accessToken, String refreshToken) {
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
   public record SupabaseAuthApiResponse(
       @JsonProperty("access_token") String accessToken,
+      @JsonProperty("refresh_token") String refreshToken,
       SupabaseAuthSession session,
       SupabaseAuthUser user,
       String id,
@@ -224,7 +247,9 @@ public class SupabaseAuthService {
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
-  public record SupabaseAuthSession(@JsonProperty("access_token") String accessToken) {
+  public record SupabaseAuthSession(
+      @JsonProperty("access_token") String accessToken,
+      @JsonProperty("refresh_token") String refreshToken) {
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)

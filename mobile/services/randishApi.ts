@@ -91,6 +91,7 @@ export type UserLoginParams = {
 export type AuthResponse = {
   user: User;
   accessToken: string | null;
+  refreshToken?: string | null;
 };
 
 export type PremiumStatus = {
@@ -132,6 +133,10 @@ export type OAuthAuthorizeResponse = {
 
 export type OAuthSessionParams = {
   accessToken: string;
+};
+
+export type OAuthRefreshParams = {
+  refreshToken: string;
 };
 
 export type RandomHistory = {
@@ -397,6 +402,12 @@ export const randishApi = {
       method: 'POST',
       body: params,
       skipAuth: true,
+    }),
+
+  refreshOAuthSession: (baseUrl: ApiBaseUrlInput, params: OAuthRefreshParams) =>
+    request<AuthResponse>(baseUrl, 'api/auth/oauth/refresh', undefined, {
+      method: 'POST',
+      body: params,
     }),
 
   getCurrentUser: (baseUrl: ApiBaseUrlInput) =>

@@ -136,6 +136,10 @@ public final class ApiDtos {
       String accessToken) {
   }
 
+  public record OAuthRefreshRequest(
+      String refreshToken) {
+  }
+
   public record EmailVerificationResponse(
       String email,
       Instant expiresAt) {
@@ -152,7 +156,11 @@ public final class ApiDtos {
 
   public record AuthResponse(
       UserResponse user,
-      String accessToken) {
+      String accessToken,
+      String refreshToken) {
+    public AuthResponse(UserResponse user, String accessToken) {
+      this(user, accessToken, null);
+    }
   }
 
   public record PremiumStatusResponse(

@@ -30,7 +30,8 @@
         {
           "locationWhenInUsePermission": "近くのお店を探して地図ルーレットを回すために現在地を使用します。"
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "ios": {
       "supportsTablet": true,
