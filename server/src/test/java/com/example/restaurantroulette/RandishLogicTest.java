@@ -491,9 +491,88 @@ class RandishLogicTest {
   }
 
   @Test
+  void geoapifyPrimarySupplementsWhenHotPepperIsEmpty() {
+    var hotPepperLikeProvider = new NamedProvider(List.of());
+    var geoapifyLikeProvider = new NamedProvider(List.of(new Restaurant(
+        "geoapify-hal-ramen",
+        "GEOAPIFY",
+        "geoapify-place-1",
+        "HAL Ramen",
+        "Osaka",
+        "ramen",
+        700,
+        1500,
+        0,
+        0,
+        "Osaka Umeda",
+        null,
+        "test",
+        34.699826,
+        135.49311)));
+    var hybridQueryService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(hotPepperLikeProvider, geoapifyLikeProvider),
+        mapper,
+        validationService);
+
+    var restaurants = hybridQueryService.searchRandomEntities("Osaka", "ramen", 0, 2000, 34.699826, 135.49311, 2, 20);
+
+    assertThat(restaurants).hasSize(1);
+    assertThat(restaurants.getFirst().externalProvider()).isEqualTo("GEOAPIFY");
+    assertThat(hotPepperLikeProvider.randomCallCount).isEqualTo(1);
+    assertThat(geoapifyLikeProvider.randomCallCount).isEqualTo(1);
+  }
+
+  @Test
+  void duplicateRestaurantsUseNearbyCoordinates() {
+    var hotPepperLikeProvider = new NamedProvider(List.of(new Restaurant(
+        "hotpepper-hal-ramen",
+        "HOTPEPPER",
+        "hotpepper-place-1",
+        "Ramen HAL",
+        "Osaka",
+        "ramen",
+        700,
+        1500,
+        0,
+        0,
+        "Osaka Umeda 1",
+        null,
+        "test",
+        34.699826,
+        135.49311)));
+    var geoapifyLikeProvider = new NamedProvider(List.of(new Restaurant(
+        "geoapify-hal-ramen",
+        "GEOAPIFY",
+        "geoapify-place-1",
+        "Ramen HAL Osaka",
+        "Osaka",
+        "ramen",
+        700,
+        1500,
+        0,
+        0,
+        "Different nearby address",
+        null,
+        "test",
+        34.699830,
+        135.49315)));
+    var hybridQueryService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(hotPepperLikeProvider, geoapifyLikeProvider),
+        mapper,
+        validationService);
+
+    var restaurants = hybridQueryService.searchEntities("Osaka", "ramen", 0, 2000, 34.699826, 135.49311, 2);
+
+    assertThat(restaurants).hasSize(1);
+    assertThat(restaurants.getFirst().externalProvider()).isEqualTo("HOTPEPPER");
+  }
+
+  @Test
   void mobileInitialGenreCatalogIsCuratedAndUnique() throws Exception {
-    String source = Files.readString(Path.of("..", "mobile", "App.tsx"));
-    String catalog = source.substring(source.indexOf("const GENRES"), source.indexOf("const AI_REPORT_MONTH_OPTIONS"));
+    String source = Files.readString(Path.of("..", "mobile", "src", "AppRoot.tsx"));
+    String catalog = source.substring(source.indexOf("const GENRES"), source.indexOf("const AI_REPORT_MONTHLY_NOTICE"));
     var matcher = Pattern.compile("\\{ label: '([^']+)'").matcher(catalog);
     var labels = new ArrayList<String>();
     while (matcher.find()) {
@@ -712,6 +791,59 @@ class RandishLogicTest {
     assertThat(provider.nearbyCallCount).isZero();
   }
 
+  @Test
+  void nearbyPlacesFallsBackToRestaurantProvidersWhenGoogleIsUnavailable() {
+    var restaurantProvider = new NearbyRestaurantProvider();
+    var restaurantService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(restaurantProvider),
+        mapper,
+        validationService);
+    var service = new NearbyPlacesService(
+        new UnavailableNearbyPlacesProvider(),
+        restaurantService,
+        validationService,
+        600,
+        300,
+        false,
+        false,
+        20);
+
+    var response = service.search(new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false));
+
+    assertThat(response.source()).isEqualTo("RANDISH_RESTAURANTS");
+    assertThat(response.cacheHit()).isFalse();
+    assertThat(restaurantProvider.searchCallCount).isEqualTo(1);
+    assertThat(response.places()).hasSize(1);
+    assertThat(response.places().get(0).id()).isEqualTo("geoapify-geo-test-1");
+    assertThat(response.places().get(0).distanceMeters()).isLessThanOrEqualTo(500);
+    assertThat(response.places().get(0).openNow()).isNull();
+  }
+
+  @Test
+  void nearbyPlacesReturnsEmptyListWhenGoogleAndRestaurantProvidersHaveNoCandidates() {
+    var restaurantService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(),
+        mapper,
+        validationService);
+    var service = new NearbyPlacesService(
+        new UnavailableNearbyPlacesProvider(),
+        restaurantService,
+        validationService,
+        600,
+        300,
+        false,
+        false,
+        20);
+
+    var response = service.search(new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false));
+
+    assertThat(response.source()).isEqualTo("RANDISH_RESTAURANTS");
+    assertThat(response.places()).isEmpty();
+    assertThat(response.message()).isEqualTo("no nearby candidates");
+  }
+
   private static class CoordinateFallbackProvider implements ExternalRestaurantProvider {
     private int coordinateSearchCalls;
     private int keywordSearchCalls;
@@ -774,6 +906,52 @@ class RandishLogicTest {
           "東京都千代田区丸の内",
           0,
           "https://www.google.com/maps/search/?api=1&query=Nearby%20Test"));
+    }
+  }
+
+  private static class UnavailableNearbyPlacesProvider extends GooglePlacesEnrichmentService {
+    private UnavailableNearbyPlacesProvider() {
+      super(RestClient.builder());
+    }
+
+    @Override
+    public boolean isAvailable() {
+      return false;
+    }
+
+    @Override
+    public List<CandidatePlaceResponse> searchNearbyCandidates(NearbyPlacesRequest request, int maxCandidates) {
+      throw new AssertionError("Google Places should not be called when unavailable.");
+    }
+  }
+
+  private static class NearbyRestaurantProvider implements ExternalRestaurantProvider {
+    private int searchCallCount;
+
+    @Override
+    public boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    public List<Restaurant> search(String area, String genre, Integer budgetMin, Integer budgetMax, Double latitude, Double longitude, Integer range) {
+      searchCallCount++;
+      return List.of(new Restaurant(
+          "geo-test-1",
+          "GEOAPIFY",
+          "geo-test-1",
+          "HAL Ramen",
+          area,
+          genre == null ? "ramen" : genre,
+          900,
+          1500,
+          4.1,
+          4,
+          "Osaka Kita",
+          null,
+          "test",
+          latitude == null ? 34.699826 : latitude + 0.0002,
+          longitude == null ? 135.49311 : longitude + 0.0002));
     }
   }
 
@@ -846,6 +1024,39 @@ class RandishLogicTest {
               null,
               null))
           .toList();
+    }
+  }
+
+  private static class NamedProvider implements ExternalRestaurantProvider {
+    private final List<Restaurant> restaurants;
+    private int randomCallCount;
+
+    private NamedProvider(List<Restaurant> restaurants) {
+      this.restaurants = restaurants;
+    }
+
+    @Override
+    public boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    public List<Restaurant> search(String area, String genre, Integer budgetMin, Integer budgetMax, Double latitude, Double longitude, Integer range) {
+      return restaurants;
+    }
+
+    @Override
+    public List<Restaurant> searchRandomCandidates(
+        String area,
+        String genre,
+        Integer budgetMin,
+        Integer budgetMax,
+        Double latitude,
+        Double longitude,
+        Integer range,
+        int maxCandidates) {
+      randomCallCount++;
+      return restaurants.stream().limit(maxCandidates).toList();
     }
   }
 }

@@ -3,14 +3,18 @@ package com.example.restaurantroulette.service;
 import com.example.restaurantroulette.dto.ApiDtos.CandidatePlaceResponse;
 import com.example.restaurantroulette.dto.ApiDtos.NearbyPlacesRequest;
 import com.example.restaurantroulette.dto.ApiDtos.NearbyPlacesResponse;
+import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.service.external.GooglePlacesEnrichmentService;
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -30,6 +34,7 @@ public class NearbyPlacesService {
   private static final int DEFAULT_MAX_RESULTS = 20;
 
   private final GooglePlacesEnrichmentService googlePlacesEnrichmentService;
+  private final RestaurantQueryService restaurantQueryService;
   private final ValidationService validationService;
   private final Map<NearbyCacheKey, List<NearbyCacheEntry>> cache = new ConcurrentHashMap<>();
   private final int cacheTtlSeconds;
@@ -41,9 +46,11 @@ public class NearbyPlacesService {
   @Autowired
   public NearbyPlacesService(
       GooglePlacesEnrichmentService googlePlacesEnrichmentService,
+      RestaurantQueryService restaurantQueryService,
       ValidationService validationService) {
     this(
         googlePlacesEnrichmentService,
+        restaurantQueryService,
         validationService,
         readPositiveInt("PLACES_CACHE_TTL_SECONDS").orElse(DEFAULT_CACHE_TTL_SECONDS),
         readPositiveInt("PLACES_CACHE_DISTANCE_METERS").orElse(DEFAULT_CACHE_DISTANCE_METERS),
@@ -60,7 +67,28 @@ public class NearbyPlacesService {
       boolean mockEnabled,
       boolean productionRuntime,
       int maxResults) {
+    this(
+        googlePlacesEnrichmentService,
+        null,
+        validationService,
+        cacheTtlSeconds,
+        cacheDistanceMeters,
+        mockEnabled,
+        productionRuntime,
+        maxResults);
+  }
+
+  public NearbyPlacesService(
+      GooglePlacesEnrichmentService googlePlacesEnrichmentService,
+      RestaurantQueryService restaurantQueryService,
+      ValidationService validationService,
+      int cacheTtlSeconds,
+      int cacheDistanceMeters,
+      boolean mockEnabled,
+      boolean productionRuntime,
+      int maxResults) {
     this.googlePlacesEnrichmentService = googlePlacesEnrichmentService;
+    this.restaurantQueryService = restaurantQueryService;
     this.validationService = validationService;
     this.cacheTtlSeconds = Math.max(30, cacheTtlSeconds);
     this.cacheDistanceMeters = Math.max(50, cacheDistanceMeters);
@@ -92,12 +120,19 @@ public class NearbyPlacesService {
     List<CandidatePlaceResponse> places;
     String source = "GOOGLE_PLACES";
     if (!googlePlacesEnrichmentService.isAvailable()) {
-      if (!canUseMockPlaces()) {
-        throw new BadRequestException("Google Places nearby search is disabled or API key is not configured.");
+      places = searchRestaurantProviders(normalized);
+      source = "RANDISH_RESTAURANTS";
+      if (places.isEmpty()) {
+        if (canUseMockPlaces()) {
+          logger.info("[RANDISH_PLACES] using development mock places because Google Places is unavailable");
+          places = mockPlaces(normalized);
+          source = "MOCK_PLACES";
+        } else {
+          logger.info("[RANDISH_PLACES] no restaurant provider candidates while Google Places is unavailable");
+        }
+      } else {
+        logger.info("[RANDISH_PLACES] using restaurant providers because Google Places is unavailable count={}", places.size());
       }
-      logger.info("[RANDISH_PLACES] using development mock places because Google Places is unavailable");
-      places = mockPlaces(normalized);
-      source = "MOCK_PLACES";
     } else {
       logger.info("[RANDISH_PLACES] new nearby place search key={} radius={} category={} openNow={}",
           cacheKey,
@@ -199,6 +234,98 @@ public class NearbyPlacesService {
 
   private boolean canUseMockPlaces() {
     return mockEnabled && !productionRuntime;
+  }
+
+  private List<CandidatePlaceResponse> searchRestaurantProviders(NearbyPlacesRequest request) {
+    if (restaurantQueryService == null) {
+      return List.of();
+    }
+    Integer budgetMax = parseBudgetMax(request.priceRange());
+    List<Restaurant> restaurants = restaurantQueryService.searchEntities(
+        "現在地",
+        request.category(),
+        null,
+        budgetMax,
+        request.latitude(),
+        request.longitude(),
+        radiusToRange(request.radius()));
+    return restaurants.stream()
+        .filter(restaurant -> restaurant.latitude() != null && restaurant.longitude() != null)
+        .map(restaurant -> toCandidatePlace(restaurant, request))
+        .filter(candidate -> candidate.distanceMeters() == null || candidate.distanceMeters() <= request.radius())
+        .sorted(Comparator.comparing(candidate -> candidate.distanceMeters() == null ? Integer.MAX_VALUE : candidate.distanceMeters()))
+        .limit(maxResults)
+        .toList();
+  }
+
+  private CandidatePlaceResponse toCandidatePlace(Restaurant restaurant, NearbyPlacesRequest request) {
+    int distance = distanceMeters(request.latitude(), request.longitude(), restaurant.latitude(), restaurant.longitude());
+    String provider = restaurant.externalProvider() == null || restaurant.externalProvider().isBlank()
+        ? "RANDISH"
+        : restaurant.externalProvider();
+    String externalId = restaurant.externalId() == null || restaurant.externalId().isBlank()
+        ? restaurant.id()
+        : restaurant.externalId();
+    String address = restaurant.address() == null ? "" : restaurant.address();
+    String genre = restaurant.genre() == null || restaurant.genre().isBlank() ? "restaurant" : restaurant.genre();
+    return new CandidatePlaceResponse(
+        provider.toLowerCase(Locale.ROOT) + "-" + externalId,
+        restaurant.name(),
+        restaurant.latitude(),
+        restaurant.longitude(),
+        List.of(genre, provider),
+        restaurant.rating(),
+        budgetToPriceLevel(restaurant.budgetMin(), restaurant.budgetMax()),
+        null,
+        address.isBlank() ? null : address,
+        distance,
+        "https://www.google.com/maps/search/?api=1&query="
+            + URLEncoder.encode((restaurant.name() + " " + address).trim(), StandardCharsets.UTF_8));
+  }
+
+  private Integer parseBudgetMax(String priceRange) {
+    if (priceRange == null || priceRange.isBlank()) {
+      return null;
+    }
+    try {
+      int parsed = Integer.parseInt(priceRange.replaceAll("[^0-9]", ""));
+      return parsed > 0 ? parsed : null;
+    } catch (NumberFormatException exception) {
+      return null;
+    }
+  }
+
+  private Integer budgetToPriceLevel(int budgetMin, int budgetMax) {
+    int averageBudget = (Math.max(0, budgetMin) + Math.max(0, budgetMax)) / 2;
+    if (averageBudget <= 1000) {
+      return 1;
+    }
+    if (averageBudget <= 2000) {
+      return 2;
+    }
+    if (averageBudget <= 5000) {
+      return 3;
+    }
+    return 4;
+  }
+
+  private Integer radiusToRange(Integer radiusMeters) {
+    if (radiusMeters == null) {
+      return 3;
+    }
+    if (radiusMeters <= 300) {
+      return 1;
+    }
+    if (radiusMeters <= 500) {
+      return 2;
+    }
+    if (radiusMeters <= 1000) {
+      return 3;
+    }
+    if (radiusMeters <= 2000) {
+      return 4;
+    }
+    return 5;
   }
 
   private List<CandidatePlaceResponse> mockPlaces(NearbyPlacesRequest request) {

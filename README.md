@@ -63,12 +63,20 @@ Security-related defaults:
 - API requests are rate-limited by default; tune the `RANDISH_RATE_LIMIT_*` values for production traffic.
 - Mobile native clients do not need CORS; Expo Web does.
 
-RANDISH uses Hot Pepper Gourmet as the primary restaurant source. Google Places is a paid fallback only:
+RANDISH uses Hot Pepper Gourmet as the first restaurant source and Geoapify Places as a temporary supplemental source. Google Places is a paid fallback only:
 
 - Hot Pepper is queried first and owns the main candidate pool.
+- Geoapify is queried by the Spring Boot API after Hot Pepper when latitude/longitude are available, with a 500m default radius and a short server-side cache.
 - Google Places is disabled by default.
-- Google Places is used only when explicitly enabled and Hot Pepper does not fill the target candidate count.
+- Google Places is used only when explicitly enabled and Hot Pepper plus Geoapify do not fill the target candidate count.
 - Google fallback is capped per request and by a per-server-session request limit.
+
+Keep the Geoapify secret on the backend only:
+
+```env
+GEOAPIFY_API_KEY=YOUR_LOCAL_KEY
+GEOAPIFY_CACHE_TTL_SECONDS=600
+```
 
 To intentionally test Google fallback, set both values locally:
 

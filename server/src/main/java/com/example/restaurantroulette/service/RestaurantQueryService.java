@@ -19,6 +19,7 @@ public class RestaurantQueryService {
   private static final Logger logger = LoggerFactory.getLogger(RestaurantQueryService.class);
   private static final int HYBRID_TARGET_RESULT_COUNT = 100;
   private static final int MAX_FALLBACK_FILL_COUNT = 30;
+  private static final int DUPLICATE_DISTANCE_METERS = 60;
 
   private final RestaurantRepository restaurantRepository;
   private final List<ExternalRestaurantProvider> externalRestaurantProviders;
@@ -133,6 +134,10 @@ public class RestaurantQueryService {
       return limitedCandidates(externalOnlyRestaurants, desiredCandidateCount);
     }
 
+    if (hasCoordinates(latitude, longitude)) {
+      return List.of();
+    }
+
     return restaurantRepository.search(area, genre, budgetMin, budgetMax);
   }
 
@@ -193,6 +198,10 @@ public class RestaurantQueryService {
 
     if (!externalOnlyRestaurants.isEmpty()) {
       return limitedCandidates(externalOnlyRestaurants, HYBRID_TARGET_RESULT_COUNT);
+    }
+
+    if (hasCoordinates(latitude, longitude)) {
+      return List.of();
     }
 
     return restaurantRepository.search(area, genre, budgetMin, budgetMax);
@@ -340,6 +349,17 @@ public class RestaurantQueryService {
 
     String firstAddress = normalizeComparableText(first.address());
     String secondAddress = normalizeComparableText(second.address());
+    Integer distanceMeters = distanceMeters(first.latitude(), first.longitude(), second.latitude(), second.longitude());
+    if (distanceMeters != null
+        && distanceMeters <= DUPLICATE_DISTANCE_METERS
+        && (firstName.contains(secondName)
+            || secondName.contains(firstName)
+            || (!firstAddress.isBlank()
+                && !secondAddress.isBlank()
+                && (firstAddress.contains(secondAddress) || secondAddress.contains(firstAddress))))) {
+      return true;
+    }
+
     return !firstAddress.isBlank()
         && !secondAddress.isBlank()
         && (firstAddress.contains(secondAddress) || secondAddress.contains(firstAddress))
@@ -353,6 +373,21 @@ public class RestaurantQueryService {
     return value.toLowerCase(Locale.ROOT)
         .replaceAll("\\s+", "")
         .replaceAll("[\\p{Punct}　－ー・ｰ]", "");
+  }
+
+  private Integer distanceMeters(Double fromLatitude, Double fromLongitude, Double toLatitude, Double toLongitude) {
+    if (fromLatitude == null || fromLongitude == null || toLatitude == null || toLongitude == null) {
+      return null;
+    }
+    double earthRadiusMeters = 6_371_000;
+    double latitudeDelta = Math.toRadians(toLatitude - fromLatitude);
+    double longitudeDelta = Math.toRadians(toLongitude - fromLongitude);
+    double fromLatitudeRad = Math.toRadians(fromLatitude);
+    double toLatitudeRad = Math.toRadians(toLatitude);
+    double haversine = Math.sin(latitudeDelta / 2) * Math.sin(latitudeDelta / 2)
+        + Math.cos(fromLatitudeRad) * Math.cos(toLatitudeRad)
+        * Math.sin(longitudeDelta / 2) * Math.sin(longitudeDelta / 2);
+    return (int) Math.round(earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine)));
   }
 
   public Restaurant getEntityOrThrow(String id) {

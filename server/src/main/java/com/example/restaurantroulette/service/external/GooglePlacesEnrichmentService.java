@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.slf4j.Logger;
@@ -29,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 @Service
+@Order(100)
 public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider {
   private static final Logger logger = LoggerFactory.getLogger(GooglePlacesEnrichmentService.class);
   private static final String API_URL = "https://places.googleapis.com/v1";

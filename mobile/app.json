@@ -19,8 +19,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "プロフィール画像やごはん日記の写真を選ぶために写真へのアクセスを使用します。",
-          "cameraPermission": "ごはんの写真を撮ってアルバムに残すためにカメラを使用します。"
+          "photosPermission": "プロフィール画像や食事の写真を選ぶために写真ライブラリへのアクセスを使用します。",
+          "cameraPermission": "食事の写真を撮ってアルバムに残すためにカメラを使用します。"
         }
       ],
       "expo-apple-authentication",
@@ -28,7 +28,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "近くのお店を探して地図ルーレットを回すために現在地を使用します。"
+          "locationWhenInUsePermission": "近くのお店を探してルーレットで選ぶために現在地を使用します。"
         }
       ],
       "expo-secure-store"
@@ -37,10 +37,10 @@
       "supportsTablet": true,
       "usesAppleSignIn": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "ごはんの写真を撮ってアルバムに残すためにカメラを使用します。",
-        "NSLocationWhenInUseUsageDescription": "近くのお店を探して地図ルーレットを回すために現在地を使用します。",
-        "NSPhotoLibraryUsageDescription": "プロフィール画像やごはんの写真を選ぶために写真へのアクセスを使用します。",
-        "NSPhotoLibraryAddUsageDescription": "撮影したごはんの写真をアルバムに残すために写真ライブラリを使用します。"
+        "NSCameraUsageDescription": "食事の写真を撮ってアルバムに残すためにカメラを使用します。",
+        "NSLocationWhenInUseUsageDescription": "近くのお店を探してルーレットで選ぶために現在地を使用します。",
+        "NSPhotoLibraryUsageDescription": "プロフィール画像や食事の写真を選ぶために写真ライブラリへのアクセスを使用します。",
+        "NSPhotoLibraryAddUsageDescription": "撮影した食事の写真をアルバムに残すために写真ライブラリを使用します。"
       }
     },
     "android": {

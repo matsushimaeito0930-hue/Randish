@@ -1,6 +1,7 @@
 package com.example.restaurantroulette.controller;
 
 import com.example.restaurantroulette.service.external.GooglePlacesEnrichmentService;
+import com.example.restaurantroulette.service.external.GeoapifyRestaurantProvider;
 import com.example.restaurantroulette.service.external.HotPepperRestaurantProvider;
 import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,12 +15,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/debug")
 public class DebugController {
   private final HotPepperRestaurantProvider hotPepperRestaurantProvider;
+  private final GeoapifyRestaurantProvider geoapifyRestaurantProvider;
   private final GooglePlacesEnrichmentService googlePlacesEnrichmentService;
 
   public DebugController(
       HotPepperRestaurantProvider hotPepperRestaurantProvider,
+      GeoapifyRestaurantProvider geoapifyRestaurantProvider,
       GooglePlacesEnrichmentService googlePlacesEnrichmentService) {
     this.hotPepperRestaurantProvider = hotPepperRestaurantProvider;
+    this.geoapifyRestaurantProvider = geoapifyRestaurantProvider;
     this.googlePlacesEnrichmentService = googlePlacesEnrichmentService;
   }
 
@@ -33,5 +37,10 @@ public class DebugController {
   @GetMapping("/google-places")
   public Map<String, Object> googlePlaces() {
     return googlePlacesEnrichmentService.diagnostics();
+  }
+
+  @GetMapping("/geoapify")
+  public Map<String, Object> geoapify() {
+    return geoapifyRestaurantProvider.diagnostics();
   }
 }

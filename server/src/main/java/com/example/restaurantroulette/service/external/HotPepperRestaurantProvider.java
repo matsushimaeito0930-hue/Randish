@@ -17,10 +17,12 @@ import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 @Service
+@Order(10)
 public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   private static final String PROVIDER = "HOTPEPPER";
   private static final String API_URL = "https://webservice.recruit.co.jp/hotpepper/gourmet/v1/";
