@@ -207,9 +207,25 @@ export type Statistics = {
   visitedRestaurantCount: number;
 };
 
+export type ApiUsageProvider = {
+  key: string;
+  name: string;
+  used: number;
+  limit: number;
+  remaining: number;
+  display: string;
+  available?: boolean;
+};
+
+export type ApiUsageResponse = {
+  generatedAt: string;
+  providers: ApiUsageProvider[];
+};
+
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'DELETE';
   body?: unknown;
+  headers?: Record<string, string>;
   skipAuth?: boolean;
 };
 
@@ -288,7 +304,7 @@ const requestUrl = async <T>(url: string, options: RequestOptions = {}, timeoutM
 
   let response: Response;
   try {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...(options.headers ?? {}) };
     if (options.body) {
       headers['Content-Type'] = 'application/json';
     }
@@ -369,6 +385,12 @@ export const randishApi = {
 
   getRestaurant: (baseUrl: ApiBaseUrlInput, restaurantId: string) =>
     request<Restaurant>(baseUrl, `api/restaurants/${restaurantId}`),
+
+  getAdminApiUsage: (baseUrl: ApiBaseUrlInput, password: string) =>
+    request<ApiUsageResponse>(baseUrl, 'api/admin/api-usage', undefined, {
+      headers: { 'X-Randish-Admin-Password': password },
+      skipAuth: true,
+    }),
 
   registerUser: (baseUrl: ApiBaseUrlInput, params: UserCreateParams) =>
     request<EmailVerificationResponse>(baseUrl, 'api/auth/register', undefined, {

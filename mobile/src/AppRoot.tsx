@@ -21,7 +21,7 @@ import {
   View,
 } from 'react-native';
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
-import type { AuthResponse, CandidatePlace, Favorite as ApiFavorite, OAuthProvider, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory } from './services/randishApi';
+import type { ApiUsageResponse, AuthResponse, CandidatePlace, Favorite as ApiFavorite, OAuthProvider, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory } from './services/randishApi';
 import {
   getNativeBillingSetupMessage,
   presentPremiumPaywall,
@@ -308,6 +308,7 @@ type AreaPreset = {
   group: string;
   value?: string;
   searchValue?: string;
+  originAliases?: string[];
   latitude: number;
   longitude: number;
   useCoordinates?: boolean;
@@ -2120,7 +2121,8 @@ const AREA_PRESETS: AreaPreset[] = [
   { label: '鳥取', group: '鳥取県 / 鳥取市', latitude: 35.5011, longitude: 134.2351 },
   { label: '米子', group: '鳥取県 / 米子市', latitude: 35.4281, longitude: 133.3309 },
   { label: '松江', group: '島根県 / 松江市', latitude: 35.4681, longitude: 133.0484 },
-  { label: '出雲', group: '島根県 / 出雲市', latitude: 35.367, longitude: 132.7547 },
+  { label: '出雲', group: '島根県 / 出雲市', searchValue: '島根県 出雲市 出雲市駅', latitude: 35.360748, longitude: 132.756697 },
+  { label: '出雲市駅', group: '島根県 / 出雲市', value: '出雲市駅', searchValue: '島根県 出雲市 出雲市駅', latitude: 35.360748, longitude: 132.756697 },
   { label: '山口', group: '山口県 / 山口市', latitude: 34.1785, longitude: 131.4737 },
   { label: '下関', group: '山口県 / 下関市', latitude: 33.9578, longitude: 130.9415 },
   { label: '徳島', group: '徳島県 / 徳島市', latitude: 34.0703, longitude: 134.5548 },
@@ -2287,6 +2289,18 @@ const OSAKA_WARD_REPRESENTATIVE_ORIGIN_PRESETS: Record<string, AreaPreset> = {
   平野区: { label: '平野', group: '大阪府 / 大阪市平野区', latitude: 34.6212, longitude: 135.5499 },
   鶴見区: { label: '横堤', group: '大阪府 / 大阪市鶴見区', latitude: 34.7044, longitude: 135.5744 },
 };
+
+const CITY_REPRESENTATIVE_ORIGIN_PRESETS: AreaPreset[] = [
+  {
+    label: '出雲市駅',
+    group: '島根県 / 出雲市',
+    value: '出雲市駅',
+    searchValue: '島根県 出雲市 出雲市駅',
+    originAliases: ['出雲', '出雲市', '島根県 出雲市', '島根県 / 出雲市', '島根県 出雲市 出雲市', '島根県 出雲市 出雲'],
+    latitude: 35.360748,
+    longitude: 132.756697,
+  },
+];
 
 const PREFECTURE_POPULAR_AREA_ORDER: Record<string, string[]> = {
   大阪府: [
@@ -3861,6 +3875,8 @@ const STATION_LINE_LABELS: Record<string, string> = {
   渋谷: 'JR・東急・東京メトロ',
   新宿: 'JR・小田急・京王',
   花隈: '神戸高速線',
+  出雲: 'JR山陰本線',
+  出雲市駅: 'JR山陰本線',
 };
 
 const uniqueAreaPresets = (items: AreaPreset[]) => {
@@ -3961,7 +3977,14 @@ const getOsakaWardFromArea = (area: string) => {
 
 const getRepresentativeOriginPresetForArea = (area: string) => {
   const ward = getOsakaWardFromArea(area);
-  return ward ? OSAKA_WARD_REPRESENTATIVE_ORIGIN_PRESETS[ward] ?? null : null;
+  if (ward) {
+    return OSAKA_WARD_REPRESENTATIVE_ORIGIN_PRESETS[ward] ?? null;
+  }
+
+  const compactArea = area.replace(/[\s/]+/g, '');
+  return CITY_REPRESENTATIVE_ORIGIN_PRESETS.find((preset) =>
+    (preset.originAliases ?? []).some((alias) => alias.replace(/[\s/]+/g, '') === compactArea),
+  ) ?? null;
 };
 
 const isWardLikeAreaLabel = (label: string) => label.trim().endsWith('区');
@@ -4494,6 +4517,72 @@ const buildGenreDiagnosticMessage = (requestedGenre: string, restaurants: Restau
   return `${areaLabel}では「${cleanGenre}」候補が見つかりません。API上は主に ${genreSummary.join(' / ')} として返っています。`;
 };
 
+type DrawFailureDetailsInput = {
+  area: string;
+  genre: string;
+  budgetMax: string;
+  distance: string;
+  conditionRandom: ConditionRandomState;
+  diagnosticMessage?: string | null;
+  apiMessage?: string | null;
+  centerLabel?: string | null;
+  mode?: 'noMatch' | 'apiError' | 'location';
+};
+
+const buildDrawFailureDetails = ({
+  area,
+  genre,
+  budgetMax,
+  distance,
+  conditionRandom,
+  diagnosticMessage,
+  apiMessage,
+  centerLabel,
+  mode = 'noMatch',
+}: DrawFailureDetailsInput) => {
+  const details: string[] = [];
+  const cleanGenre = genre.trim();
+  const cleanArea = area.trim();
+  const cleanBudget = budgetMax.trim();
+  const numericBudget = Number(cleanBudget.replace(/,/g, ''));
+  const areaLabel = centerLabel?.trim()
+    || (cleanArea && cleanArea !== '現在地' ? cleanArea : '現在地周辺');
+
+  if (diagnosticMessage) {
+    details.push(`API分類: ${diagnosticMessage}`);
+  }
+
+  if (mode === 'location') {
+    details.push('エリア: 現在地の座標、または座標付きエリアが取れていません。位置情報許可かエリア選択を確認してください。');
+  } else {
+    details.push(`エリア: ${areaLabel} を起点に検索しています。`);
+  }
+
+  if (apiMessage) {
+    details.push(apiMessage.includes('接続')
+      ? 'API: 店舗検索APIへの接続で止まっています。条件ではなく通信・サーバーURL・APIキー側の可能性があります。'
+      : `API: ${apiMessage}`);
+  }
+
+  if (!conditionRandom.genre && cleanGenre && cleanGenre !== 'すべて') {
+    details.push(`ジャンル: 「${cleanGenre}」で絞り込んでいます。API側で別ジャンル扱いだと候補から外れます。`);
+  }
+
+  if (!conditionRandom.budget && cleanBudget && Number.isFinite(numericBudget) && numericBudget > 0 && numericBudget < 999999) {
+    details.push(`予算: ${numericBudget.toLocaleString('ja-JP')}円以内で絞り込んでいます。価格未登録や少し高い店は落ちる可能性があります。`);
+  }
+
+  if (!conditionRandom.distance && distance.trim()) {
+    details.push(`距離: ${distance.trim()}以内で絞り込んでいます。地下街や商業施設の店は少し外側判定になることがあります。`);
+  }
+
+  if (!details.length) {
+    details.push('条件: APIから返った候補が、現在の抽選条件を同時に満たせませんでした。');
+  }
+
+  return [...new Set(details)].slice(0, 5);
+};
+
 export default function App() {
   const [stage, setStage] = useState<AppStage>('splash');
   const [userId, setUserId] = useState(APP_USER_ID);
@@ -4532,6 +4621,7 @@ export default function App() {
   const [mapCandidates, setMapCandidates] = useState<CandidatePlace[]>([]);
   const [mapRouletteTarget, setMapRouletteTarget] = useState<CandidatePlace | null>(null);
   const [mapRouletteError, setMapRouletteError] = useState<string | null>(null);
+  const [drawFailureDetails, setDrawFailureDetails] = useState<string[]>([]);
   const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false);
   const [travelRevealStep, setTravelRevealStep] = useState<TravelRevealStep>('hidden');
   const [travelDisplayArea, setTravelDisplayArea] = useState<string | null>(null);
@@ -5132,6 +5222,7 @@ export default function App() {
     const isTravelDraw = drawMode === 'travel';
     setActiveTab('random');
     setIsLoading(true);
+    setDrawFailureDetails([]);
     const drawAnimation = startDrawAnimation();
     const travelRevealTimers: ReturnType<typeof setTimeout>[] = [];
     const scheduleTravelReveal = (callback: () => void, delay: number) => {
@@ -5293,6 +5384,7 @@ export default function App() {
           normalized = freshAlternative;
         }
       }
+      setDrawFailureDetails([]);
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
       recordDrawForAnalytics(normalized);
@@ -5316,19 +5408,31 @@ export default function App() {
       logApiUiError('condition draw failed', error, apiBaseUrlCandidates);
       const diagnosticMessage = isApiConnectivityError(error) ? null : await loadGenreDiagnosticMessage();
       const noMatchError = isNoRestaurantMatchError(error) || toDebugErrorMessage(error).includes('候補が見つかりません');
-      setMessage(isTravelDraw && noMatchError
+      const messageText = isTravelDraw && noMatchError
         ? 'この旅先は候補が少なすぎました。もう一度押すと別の旅先で探せます。'
         : noMatchError
           ? diagnosticMessage ?? '条件に合う候補が見つかりませんでした。距離・予算・ジャンルを少し広げてください。'
-          : diagnosticMessage ?? API_DRAW_MESSAGE);
+          : diagnosticMessage ?? API_DRAW_MESSAGE;
+      setDrawFailureDetails(buildDrawFailureDetails({
+        area,
+        genre,
+        budgetMax,
+        distance,
+        conditionRandom,
+        diagnosticMessage,
+        apiMessage: noMatchError ? null : messageText,
+        mode: noMatchError ? 'noMatch' : 'apiError',
+      }));
+      setMessage(messageText);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, area, distance, drawApiParams, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
+  }, [apiBaseUrlCandidates, area, budgetMax, conditionRandom, distance, drawApiParams, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
     setIsLoading(true);
+    setDrawFailureDetails([]);
     const drawAnimation = startDrawAnimation(true);
     const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
 
@@ -5345,6 +5449,7 @@ export default function App() {
           normalized = freshAlternative;
         }
       }
+      setDrawFailureDetails([]);
       setSelectedRestaurant(normalized);
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
       recordDrawForAnalytics(normalized);
@@ -5354,11 +5459,20 @@ export default function App() {
     } catch (error) {
       setSelectedRestaurant(null);
       logApiUiError('everything draw failed', error, apiBaseUrlCandidates);
+      setDrawFailureDetails(buildDrawFailureDetails({
+        area,
+        genre: 'すべて',
+        budgetMax: '',
+        distance,
+        conditionRandom: { area: true, budget: true, distance: true, genre: true },
+        apiMessage: isApiConnectivityError(error) ? '店舗検索APIに接続できませんでした。' : API_DRAW_MESSAGE,
+        mode: 'apiError',
+      }));
       setMessage(API_DRAW_MESSAGE);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, area, distance, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
 
   const triggerRouletteHaptic = useCallback((final = false) => {
     const Haptics = getOptionalHapticsModule();
@@ -5479,6 +5593,7 @@ export default function App() {
     setActiveTab('random');
     setIsLoading(true);
     setMapRouletteError(null);
+    setDrawFailureDetails([]);
     setSelectedRestaurant(null);
     resultRevealValue.setValue(0);
     mapPinProgress.stopAnimation();
@@ -5491,6 +5606,14 @@ export default function App() {
       if (!query) {
         setMapRouletteStatus('error');
         setMapRouletteError('現在地または座標付きエリアを選んでください。');
+        setDrawFailureDetails(buildDrawFailureDetails({
+          area: areaRef.current,
+          genre,
+          budgetMax,
+          distance,
+          conditionRandom,
+          mode: 'location',
+        }));
         setMessage('検索地点の座標が取れませんでした。駅・市区町村を選び直すか、現在地を取得してください。');
         setIsLoading(false);
         return;
@@ -5500,6 +5623,15 @@ export default function App() {
       if (cacheEntry.candidates.length === 0) {
         setMapRouletteStatus('empty');
         setMapRouletteError('条件に合う店舗が見つかりませんでした。');
+        setDrawFailureDetails(buildDrawFailureDetails({
+          area: areaRef.current,
+          genre,
+          budgetMax,
+          distance,
+          conditionRandom,
+          centerLabel: query.center.label,
+          mode: 'noMatch',
+        }));
         setMessage('条件に合う店舗が見つかりませんでした。距離を広げるか、条件を減らしてください。');
         setIsLoading(false);
         return;
@@ -5513,6 +5645,15 @@ export default function App() {
       if (!selected) {
         setMapRouletteStatus('empty');
         setMapRouletteError('候補店舗がありません。');
+        setDrawFailureDetails(buildDrawFailureDetails({
+          area: areaRef.current,
+          genre,
+          budgetMax,
+          distance,
+          conditionRandom,
+          centerLabel: query.center.label,
+          mode: 'noMatch',
+        }));
         setIsLoading(false);
         return;
       }
@@ -5536,6 +5677,7 @@ export default function App() {
           usedIds: nextUsedIds,
           lastSelectedId: selected.id,
         };
+        setDrawFailureDetails([]);
         setSelectedRestaurant(normalized);
         setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
         recordDrawForAnalytics(normalized);
@@ -5585,12 +5727,24 @@ export default function App() {
           ? '店舗検索APIに接続できませんでした。ネットワークを確認してください。'
           : '店舗検索APIでエラーが発生しました。少し時間をおいて再度お試しください。';
       setMapRouletteError(messageText);
+      setDrawFailureDetails(buildDrawFailureDetails({
+        area: areaRef.current,
+        genre,
+        budgetMax,
+        distance,
+        conditionRandom,
+        apiMessage: messageText,
+        mode: 'apiError',
+      }));
       setMessage(messageText);
       setIsLoading(false);
     }
   }, [
     apiBaseUrlCandidates,
+    budgetMax,
     buildCandidateQuery,
+    conditionRandom,
+    distance,
     genre,
     loadCandidatePool,
     mapPinBounce,
@@ -5639,9 +5793,19 @@ export default function App() {
           return;
         }
         if (cacheEntry.candidates.length) {
+          setDrawFailureDetails([]);
           setMessage(`${query.center.label} 周辺に${cacheEntry.candidates.length}件の候補を表示しました。STARTで一店を選びます。`);
         } else {
           setMapRouletteError('条件に合う店舗が見つかりませんでした。');
+          setDrawFailureDetails(buildDrawFailureDetails({
+            area: areaRef.current,
+            genre,
+            budgetMax,
+            distance,
+            conditionRandom,
+            centerLabel: query.center.label,
+            mode: 'noMatch',
+          }));
         }
       } catch (error) {
         if (cancelled) {
@@ -5651,9 +5815,19 @@ export default function App() {
         setMapCandidates([]);
         setMapRouletteTarget(null);
         logApiUiError('nearby preview failed', error, apiBaseUrlCandidates);
-        setMapRouletteError(isApiConnectivityError(error)
+        const messageText = isApiConnectivityError(error)
           ? '店舗検索APIに接続できませんでした。'
-          : '候補の読み込みに失敗しました。');
+          : '候補の読み込みに失敗しました。';
+        setMapRouletteError(messageText);
+        setDrawFailureDetails(buildDrawFailureDetails({
+          area: areaRef.current,
+          genre,
+          budgetMax,
+          distance,
+          conditionRandom,
+          apiMessage: messageText,
+          mode: 'apiError',
+        }));
       }
     };
 
@@ -5665,8 +5839,12 @@ export default function App() {
   }, [
     activeTab,
     apiBaseUrlCandidates,
+    budgetMax,
     buildCandidateQuery,
+    conditionRandom,
+    distance,
     drawMode,
+    genre,
     loadCandidatePool,
     mapPinBounce,
     mapPinProgress,
@@ -6026,6 +6204,7 @@ export default function App() {
     setMapCandidates([]);
     setMapRouletteTarget(null);
     setMapRouletteError(null);
+    setDrawFailureDetails([]);
     previewCandidateQueryKeyRef.current = null;
     mapPinProgress.setValue(0);
     mapPinBounce.setValue(0);
@@ -6133,6 +6312,7 @@ export default function App() {
     setMapCandidates([]);
     setMapRouletteTarget(null);
     setMapRouletteError(null);
+    setDrawFailureDetails([]);
     previewCandidateQueryKeyRef.current = null;
     mapPinProgress.setValue(0);
     mapPinBounce.setValue(0);
@@ -6142,6 +6322,7 @@ export default function App() {
     setDrawMode('condition');
     setTravelRevealStep('hidden');
     setTravelDisplayArea(null);
+    setDrawFailureDetails([]);
     setActiveTab('random');
     setMessage('抽選カードを押すとスタートします。');
     if (locationIntroState === 'completed' && areaRef.current.trim() === '現在地') {
@@ -6161,6 +6342,7 @@ export default function App() {
 
   const handleLogout = useCallback(() => {
     randishApi.setAuthToken(null);
+    void clearStoredAuthSession();
     setFreshOAuthSessionPreferred(true);
     void Linking.getInitialURL()
       .then((url) => {
@@ -6273,6 +6455,7 @@ export default function App() {
             profileName={profileName}
             profileImageUri={profileImageUri}
             appLanguage={appLanguage}
+            apiBaseUrlCandidates={apiBaseUrlCandidates}
             isRegisteredUser={isRegisteredUser}
             isLoading={isLoading}
             mealTicketState={mealTicketState}
@@ -6341,6 +6524,7 @@ export default function App() {
             mapRouletteTarget={mapRouletteTarget}
             mapRouletteStatus={mapRouletteStatus}
             mapRouletteError={mapRouletteError}
+            drawFailureDetails={drawFailureDetails}
             history={randomHistory}
             conditionRandom={conditionRandom}
             travelRevealStep={travelRevealStep}
@@ -6886,6 +7070,7 @@ function HomeTab({
   profileName,
   profileImageUri,
   appLanguage,
+  apiBaseUrlCandidates,
   isRegisteredUser,
   isLoading,
   mealTicketState,
@@ -6923,6 +7108,7 @@ function HomeTab({
   profileName: string;
   profileImageUri: string | null;
   appLanguage: AppLanguage;
+  apiBaseUrlCandidates: string | readonly string[];
   isRegisteredUser: boolean;
   isLoading: boolean;
   mealTicketState: MealTicketState;
@@ -6960,6 +7146,7 @@ function HomeTab({
             profileName={profileName}
             profileImageUri={profileImageUri}
             appLanguage={appLanguage}
+            apiBaseUrlCandidates={apiBaseUrlCandidates}
             isRegisteredUser={isRegisteredUser}
             mealTicketState={mealTicketState}
             onProfileNameChange={onProfileNameChange}
@@ -7080,6 +7267,7 @@ function HomeLocationPanel({
   profileName,
   profileImageUri,
   appLanguage,
+  apiBaseUrlCandidates,
   isRegisteredUser,
   mealTicketState,
   onProfileNameChange,
@@ -7108,6 +7296,7 @@ function HomeLocationPanel({
   profileName: string;
   profileImageUri: string | null;
   appLanguage: AppLanguage;
+  apiBaseUrlCandidates: string | readonly string[];
   isRegisteredUser: boolean;
   mealTicketState: MealTicketState;
   onProfileNameChange: (value: string) => void;
@@ -7132,6 +7321,11 @@ function HomeLocationPanel({
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
   const [logoutSheetOpen, setLogoutSheetOpen] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState(profileName);
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminUsage, setAdminUsage] = useState<ApiUsageResponse | null>(null);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminLoading, setAdminLoading] = useState(false);
   const t = UI_TEXT[appLanguage];
   const currentLanguage = LANGUAGE_OPTIONS.find((item) => item.key === appLanguage) ?? LANGUAGE_OPTIONS[0];
   const selectedPreset = getAreaPreset(area);
@@ -7289,6 +7483,44 @@ function HomeLocationPanel({
     onLogout();
   };
 
+  const openAdminPanel = () => {
+    Keyboard.dismiss();
+    setProfileEditorOpen(false);
+    setLanguageMenuOpen(false);
+    setAdminPanelOpen(true);
+  };
+
+  const closeAdminPanel = () => {
+    Keyboard.dismiss();
+    setAdminPanelOpen(false);
+    setAdminPassword('');
+    setAdminUsage(null);
+    setAdminError(null);
+  };
+
+  const loadAdminUsage = async () => {
+    const password = adminPassword.trim();
+    if (!password) {
+      setAdminError('パスワードを入力してください。');
+      return;
+    }
+
+    setAdminLoading(true);
+    setAdminError(null);
+    try {
+      const usage = await randishApi.getAdminApiUsage(apiBaseUrlCandidates, password);
+      setAdminUsage(usage);
+    } catch (error) {
+      if (error instanceof RandishApiError && error.status === 401) {
+        setAdminError('パスワードが違います。');
+      } else {
+        setAdminError('API使用量を取得できませんでした。');
+      }
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
   const pickProfileImage = async () => {
     if (!isRegisteredUser) {
       promptRegistration();
@@ -7340,6 +7572,62 @@ function HomeLocationPanel({
               </Pressable>
               <Pressable style={styles.logoutSheetActionButton} onPress={runLogout}>
                 <Text style={styles.logoutSheetActionText}>{t.logoutConfirmAction}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={adminPanelOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAdminPanel}
+      >
+        <View style={styles.adminModalOverlay}>
+          <View style={styles.adminSheet}>
+            <View style={styles.adminSheetHeader}>
+              <View style={styles.adminSheetIcon}>
+                <Ionicons name="analytics-outline" size={23} color={INK} />
+              </View>
+              <View style={styles.adminSheetHeaderText}>
+                <Text style={styles.adminSheetTitle}>API使用量</Text>
+                <Text style={styles.adminSheetLead}>RANDISH経由で外部APIへ送った回数です。</Text>
+              </View>
+            </View>
+            <TextInput
+              value={adminPassword}
+              onChangeText={setAdminPassword}
+              style={styles.adminPasswordInput}
+              placeholder="管理パスワード"
+              placeholderTextColor="#a49a90"
+              secureTextEntry
+              returnKeyType="done"
+              onSubmitEditing={loadAdminUsage}
+            />
+            {adminError ? <Text style={styles.adminErrorText}>{adminError}</Text> : null}
+            {adminUsage ? (
+              <View style={styles.adminUsageList}>
+                {adminUsage.providers.map((provider) => {
+                  const used = Number.isFinite(provider.used) ? Math.max(0, Math.floor(provider.used)) : 0;
+                  const limit = Number.isFinite(provider.limit) ? Math.max(0, Math.floor(provider.limit)) : 0;
+                  return (
+                    <View key={provider.key} style={styles.adminUsageRow}>
+                      <View style={styles.adminUsageProviderText}>
+                        <Text style={styles.adminUsageName}>{provider.name}</Text>
+                        <Text style={styles.adminUsageMeta}>{provider.available === false ? 'APIキー未設定' : '利用可能'}</Text>
+                      </View>
+                      <Text style={styles.adminUsageCount}>{limit.toLocaleString('ja-JP')}回中 {used.toLocaleString('ja-JP')}回</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
+            <View style={styles.adminActions}>
+              <Pressable style={styles.adminGhostButton} onPress={closeAdminPanel}>
+                <Text style={styles.adminGhostButtonText}>閉じる</Text>
+              </Pressable>
+              <Pressable style={styles.adminActionButton} onPress={loadAdminUsage} disabled={adminLoading}>
+                {adminLoading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.adminActionButtonText}>確認</Text>}
               </Pressable>
             </View>
           </View>
@@ -7473,6 +7761,10 @@ function HomeLocationPanel({
                 </Pressable>
               )}
               <View style={styles.homeAccountMenuFooter}>
+                <Pressable style={styles.homeAccountAdminButton} onPress={openAdminPanel}>
+                  <Ionicons name="analytics-outline" size={14} color="#b6aa9d" />
+                  <Text style={styles.homeAccountAdminButtonText}>ops</Text>
+                </Pressable>
                 <Pressable
                   style={styles.homeAccountCloseButton}
                   onPress={() => {
@@ -8427,6 +8719,7 @@ function RandomTab({
   mapRouletteTarget,
   mapRouletteStatus,
   mapRouletteError,
+  drawFailureDetails,
   history,
   conditionRandom,
   travelRevealStep,
@@ -8462,6 +8755,7 @@ function RandomTab({
   mapRouletteTarget: CandidatePlace | null;
   mapRouletteStatus: MapRouletteStatus;
   mapRouletteError: string | null;
+  drawFailureDetails: string[];
   history: Restaurant[];
   conditionRandom: ConditionRandomState;
   travelRevealStep: TravelRevealStep;
@@ -8738,6 +9032,17 @@ function RandomTab({
         <View style={styles.emptyPanel}>
           <Text style={styles.emptyTitle}>{mapRouletteStatus === 'empty' ? '近くの候補が見つかりません' : uiText.emptyResultTitle}</Text>
           <Text style={styles.emptyText}>{mapRouletteError ?? uiText.emptyResultText}</Text>
+          {drawFailureDetails.length > 0 && (
+            <View style={styles.emptyDiagnosticPanel}>
+              <Text style={styles.emptyDiagnosticTitle}>引っかかった可能性</Text>
+              {drawFailureDetails.map((detail, index) => (
+                <View key={`${detail}-${index}`} style={styles.emptyDiagnosticRow}>
+                  <View style={styles.emptyDiagnosticDot} />
+                  <Text style={styles.emptyDiagnosticText}>{detail}</Text>
+                </View>
+              ))}
+            </View>
+          )}
           {(mapRouletteStatus === 'empty' || mapRouletteStatus === 'error') && (
             <View style={styles.emptyActionRow}>
               <Pressable style={styles.emptyActionButton} onPress={onExpandDistance}>
@@ -8785,7 +9090,6 @@ function RouletteMapView({
 }) {
   const [canvasSize, setCanvasSize] = useState({ width: 320, height: 318 });
   const [mapHeading, setMapHeading] = useState(0);
-  const [activeCandidateIndex, setActiveCandidateIndex] = useState(0);
   const rouletteMapRef = useRef<any>(null);
   const genrePulse = useRef(new Animated.Value(0)).current;
   const MapModule = useMemo(getNativeMapModule, []);
@@ -8819,11 +9123,8 @@ function RouletteMapView({
     if (status === 'result') {
       return target?.id ?? null;
     }
-    if (status !== 'spinning' || displayCandidates.length === 0) {
-      return null;
-    }
-    return displayCandidates[activeCandidateIndex % displayCandidates.length]?.id ?? null;
-  }, [activeCandidateIndex, displayCandidates, status, target?.id]);
+    return null;
+  }, [status, target?.id]);
 
   useEffect(() => {
     setVisibleRegion(region);
@@ -8858,42 +9159,6 @@ function RouletteMapView({
       loop.stop();
     };
   }, [genrePulse, showGenreEffect]);
-
-  useEffect(() => {
-    if (status !== 'spinning' || !genreFocused || displayCandidates.length <= 1) {
-      if (status !== 'result') {
-        setActiveCandidateIndex(0);
-      }
-      return undefined;
-    }
-
-    setActiveCandidateIndex(0);
-    const intervalId = setInterval(() => {
-      setActiveCandidateIndex((current) => {
-        const jump = 1 + Math.floor(Math.random() * Math.max(displayCandidates.length - 1, 1));
-        return (current + jump) % displayCandidates.length;
-      });
-    }, 140);
-
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [displayCandidates.length, genreFocused, status]);
-
-  const handleMapRegionChangeComplete = useCallback((nextRegion: typeof region) => {
-    setVisibleRegion(nextRegion);
-    const mapRef = rouletteMapRef.current;
-    if (!mapRef?.getCamera) {
-      return;
-    }
-    void mapRef.getCamera()
-      .then((camera: { heading?: number }) => {
-        if (typeof camera.heading === 'number' && Number.isFinite(camera.heading)) {
-          setMapHeading(camera.heading);
-        }
-      })
-      .catch(() => undefined);
-  }, []);
 
   const toPoint = useCallback((latitude: number, longitude: number) => {
     const width = Math.max(canvasSize.width, 1);
@@ -8958,7 +9223,7 @@ function RouletteMapView({
   const statusLabel = status === 'searching'
     ? '候補を取得中'
     : status === 'spinning'
-      ? '候補を巡回中'
+      ? '一店を選択中'
       : status === 'result'
         ? '一店決定'
         : candidates.length
@@ -8983,13 +9248,14 @@ function RouletteMapView({
         <MapView
           ref={rouletteMapRef}
           provider={MapModule?.PROVIDER_GOOGLE}
+          pointerEvents="none"
           style={styles.mapRouletteNativeMap}
           region={visibleRegion}
-          onRegionChangeComplete={handleMapRegionChangeComplete}
-          scrollEnabled
-          zoomEnabled
+          scrollEnabled={false}
+          zoomEnabled={false}
           pitchEnabled={false}
-          rotateEnabled
+          rotateEnabled={false}
+          scrollDuringRotateOrZoomEnabled={false}
           toolbarEnabled={false}
           showsCompass
           showsMyLocationButton={false}

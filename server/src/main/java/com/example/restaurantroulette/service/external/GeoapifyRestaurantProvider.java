@@ -1,6 +1,7 @@
 package com.example.restaurantroulette.service.external;
 
 import com.example.restaurantroulette.entity.Restaurant;
+import com.example.restaurantroulette.service.ApiUsageCounter;
 import com.example.restaurantroulette.service.external.GeoapifyRestaurantMapper.SearchContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
@@ -36,12 +37,14 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
       "catering.restaurant.ramen",
       "catering.fast_food.ramen",
       "catering.restaurant.noodle",
-      "catering.fast_food.noodle");
+      "catering.fast_food.noodle",
+      "catering.restaurant.japanese");
   private static final List<String> NOODLE_CATEGORIES = List.of(
       "catering.restaurant.noodle",
       "catering.fast_food.noodle",
       "catering.restaurant.ramen",
-      "catering.fast_food.ramen");
+      "catering.fast_food.ramen",
+      "catering.restaurant.japanese");
   private static final List<String> DEFAULT_CATEGORIES = List.of(
       "catering.restaurant",
       "catering.fast_food",
@@ -95,6 +98,10 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
   private final GeoapifyRestaurantMapper mapper;
   private final String apiKey;
   private final int cacheTtlSeconds;
+  private final ApiUsageCounter usageCounter = new ApiUsageCounter(
+      "geoapify",
+      "Geoapify",
+      "RANDISH_GEOAPIFY_API_LIMIT");
   private final Map<GeoapifyCacheKey, GeoapifyCacheEntry> cache = new ConcurrentHashMap<>();
   private final Map<String, CachedRestaurant> restaurantCacheByExternalId = new ConcurrentHashMap<>();
   private final List<Path> envFiles = List.of(
@@ -210,6 +217,10 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
     return result;
   }
 
+  public Map<String, Object> apiUsage() {
+    return usageCounter.snapshot(isAvailable());
+  }
+
   private Optional<List<Restaurant>> cachedRestaurants(GeoapifyCacheKey cacheKey) {
     GeoapifyCacheEntry entry = cache.get(cacheKey);
     if (entry == null) {
@@ -251,6 +262,7 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
       Double latitude,
       Double longitude,
       int radiusMeters) {
+    usageCounter.increment();
     JsonNode response = restClient.get()
         .uri(uriBuilder -> uriBuilder
             .path("/places")

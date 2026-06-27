@@ -5,6 +5,7 @@ import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.exception.NotFoundException;
 import com.example.restaurantroulette.repository.RestaurantRepository;
 import com.example.restaurantroulette.service.external.ExternalRestaurantProvider;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -20,6 +21,10 @@ public class RestaurantQueryService {
   private static final int HYBRID_TARGET_RESULT_COUNT = 100;
   private static final int MAX_FALLBACK_FILL_COUNT = 30;
   private static final int DUPLICATE_DISTANCE_METERS = 60;
+  private static final Map<String, Integer> PROVIDER_SEARCH_ORDER = Map.of(
+      "HOTPEPPER", 10,
+      "GEOAPIFY", 20,
+      "GOOGLE_PLACES", 100);
 
   private final RestaurantRepository restaurantRepository;
   private final List<ExternalRestaurantProvider> externalRestaurantProviders;
@@ -208,11 +213,26 @@ public class RestaurantQueryService {
   }
 
   private List<ExternalRestaurantProvider> primaryProviders() {
-    return externalRestaurantProviders.stream().filter(provider -> !provider.isFallback()).toList();
+    return orderedProviders(externalRestaurantProviders.stream()
+        .filter(provider -> !provider.isFallback())
+        .toList());
   }
 
   private List<ExternalRestaurantProvider> fallbackProviders() {
-    return externalRestaurantProviders.stream().filter(ExternalRestaurantProvider::isFallback).toList();
+    return orderedProviders(externalRestaurantProviders.stream()
+        .filter(ExternalRestaurantProvider::isFallback)
+        .toList());
+  }
+
+  private List<ExternalRestaurantProvider> orderedProviders(List<ExternalRestaurantProvider> providers) {
+    return providers.stream()
+        .sorted(Comparator.comparingInt(this::providerSearchOrder))
+        .toList();
+  }
+
+  private int providerSearchOrder(ExternalRestaurantProvider provider) {
+    String providerKey = provider.providerKey() == null ? "" : provider.providerKey().trim().toUpperCase(Locale.ROOT);
+    return PROVIDER_SEARCH_ORDER.getOrDefault(providerKey, provider.isFallback() ? 1_000 : 50);
   }
 
   private boolean queryProviders(

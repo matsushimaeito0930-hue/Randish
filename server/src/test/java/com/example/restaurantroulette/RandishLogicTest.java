@@ -58,6 +58,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -570,6 +571,24 @@ class RandishLogicTest {
   }
 
   @Test
+  void restaurantProvidersAreQueriedInCostControlledOrder() {
+    var callOrder = new ArrayList<String>();
+    var googleProvider = new OrderedProvider("GOOGLE_PLACES", true, callOrder);
+    var geoapifyProvider = new OrderedProvider("GEOAPIFY", false, callOrder);
+    var hotPepperProvider = new OrderedProvider("HOTPEPPER", false, callOrder);
+    var service = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(googleProvider, geoapifyProvider, hotPepperProvider),
+        mapper,
+        validationService);
+
+    var restaurants = service.searchRandomEntities("出雲市", "ラーメン", 0, 2000, 35.360748, 132.756697, 4, 3);
+
+    assertThat(callOrder).containsExactly("HOTPEPPER", "GEOAPIFY", "GOOGLE_PLACES");
+    assertThat(restaurants).extracting("externalProvider").containsExactly("HOTPEPPER", "GEOAPIFY", "GOOGLE_PLACES");
+  }
+
+  @Test
   void mobileInitialGenreCatalogIsCuratedAndUnique() throws Exception {
     String source = Files.readString(Path.of("..", "mobile", "src", "AppRoot.tsx"));
     String catalog = source.substring(source.indexOf("const GENRES"), source.indexOf("const AI_REPORT_MONTHLY_NOTICE"));
@@ -821,6 +840,33 @@ class RandishLogicTest {
   }
 
   @Test
+  void nearbyPlacesUsesRestaurantProvidersBeforeGoogleFallbackWhenGoogleIsAvailable() {
+    var googleProvider = new CountingNearbyPlacesProvider();
+    var restaurantProvider = new NearbyRestaurantProvider();
+    var restaurantService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(restaurantProvider),
+        mapper,
+        validationService);
+    var service = new NearbyPlacesService(
+        googleProvider,
+        restaurantService,
+        validationService,
+        600,
+        300,
+        false,
+        false,
+        20);
+
+    var response = service.search(new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false));
+
+    assertThat(response.source()).isEqualTo("HYBRID_PLACES");
+    assertThat(restaurantProvider.searchCallCount).isEqualTo(1);
+    assertThat(googleProvider.nearbyCallCount).isEqualTo(1);
+    assertThat(response.places()).extracting("id").containsExactly("geoapify-geo-test-1", "nearby-test-1");
+  }
+
+  @Test
   void nearbyPlacesReturnsEmptyListWhenGoogleAndRestaurantProvidersHaveNoCandidates() {
     var restaurantService = new RestaurantQueryService(
         restaurantRepository,
@@ -1024,6 +1070,67 @@ class RandishLogicTest {
               null,
               null))
           .toList();
+    }
+  }
+
+  private static class OrderedProvider implements ExternalRestaurantProvider {
+    private final String providerKey;
+    private final boolean fallback;
+    private final List<String> callOrder;
+
+    private OrderedProvider(String providerKey, boolean fallback, List<String> callOrder) {
+      this.providerKey = providerKey;
+      this.fallback = fallback;
+      this.callOrder = callOrder;
+    }
+
+    @Override
+    public String providerKey() {
+      return providerKey;
+    }
+
+    @Override
+    public boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    public boolean isFallback() {
+      return fallback;
+    }
+
+    @Override
+    public List<Restaurant> search(String area, String genre, Integer budgetMin, Integer budgetMax, Double latitude, Double longitude, Integer range) {
+      return searchRandomCandidates(area, genre, budgetMin, budgetMax, latitude, longitude, range, 1);
+    }
+
+    @Override
+    public List<Restaurant> searchRandomCandidates(
+        String area,
+        String genre,
+        Integer budgetMin,
+        Integer budgetMax,
+        Double latitude,
+        Double longitude,
+        Integer range,
+        int maxCandidates) {
+      callOrder.add(providerKey);
+      return List.of(new Restaurant(
+          providerKey.toLowerCase(Locale.ROOT) + "-order-test",
+          providerKey,
+          providerKey.toLowerCase(Locale.ROOT) + "-external",
+          providerKey + " order test",
+          area,
+          genre,
+          800,
+          1500,
+          4.0,
+          5,
+          "島根県出雲市 " + providerKey,
+          null,
+          "test",
+          latitude,
+          longitude));
     }
   }
 
