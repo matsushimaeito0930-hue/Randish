@@ -6,21 +6,37 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 @Service
 public class SupabaseAuthService {
+  private static final Logger logger = LoggerFactory.getLogger(SupabaseAuthService.class);
   private static final String DEFAULT_OAUTH_REDIRECT_URI = "randish://auth/callback";
   private static final Set<String> SUPPORTED_OAUTH_PROVIDERS = Set.of("google", "apple");
   private static final List<String> SUPABASE_ERROR_FIELDS = List.of("msg", "message", "error_description", "error");
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final List<Path> ENV_FILES = List.of(
+      Path.of(".env.local"),
+      Path.of("..", ".env.local"),
+      Path.of("server", ".env.local"),
+      Path.of("..", "server", ".env.local"),
+      Path.of(".env"),
+      Path.of("..", ".env"),
+      Path.of("server", ".env"),
+      Path.of("..", "server", ".env"));
 
   private final RestClient.Builder restClientBuilder;
   private final String supabaseUrl;
@@ -33,15 +49,20 @@ public class SupabaseAuthService {
         System.getProperty("SUPABASE_URL"),
         System.getenv("SUPABASE_URL"),
         System.getProperty("EXPO_PUBLIC_SUPABASE_URL"),
-        System.getenv("EXPO_PUBLIC_SUPABASE_URL")));
+        System.getenv("EXPO_PUBLIC_SUPABASE_URL"),
+        readConfigValue("SUPABASE_URL").orElse(null),
+        readConfigValue("EXPO_PUBLIC_SUPABASE_URL").orElse(null)));
     this.anonKey = firstPresent(
         System.getProperty("SUPABASE_ANON_KEY"),
         System.getenv("SUPABASE_ANON_KEY"),
         System.getProperty("EXPO_PUBLIC_SUPABASE_ANON_KEY"),
-        System.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY"));
+        System.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY"),
+        readConfigValue("SUPABASE_ANON_KEY").orElse(null),
+        readConfigValue("EXPO_PUBLIC_SUPABASE_ANON_KEY").orElse(null));
     this.defaultOAuthRedirectUri = firstPresent(
         System.getProperty("RANDISH_OAUTH_REDIRECT_URI"),
         System.getenv("RANDISH_OAUTH_REDIRECT_URI"),
+        readConfigValue("RANDISH_OAUTH_REDIRECT_URI").orElse(null),
         DEFAULT_OAUTH_REDIRECT_URI);
   }
 
@@ -220,6 +241,45 @@ public class SupabaseAuthService {
       }
     }
     return null;
+  }
+
+  private Optional<String> readConfigValue(String key) {
+    for (Path path : ENV_FILES) {
+      Optional<String> fileValue = readConfigValueFromFile(path, key);
+      if (fileValue.isPresent()) {
+        return fileValue;
+      }
+    }
+    return Optional.empty();
+  }
+
+  private Optional<String> readConfigValueFromFile(Path path, String key) {
+    if (!Files.exists(path)) {
+      return Optional.empty();
+    }
+    try {
+      return Files.readAllLines(path, StandardCharsets.UTF_8).stream()
+          .map(String::trim)
+          .filter(line -> !line.isBlank())
+          .filter(line -> !line.startsWith("#"))
+          .filter(line -> line.startsWith(key + "="))
+          .map(line -> line.substring(line.indexOf('=') + 1))
+          .map(this::trimConfigValue)
+          .filter(value -> !value.isBlank())
+          .findFirst();
+    } catch (IOException exception) {
+      logger.warn("Failed to read Supabase config from {}", path, exception);
+      return Optional.empty();
+    }
+  }
+
+  private String trimConfigValue(String value) {
+    String trimmed = value == null ? "" : value.trim();
+    if ((trimmed.startsWith("\"") && trimmed.endsWith("\""))
+        || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+      return trimmed.substring(1, trimmed.length() - 1).trim();
+    }
+    return trimmed;
   }
 
   public record SupabaseAuthResult(SupabaseAuthUser user, String accessToken, String refreshToken) {
