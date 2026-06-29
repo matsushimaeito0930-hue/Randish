@@ -97,6 +97,10 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
   private final RestClient restClient;
   private final GeoapifyRestaurantMapper mapper;
   private final String apiKey;
+  private final ApiUsageCounter usageCounter = new ApiUsageCounter(
+      "geoapify",
+      "Geoapify",
+      "RANDISH_GEOAPIFY_API_LIMIT");
   private final int cacheTtlSeconds;
   private final ApiUsageCounter usageCounter = new ApiUsageCounter(
       "geoapify",
