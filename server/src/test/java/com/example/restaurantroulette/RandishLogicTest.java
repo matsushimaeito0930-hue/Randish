@@ -58,6 +58,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -405,6 +406,24 @@ class RandishLogicTest {
 
     assertThatThrownBy(() -> auth.createOAuthAuthorizeUrl("line", "randish://auth/callback"))
         .isInstanceOf(BadRequestException.class);
+  }
+
+  @Test
+  void supabaseUserSyncMergesExistingEmailAccount() {
+    UserResponse localUser = userService.register(new UserCreateRequest("google-merge@example.com", "password123", "Local User"));
+    var supabaseUser = new SupabaseAuthService.SupabaseAuthUser(
+        "supabase-user-id",
+        "google-merge@example.com",
+        Map.of("name", "Google User"),
+        null);
+
+    UserResponse synced = userService.syncSupabaseUser(supabaseUser, null);
+
+    assertThat(synced.id()).isEqualTo(localUser.id());
+    assertThat(synced.email()).isEqualTo("google-merge@example.com");
+    assertThat(synced.displayName()).isEqualTo("Google User");
+    assertThat(synced.authProvider()).isEqualTo("SUPABASE");
+    assertThat(userService.findByEmail("google-merge@example.com").orElseThrow().id()).isEqualTo(localUser.id());
   }
 
   @Test

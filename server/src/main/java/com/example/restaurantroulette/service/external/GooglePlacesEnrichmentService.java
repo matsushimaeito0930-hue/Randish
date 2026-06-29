@@ -425,6 +425,20 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
     return result;
   }
 
+  public Map<String, Object> apiUsage() {
+    int used = sessionRequestCount.get();
+    int limit = Math.max(1, resolveApiUsageLimit());
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("key", "google_places");
+    result.put("name", "Google Places");
+    result.put("used", used);
+    result.put("limit", limit);
+    result.put("remaining", Math.max(0, limit - used));
+    result.put("display", used + "/" + limit);
+    result.put("available", isAvailable());
+    return result;
+  }
+
   public ResponseEntity<byte[]> fetchPhoto(String photoName) {
     if (!isAvailable() || !isSafePhotoName(photoName)) {
       return ResponseEntity.notFound().build();
@@ -840,6 +854,13 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
         .or(() -> readConfigValue("GOOGLE_PLACES_SESSION_LIMIT"))
         .flatMap(this::parsePositiveInt)
         .orElse(DEFAULT_SESSION_REQUEST_LIMIT);
+  }
+
+  private int resolveApiUsageLimit() {
+    return readConfigValue("RANDISH_GOOGLE_PLACES_API_LIMIT")
+        .or(() -> readConfigValue("GOOGLE_PLACES_API_LIMIT"))
+        .flatMap(this::parsePositiveInt)
+        .orElse(sessionRequestLimit);
   }
 
   private boolean reserveGoogleRequests(int count, String reason) {

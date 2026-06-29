@@ -1,6 +1,7 @@
 package com.example.restaurantroulette.service.external;
 
 import com.example.restaurantroulette.entity.Restaurant;
+import com.example.restaurantroulette.service.ApiUsageCounter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -85,6 +86,10 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
   private final String apiKey;
+  private final ApiUsageCounter usageCounter = new ApiUsageCounter(
+      "hotpepper",
+      "Hot Pepper",
+      "RANDISH_HOTPEPPER_API_LIMIT");
 
   public HotPepperRestaurantProvider(RestClient.Builder restClientBuilder, ObjectMapper objectMapper) {
     this.restClient = restClientBuilder.baseUrl(API_URL).build();
@@ -125,6 +130,10 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
       result.put("errorClass", exception.getClass().getSimpleName());
     }
     return result;
+  }
+
+  public Map<String, Object> apiUsage() {
+    return usageCounter.snapshot(isAvailable());
   }
 
   @Override
@@ -279,6 +288,7 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
     String requestKeyword = keyword;
     Integer safeRange = range == null ? 4 : Math.max(1, Math.min(5, range));
 
+    usageCounter.increment();
     byte[] responseBody = restClient.get()
         .uri(uriBuilder -> uriBuilder
             .queryParam("key", apiKey)
@@ -299,6 +309,7 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   }
 
   private HotPepperResponse requestById(String id) {
+    usageCounter.increment();
     byte[] responseBody = restClient.get()
         .uri(uriBuilder -> uriBuilder
             .queryParam("key", apiKey)

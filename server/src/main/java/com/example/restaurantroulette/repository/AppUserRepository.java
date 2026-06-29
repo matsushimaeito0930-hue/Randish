@@ -52,6 +52,30 @@ public class AppUserRepository {
       return user;
     }
 
+    Optional<AppUser> existingByEmail = findByEmail(user.email());
+    if (existingByEmail.isPresent()) {
+      AppUser existingUser = existingByEmail.get();
+      jdbcClient.sql("""
+          UPDATE app_users
+          SET display_name = :displayName,
+              auth_provider = :authProvider,
+              updated_at = :updatedAt
+          WHERE email = :email
+          """)
+          .param("email", user.email())
+          .param("displayName", user.displayName())
+          .param("authProvider", user.authProvider())
+          .param("updatedAt", Timestamp.from(user.updatedAt()))
+          .update();
+      return new AppUser(
+          existingUser.id(),
+          user.email(),
+          user.displayName(),
+          user.authProvider(),
+          existingUser.createdAt(),
+          user.updatedAt());
+    }
+
     jdbcClient.sql("""
         INSERT INTO app_users (id, email, display_name, auth_provider, created_at, updated_at)
         VALUES (:id, :email, :displayName, :authProvider, :createdAt, :updatedAt)
