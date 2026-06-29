@@ -37,12 +37,14 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
       "catering.restaurant.ramen",
       "catering.fast_food.ramen",
       "catering.restaurant.noodle",
-      "catering.fast_food.noodle");
+      "catering.fast_food.noodle",
+      "catering.restaurant.japanese");
   private static final List<String> NOODLE_CATEGORIES = List.of(
       "catering.restaurant.noodle",
       "catering.fast_food.noodle",
       "catering.restaurant.ramen",
-      "catering.fast_food.ramen");
+      "catering.fast_food.ramen",
+      "catering.restaurant.japanese");
   private static final List<String> DEFAULT_CATEGORIES = List.of(
       "catering.restaurant",
       "catering.fast_food",
@@ -100,6 +102,10 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
       "Geoapify",
       "RANDISH_GEOAPIFY_API_LIMIT");
   private final int cacheTtlSeconds;
+  private final ApiUsageCounter usageCounter = new ApiUsageCounter(
+      "geoapify",
+      "Geoapify",
+      "RANDISH_GEOAPIFY_API_LIMIT");
   private final Map<GeoapifyCacheKey, GeoapifyCacheEntry> cache = new ConcurrentHashMap<>();
   private final Map<String, CachedRestaurant> restaurantCacheByExternalId = new ConcurrentHashMap<>();
   private final List<Path> envFiles = List.of(

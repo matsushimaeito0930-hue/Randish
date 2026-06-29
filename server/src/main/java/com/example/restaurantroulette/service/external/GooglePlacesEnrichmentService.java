@@ -9,6 +9,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -843,10 +846,16 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
   }
 
   private boolean resolveEnabled() {
-    return readConfigValue("RANDISH_GOOGLE_PLACES_ENABLED")
+    Optional<String> configured = readConfigValue("RANDISH_GOOGLE_PLACES_ENABLED")
         .or(() -> readConfigValue("GOOGLE_PLACES_ENABLED"))
-        .map(this::isTruthy)
-        .orElse(false);
+        .map(this::trimLower);
+    if (configured.isEmpty()) {
+      return false;
+    }
+    if (configured.get().equals("auto")) {
+      return resolveEnableAfter().map(Instant.now()::isAfter).orElse(false);
+    }
+    return isTruthy(configured.get());
   }
 
   private int resolveSessionRequestLimit() {
@@ -891,8 +900,34 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
     }
   }
 
+  private Optional<Instant> resolveEnableAfter() {
+    return readConfigValue("RANDISH_GOOGLE_PLACES_ENABLE_AFTER")
+        .or(() -> readConfigValue("GOOGLE_PLACES_ENABLE_AFTER"))
+        .flatMap(this::parseInstant);
+  }
+
+  private Optional<Instant> parseInstant(String value) {
+    String normalized = trimValue(value);
+    if (normalized.isBlank()) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(OffsetDateTime.parse(normalized).toInstant());
+    } catch (DateTimeParseException ignored) {
+      try {
+        return Optional.of(Instant.parse(normalized));
+      } catch (DateTimeParseException exception) {
+        return Optional.empty();
+      }
+    }
+  }
+
+  private String trimLower(String value) {
+    return trimValue(value).toLowerCase(Locale.ROOT);
+  }
+
   private boolean isTruthy(String value) {
-    String normalized = trimValue(value).toLowerCase(Locale.ROOT);
+    String normalized = trimLower(value);
     return normalized.equals("true") || normalized.equals("1") || normalized.equals("yes") || normalized.equals("on");
   }
 

@@ -225,8 +225,8 @@ export type ApiUsageResponse = {
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'DELETE';
   body?: unknown;
-  skipAuth?: boolean;
   headers?: Record<string, string>;
+  skipAuth?: boolean;
 };
 
 type ApiBaseUrlInput = string | readonly string[];

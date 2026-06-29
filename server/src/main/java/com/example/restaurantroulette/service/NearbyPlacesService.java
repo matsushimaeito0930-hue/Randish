@@ -117,29 +117,30 @@ public class NearbyPlacesService {
           "cached nearby candidates");
     }
 
-    List<CandidatePlaceResponse> places;
-    String source = "GOOGLE_PLACES";
-    if (!googlePlacesEnrichmentService.isAvailable()) {
-      places = searchRestaurantProviders(normalized);
-      source = "RANDISH_RESTAURANTS";
-      if (places.isEmpty()) {
-        if (canUseMockPlaces()) {
-          logger.info("[RANDISH_PLACES] using development mock places because Google Places is unavailable");
-          places = mockPlaces(normalized);
-          source = "MOCK_PLACES";
-        } else {
-          logger.info("[RANDISH_PLACES] no restaurant provider candidates while Google Places is unavailable");
-        }
-      } else {
-        logger.info("[RANDISH_PLACES] using restaurant providers because Google Places is unavailable count={}", places.size());
-      }
-    } else {
-      logger.info("[RANDISH_PLACES] new nearby place search key={} radius={} category={} openNow={}",
+    List<CandidatePlaceResponse> restaurantPlaces = searchRestaurantProviders(normalized);
+    if (!restaurantPlaces.isEmpty()) {
+      logger.info("[RANDISH_PLACES] restaurant provider candidates count={}", restaurantPlaces.size());
+    }
+
+    List<CandidatePlaceResponse> googlePlaces = List.of();
+    if (googlePlacesEnrichmentService.isAvailable() && restaurantPlaces.size() < maxResults) {
+      logger.info("[RANDISH_PLACES] google fallback nearby search key={} radius={} category={} openNow={} currentCount={}",
           cacheKey,
           normalized.radius(),
           normalized.category(),
-          normalized.openNow());
-      places = googlePlacesEnrichmentService.searchNearbyCandidates(normalized, maxResults);
+          normalized.openNow(),
+          restaurantPlaces.size());
+      googlePlaces = searchGooglePlaces(normalized, maxResults - restaurantPlaces.size());
+    } else if (!googlePlacesEnrichmentService.isAvailable() && restaurantPlaces.isEmpty()) {
+      logger.info("[RANDISH_PLACES] no restaurant provider candidates while Google Places is unavailable");
+    }
+
+    List<CandidatePlaceResponse> places = mergeCandidatePlaces(restaurantPlaces, googlePlaces);
+    String source = nearbySource(restaurantPlaces, googlePlaces);
+    if (places.isEmpty() && canUseMockPlaces()) {
+      logger.info("[RANDISH_PLACES] using development mock places because all live providers returned no candidates");
+      places = mockPlaces(normalized);
+      source = "MOCK_PLACES";
     }
 
     NearbyCacheEntry entry = new NearbyCacheEntry(
@@ -234,6 +235,94 @@ public class NearbyPlacesService {
 
   private boolean canUseMockPlaces() {
     return mockEnabled && !productionRuntime;
+  }
+
+  private List<CandidatePlaceResponse> searchGooglePlaces(NearbyPlacesRequest request, int maxCandidates) {
+    if (maxCandidates <= 0) {
+      return List.of();
+    }
+    try {
+      return googlePlacesEnrichmentService.searchNearbyCandidates(request, maxCandidates);
+    } catch (RuntimeException exception) {
+      logger.warn("[RANDISH_PLACES] Google Places nearby search failed; keeping restaurant provider candidates.", exception);
+      return List.of();
+    }
+  }
+
+  private List<CandidatePlaceResponse> mergeCandidatePlaces(
+      List<CandidatePlaceResponse> primary,
+      List<CandidatePlaceResponse> fallback) {
+    List<CandidatePlaceResponse> merged = new ArrayList<>();
+    appendUniqueCandidates(merged, primary);
+    appendUniqueCandidates(merged, fallback);
+    return merged.stream().limit(maxResults).toList();
+  }
+
+  private void appendUniqueCandidates(List<CandidatePlaceResponse> merged, List<CandidatePlaceResponse> candidates) {
+    for (CandidatePlaceResponse candidate : candidates) {
+      boolean duplicate = merged.stream().anyMatch(existing -> isSameCandidate(existing, candidate));
+      if (!duplicate) {
+        merged.add(candidate);
+      }
+    }
+  }
+
+  private String nearbySource(List<CandidatePlaceResponse> restaurantPlaces, List<CandidatePlaceResponse> googlePlaces) {
+    if (!restaurantPlaces.isEmpty() && !googlePlaces.isEmpty()) {
+      return "HYBRID_PLACES";
+    }
+    if (!googlePlaces.isEmpty()) {
+      return "GOOGLE_PLACES";
+    }
+    return "RANDISH_RESTAURANTS";
+  }
+
+  private boolean isSameCandidate(CandidatePlaceResponse first, CandidatePlaceResponse second) {
+    if (first.id() != null && second.id() != null && first.id().equalsIgnoreCase(second.id())) {
+      return true;
+    }
+
+    String firstName = normalizeComparableText(first.name());
+    String secondName = normalizeComparableText(second.name());
+    if (firstName.isBlank() || secondName.isBlank()) {
+      return false;
+    }
+    if (firstName.equals(secondName)) {
+      return true;
+    }
+
+    Integer distance = nullableDistanceMeters(
+        first.latitude(),
+        first.longitude(),
+        second.latitude(),
+        second.longitude());
+    if (distance != null && distance <= 60 && (firstName.contains(secondName) || secondName.contains(firstName))) {
+      return true;
+    }
+
+    String firstAddress = normalizeComparableText(first.address());
+    String secondAddress = normalizeComparableText(second.address());
+    return distance != null
+        && distance <= 60
+        && !firstAddress.isBlank()
+        && !secondAddress.isBlank()
+        && (firstAddress.contains(secondAddress) || secondAddress.contains(firstAddress));
+  }
+
+  private String normalizeComparableText(String value) {
+    if (value == null) {
+      return "";
+    }
+    return value.toLowerCase(Locale.ROOT)
+        .replaceAll("\\s+", "")
+        .replaceAll("[\\p{Punct}　－ー・ｰ]", "");
+  }
+
+  private Integer nullableDistanceMeters(Double fromLatitude, Double fromLongitude, Double toLatitude, Double toLongitude) {
+    if (fromLatitude == null || fromLongitude == null || toLatitude == null || toLongitude == null) {
+      return null;
+    }
+    return distanceMeters(fromLatitude, fromLongitude, toLatitude, toLongitude);
   }
 
   private List<CandidatePlaceResponse> searchRestaurantProviders(NearbyPlacesRequest request) {

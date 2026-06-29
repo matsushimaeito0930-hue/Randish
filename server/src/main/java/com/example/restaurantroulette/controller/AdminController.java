@@ -17,12 +17,11 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
-  private static final String DEFAULT_ADMIN_USAGE_PASSWORD = "eito";
+  private static final String DEFAULT_ADMIN_PASSWORD = "matsushima0930-eito";
 
   private final HotPepperRestaurantProvider hotPepperRestaurantProvider;
   private final GeoapifyRestaurantProvider geoapifyRestaurantProvider;
   private final GooglePlacesEnrichmentService googlePlacesEnrichmentService;
-  private final String adminUsagePassword;
 
   public AdminController(
       HotPepperRestaurantProvider hotPepperRestaurantProvider,
@@ -31,14 +30,13 @@ public class AdminController {
     this.hotPepperRestaurantProvider = hotPepperRestaurantProvider;
     this.geoapifyRestaurantProvider = geoapifyRestaurantProvider;
     this.googlePlacesEnrichmentService = googlePlacesEnrichmentService;
-    this.adminUsagePassword = resolveAdminUsagePassword();
   }
 
   @GetMapping("/api-usage")
   public Map<String, Object> apiUsage(
       @RequestHeader(value = "X-Randish-Admin-Password", required = false) String headerPassword,
       @RequestParam(required = false) String password) {
-    if (!adminUsagePassword.equals(firstNonBlank(headerPassword, password))) {
+    if (!adminPassword().equals(firstNonBlank(headerPassword, password))) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Admin password is required.");
     }
     return Map.of(
@@ -49,18 +47,15 @@ public class AdminController {
             googlePlacesEnrichmentService.apiUsage()));
   }
 
+  private String adminPassword() {
+    String configured = System.getenv("RANDISH_ADMIN_PASSWORD");
+    return configured == null || configured.isBlank() ? DEFAULT_ADMIN_PASSWORD : configured.trim();
+  }
+
   private String firstNonBlank(String first, String second) {
     if (first != null && !first.isBlank()) {
       return first.trim();
     }
     return second == null ? "" : second.trim();
-  }
-
-  private String resolveAdminUsagePassword() {
-    String envValue = System.getenv("RANDISH_ADMIN_PASSWORD");
-    if (envValue != null && !envValue.isBlank()) {
-      return envValue.trim();
-    }
-    return DEFAULT_ADMIN_USAGE_PASSWORD;
   }
 }
