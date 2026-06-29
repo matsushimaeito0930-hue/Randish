@@ -3224,6 +3224,26 @@ const addMonthsToStart = (date: Date, monthOffset: number) =>
 
 const getAnalyticsMonthLabel = (date: Date) => `${date.getMonth() + 1}月`;
 
+const getMonthEndDate = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0);
+
+const isMonthEndReportDay = (date: Date) => date.getDate() === getMonthEndDate(date).getDate();
+
+const formatMonthEndDeliveryLabel = (date: Date) => {
+  const monthEnd = getMonthEndDate(date);
+  return `${monthEnd.getMonth() + 1}/${monthEnd.getDate()} 0:00`;
+};
+
+const getMonthEndCountdownLabel = (date: Date) => {
+  const monthEnd = getMonthEndDate(date);
+  const today = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const target = new Date(monthEnd.getFullYear(), monthEnd.getMonth(), monthEnd.getDate());
+  const dayDiff = Math.max(0, Math.ceil((target.getTime() - today.getTime()) / 86_400_000));
+  if (dayDiff === 0) {
+    return '今日、封筒が届きます';
+  }
+  return `あと${dayDiff}日で届きます`;
+};
+
 const getPriceRangeBucketLabel = (estimatedBudget: number | null) => {
   if (estimatedBudget == null) {
     return '推定不可';
@@ -10477,38 +10497,67 @@ function AiMonthlyReportEntryCard({
   hasReport,
   isPro,
   isSamplePreview,
+  isMonthEndUnlocked,
+  isMonthEndSimulation,
+  deliveryLabel,
+  countdownLabel,
   onOpen,
   onToggleSample,
+  onToggleMonthEndSimulation,
 }: {
   analytics: MonthlyAnalytics;
   status: AiReportStatus;
   hasReport: boolean;
   isPro: boolean;
   isSamplePreview: boolean;
+  isMonthEndUnlocked: boolean;
+  isMonthEndSimulation: boolean;
+  deliveryLabel: string;
+  countdownLabel: string;
   onOpen: () => void;
   onToggleSample: () => void;
+  onToggleMonthEndSimulation: () => void;
 }) {
   const isLoading = status === 'loading';
   const hasHistory = analytics.drawCount > 0;
+  const envelopeDelivered = isMonthEndUnlocked && (hasHistory || isMonthEndSimulation || isSamplePreview);
   const estimatedSpendLabel = analytics.budgetSampleCount ? `約${formatYen(analytics.estimatedSpend)}` : '未計測';
-  const actionLabel = isLoading ? '読み込み中' : !isPro ? 'Proで受け取る' : hasReport ? 'レポートを見る' : '届いたレポートを開く';
-  const disabled = isLoading || !hasHistory;
+  const actionLabel = isLoading
+    ? '読み込み中'
+    : !isPro
+      ? 'Proで受け取る'
+      : !hasHistory
+        ? '履歴を集める'
+        : !isMonthEndUnlocked
+          ? '月末まで封印中'
+          : hasReport
+            ? 'レポートを見る'
+            : '封筒を開く';
+  const disabled = isLoading || !hasHistory || (isPro && !isMonthEndUnlocked);
+  const title = envelopeDelivered ? '月末レポートが届きました' : '月末に封筒で届きます';
 
   return (
     <View style={styles.aiReportBuilderCard}>
       <View style={styles.aiReportBuilderHeader}>
         <View style={styles.aiReportBuilderHeaderText}>
           <Text style={styles.aiReportBuilderKicker}>{isSamplePreview ? 'SAMPLE REPORT' : 'MONTHLY REPORT'}</Text>
-          <Text style={styles.aiReportBuilderTitle}>{hasHistory ? 'レポートが届きました' : 'レポートは抽選後に届きます'}</Text>
+          <Text style={styles.aiReportBuilderTitle}>{hasHistory ? title : 'レポートは抽選後に届きます'}</Text>
         </View>
         <View style={styles.aiReportBuilderBadge}>
-          <Ionicons name={hasHistory ? 'mail-unread-outline' : 'calendar-outline'} size={15} color={ORANGE} />
+          <Ionicons name={envelopeDelivered ? 'mail-open-outline' : 'mail-unread-outline'} size={15} color={ORANGE} />
           <Text style={styles.aiReportBuilderBadgeText}>{analytics.monthLabel}</Text>
         </View>
       </View>
       <Text style={styles.aiReportBuilderLead}>
         ルーレットで出たお店のジャンル・予算・場所をもとに、1か月ごとの食傾向をまとめます。
       </Text>
+      <AiReportEnvelopePreview
+        analytics={analytics}
+        delivered={envelopeDelivered}
+        isSimulation={isMonthEndSimulation}
+        deliveryLabel={deliveryLabel}
+        countdownLabel={countdownLabel}
+      />
       <View style={styles.aiReportBuilderNotice}>
         <Ionicons name="information-circle-outline" size={17} color={ORANGE} />
         <Text style={styles.aiReportBuilderNoticeText}>{AI_REPORT_MONTHLY_NOTICE}</Text>
@@ -10543,12 +10592,28 @@ function AiMonthlyReportEntryCard({
         </Text>
       </View>
 
-      <Pressable style={styles.aiReportSampleButton} onPress={onToggleSample} disabled={isLoading}>
-        <Ionicons name={isSamplePreview ? 'refresh-outline' : 'phone-portrait-outline'} size={16} color={ORANGE} />
-        <Text style={styles.aiReportSampleButtonText}>
-          {isSamplePreview ? '実データに戻す' : `${AI_REPORT_SAMPLE_MEAL_COUNT}回サンプルで確認`}
-        </Text>
-      </Pressable>
+      <View style={styles.aiReportPreviewActions}>
+        <Pressable
+          style={[styles.aiReportSampleButton, isSamplePreview && styles.aiReportSampleButtonActive]}
+          onPress={onToggleSample}
+          disabled={isLoading}
+        >
+          <Ionicons name={isSamplePreview ? 'refresh-outline' : 'phone-portrait-outline'} size={16} color={isSamplePreview ? '#ffffff' : ORANGE} />
+          <Text style={[styles.aiReportSampleButtonText, isSamplePreview && styles.aiReportSampleButtonTextActive]}>
+            {isSamplePreview ? '実データに戻す' : `${AI_REPORT_SAMPLE_MEAL_COUNT}回サンプル`}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.aiReportSampleButton, isMonthEndSimulation && styles.aiReportSampleButtonActive]}
+          onPress={onToggleMonthEndSimulation}
+          disabled={isLoading}
+        >
+          <Ionicons name={isMonthEndSimulation ? 'time' : 'calendar-clear-outline'} size={16} color={isMonthEndSimulation ? '#ffffff' : ORANGE} />
+          <Text style={[styles.aiReportSampleButtonText, isMonthEndSimulation && styles.aiReportSampleButtonTextActive]}>
+            {isMonthEndSimulation ? '通常日に戻す' : '月末到着を試す'}
+          </Text>
+        </Pressable>
+      </View>
 
       <Pressable
         style={[styles.aiReportOpenButton, disabled && styles.aiReportOpenButtonDisabled]}
@@ -10558,6 +10623,139 @@ function AiMonthlyReportEntryCard({
         {isLoading ? <ActivityIndicator size="small" color="#ffffff" /> : <Ionicons name="document-text-outline" size={18} color="#ffffff" />}
         <Text style={styles.aiReportOpenButtonText}>{actionLabel}</Text>
       </Pressable>
+    </View>
+  );
+}
+
+function AiReportEnvelopePreview({
+  analytics,
+  delivered,
+  isSimulation,
+  deliveryLabel,
+  countdownLabel,
+}: {
+  analytics: MonthlyAnalytics;
+  delivered: boolean;
+  isSimulation: boolean;
+  deliveryLabel: string;
+  countdownLabel: string;
+}) {
+  const envelopeProgress = useRef(new Animated.Value(delivered ? 1 : 0)).current;
+  const pulseProgress = useRef(new Animated.Value(0)).current;
+  const envelopeStatus = delivered
+    ? isSimulation
+      ? '月末の到着状態をシミュレーション中'
+      : '月末レポートが到着しました'
+    : `${deliveryLabel}に到着予定`;
+  const envelopeLead = delivered
+    ? `${analytics.monthLabel}の外食傾向を封筒にまとめました。`
+    : `${countdownLabel}。届くまで抽選履歴をためられます。`;
+  const flapRotate = envelopeProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '-22deg'],
+  });
+  const letterTranslateY = envelopeProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [9, -18],
+  });
+  const letterOpacity = envelopeProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.68, 1],
+  });
+  const pulseOpacity = pulseProgress.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.18, 0.55, 0.18],
+  });
+  const pulseScale = pulseProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.92, 1.08],
+  });
+
+  useEffect(() => {
+    Animated.timing(envelopeProgress, {
+      toValue: delivered ? 1 : 0,
+      duration: 620,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [delivered, envelopeProgress]);
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseProgress, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseProgress, {
+          toValue: 0,
+          duration: 900,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    if (delivered) {
+      animation.start();
+    } else {
+      pulseProgress.setValue(0);
+    }
+    return () => animation.stop();
+  }, [delivered, pulseProgress]);
+
+  return (
+    <View style={styles.aiReportEnvelopeStage}>
+      <View style={styles.aiReportEnvelopeInfo}>
+        <View style={styles.aiReportEnvelopeStatusRow}>
+          <Ionicons name={delivered ? 'mail-open' : 'lock-closed-outline'} size={15} color={delivered ? ORANGE : '#8a8175'} />
+          <Text style={[styles.aiReportEnvelopeStatus, delivered && styles.aiReportEnvelopeStatusActive]} numberOfLines={1}>
+            {envelopeStatus}
+          </Text>
+        </View>
+        <Text style={styles.aiReportEnvelopeLead}>{envelopeLead}</Text>
+      </View>
+      <View style={styles.aiReportEnvelopeArt}>
+        {delivered && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.aiReportEnvelopePulse,
+              {
+                opacity: pulseOpacity,
+                transform: [{ scale: pulseScale }],
+              },
+            ]}
+          />
+        )}
+        <Animated.View
+          style={[
+            styles.aiReportLetterSheet,
+            {
+              opacity: letterOpacity,
+              transform: [{ translateY: letterTranslateY }],
+            },
+          ]}
+        >
+          <Text style={styles.aiReportLetterMonth}>{analytics.monthLabel}</Text>
+          <View style={styles.aiReportLetterLineWide} />
+          <View style={styles.aiReportLetterLineShort} />
+          <View style={styles.aiReportLetterMetricRow}>
+            <View style={styles.aiReportLetterMetricDot} />
+            <Text style={styles.aiReportLetterMetricText}>{analytics.drawCount}回</Text>
+          </View>
+        </Animated.View>
+        <View style={styles.aiReportEnvelopeBack} />
+        <View style={styles.aiReportEnvelopeBody}>
+          <View style={styles.aiReportEnvelopeFoldLeft} />
+          <View style={styles.aiReportEnvelopeFoldRight} />
+          <View style={styles.aiReportEnvelopeSeal}>
+            <Ionicons name={delivered ? 'sparkles' : 'lock-closed'} size={13} color="#ffffff" />
+          </View>
+        </View>
+        <Animated.View style={[styles.aiReportEnvelopeFlap, { transform: [{ rotate: flapRotate }] }]} />
+      </View>
     </View>
   );
 }
@@ -11173,9 +11371,13 @@ function AnalyticsTab({
   const [aiReport, setAiReport] = useState<AiMonthlyReport | null>(null);
   const [aiReportUsed, setAiReportUsed] = useState(false);
   const [aiReportSamplePreview, setAiReportSamplePreview] = useState(false);
+  const [aiReportMonthEndSimulation, setAiReportMonthEndSimulation] = useState(false);
   const [yearlyWrappedOpen, setYearlyWrappedOpen] = useState(false);
   const [yearlyWrappedDemoPreview, setYearlyWrappedDemoPreview] = useState(false);
   const now = useMemo(() => new Date(), []);
+  const aiReportMonthEndUnlocked = isMonthEndReportDay(now) || aiReportMonthEndSimulation;
+  const aiReportDeliveryLabel = formatMonthEndDeliveryLabel(now);
+  const aiReportCountdownLabel = getMonthEndCountdownLabel(now);
 
   const analyticsEntries = useMemo(() => {
     if (drawHistories.length || !history.length) {
@@ -11233,6 +11435,12 @@ function AnalyticsTab({
     setAiReportUsed(false);
   }, [reportDataSignature]);
 
+  useEffect(() => {
+    if (!aiReportMonthEndUnlocked) {
+      setAiReportOpen(false);
+    }
+  }, [aiReportMonthEndUnlocked]);
+
   const monthlyTotalLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.estimatedSpend)}` : '0円';
   const averageBudgetLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.averageBudget)}` : '0円';
   const topPriceRange = currentAnalytics.priceRangeAnalytics[0]?.label ?? 'まだなし';
@@ -11259,6 +11467,10 @@ function AnalyticsTab({
     setAiReportSamplePreview((current) => !current);
   }, []);
 
+  const toggleAiReportMonthEndSimulation = useCallback(() => {
+    setAiReportMonthEndSimulation((current) => !current);
+  }, []);
+
   const toggleYearlyWrapped = useCallback(() => {
     setYearlyWrappedOpen((current) => !current);
   }, []);
@@ -11269,7 +11481,7 @@ function AnalyticsTab({
   }, []);
 
   const loadAiReport = useCallback(async () => {
-    if (aiReportStatus === 'loading' || reportAnalytics.drawCount === 0) {
+    if (aiReportStatus === 'loading' || reportAnalytics.drawCount === 0 || !aiReportMonthEndUnlocked) {
       return;
     }
     setAiReportOpen(false);
@@ -11279,7 +11491,7 @@ function AnalyticsTab({
     setAiReportUsed(true);
     setAiReportStatus(nextReport.source === 'fallback' ? 'error' : 'ready');
     setAiReportOpen(true);
-  }, [aiReportStatus, apiBaseUrlCandidates, reportAnalytics, savedAnalytics, userId]);
+  }, [aiReportMonthEndUnlocked, aiReportStatus, apiBaseUrlCandidates, reportAnalytics, savedAnalytics, userId]);
 
   const openAiReport = useCallback(() => {
     if (!isPro) {
@@ -11287,6 +11499,9 @@ function AnalyticsTab({
         '月次AIレポートはPro機能です。',
         'ルーレット履歴から外食傾向、節約のヒント、次の選び方までまとめます。',
       );
+      return;
+    }
+    if (!aiReportMonthEndUnlocked) {
       return;
     }
     if (aiReportUsed && aiReport) {
@@ -11297,7 +11512,7 @@ function AnalyticsTab({
       void loadAiReport();
       return;
     }
-  }, [aiReport, aiReportStatus, aiReportUsed, isPro, loadAiReport, openPaywall]);
+  }, [aiReport, aiReportMonthEndUnlocked, aiReportStatus, aiReportUsed, isPro, loadAiReport, openPaywall]);
 
   return (
     <View style={styles.analysisScreen}>
@@ -11315,8 +11530,13 @@ function AnalyticsTab({
         hasReport={Boolean(aiReport)}
         isPro={isPro}
         isSamplePreview={aiReportSamplePreview}
+        isMonthEndUnlocked={aiReportMonthEndUnlocked}
+        isMonthEndSimulation={aiReportMonthEndSimulation}
+        deliveryLabel={aiReportDeliveryLabel}
+        countdownLabel={aiReportCountdownLabel}
         onOpen={openAiReport}
         onToggleSample={toggleAiReportSamplePreview}
+        onToggleMonthEndSimulation={toggleAiReportMonthEndSimulation}
       />
 
       {aiReportOpen && (
@@ -11832,16 +12052,24 @@ function RestaurantVisual({
   allowExternalPhoto?: boolean;
 }) {
   const genreVisual = getGenreVisual(restaurant.genre);
-  const imageCredit = '画像提供：ホットペッパー グルメ';
-  const hotPepperPhotoUrl = allowExternalPhoto && restaurant.externalProvider === 'HOTPEPPER'
-    ? restaurant.photoUrl
-    : null;
+  const externalPhotoUrl = allowExternalPhoto ? restaurant.photoUrl : null;
+  const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
+  const imageCredit = restaurant.externalProvider === 'HOTPEPPER' ? '画像提供：ホットペッパー グルメ' : null;
 
-  if (hotPepperPhotoUrl) {
+  useEffect(() => {
+    setPhotoLoadFailed(false);
+  }, [externalPhotoUrl]);
+
+  if (externalPhotoUrl && !photoLoadFailed) {
     return (
       <View style={[large ? styles.restaurantVisualLarge : styles.restaurantVisual, styles.restaurantVisualFrame]}>
-        <Image source={{ uri: hotPepperPhotoUrl }} style={styles.restaurantVisualPhoto} resizeMode="cover" />
-        {large && (
+        <Image
+          source={{ uri: externalPhotoUrl }}
+          style={styles.restaurantVisualPhoto}
+          resizeMode="cover"
+          onError={() => setPhotoLoadFailed(true)}
+        />
+        {large && imageCredit && (
           <Text style={styles.hotpepperImageCredit} numberOfLines={1}>
             {imageCredit}
           </Text>

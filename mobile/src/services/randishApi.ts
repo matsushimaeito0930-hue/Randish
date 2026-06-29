@@ -416,8 +416,8 @@ export const randishApi = {
   logout: (baseUrl: ApiBaseUrlInput) =>
     request<void>(baseUrl, 'api/auth/logout', undefined, { method: 'POST', skipAuth: true }),
 
-  getOAuthAuthorizeUrl: (baseUrl: ApiBaseUrlInput, provider: OAuthProvider, redirectTo: string) =>
-    request<OAuthAuthorizeResponse>(baseUrl, `api/auth/oauth/${provider}/authorize`, { redirectTo }, { skipAuth: true }),
+  getOAuthAuthorizeUrl: (baseUrl: ApiBaseUrlInput, provider: OAuthProvider, appRedirectTo: string) =>
+    request<OAuthAuthorizeResponse>(baseUrl, `api/auth/oauth/${provider}/authorize`, { appRedirectTo }, { skipAuth: true }),
 
   loginWithOAuthSession: (baseUrl: ApiBaseUrlInput, params: OAuthSessionParams) =>
     request<AuthResponse>(baseUrl, 'api/auth/oauth/session', undefined, {

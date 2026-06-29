@@ -102,10 +102,6 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
       "Geoapify",
       "RANDISH_GEOAPIFY_API_LIMIT");
   private final int cacheTtlSeconds;
-  private final ApiUsageCounter usageCounter = new ApiUsageCounter(
-      "geoapify",
-      "Geoapify",
-      "RANDISH_GEOAPIFY_API_LIMIT");
   private final Map<GeoapifyCacheKey, GeoapifyCacheEntry> cache = new ConcurrentHashMap<>();
   private final Map<String, CachedRestaurant> restaurantCacheByExternalId = new ConcurrentHashMap<>();
   private final List<Path> envFiles = List.of(
