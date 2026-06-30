@@ -92,7 +92,7 @@ export const presentPremiumPaywall = async (userId: string): Promise<PremiumPurc
     return {
       isPro,
       completed: isPro,
-      message: isPro ? 'RANDISH PROが有効になりました。' : '購入状態を確認しました。',
+      message: isPro ? 'RANDISH Premiumが有効になりました。' : '購入状態を確認しました。',
     };
   }
   if (result === PAYWALL_RESULT.CANCELLED) {
@@ -116,6 +116,6 @@ export const restorePremiumPurchases = async (userId: string): Promise<PremiumPu
   return {
     isPro,
     completed: isPro,
-    message: isPro ? '購入履歴を復元しました。' : '復元できるRANDISH PRO購入は見つかりませんでした。',
+    message: isPro ? '購入履歴を復元しました。' : '復元できるRANDISH Premium購入は見つかりませんでした。',
   };
 };

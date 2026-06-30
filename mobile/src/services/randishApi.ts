@@ -185,6 +185,18 @@ export type FavoriteCreateParams = {
   userTags?: string | null;
 };
 
+export type RandomHistoryCreateParams = {
+  userId: string;
+  restaurantId?: string | null;
+  provider: string;
+  providerPlaceId: string;
+  area?: string | null;
+  genre?: string | null;
+  budgetMin?: number | null;
+  budgetMax?: number | null;
+  rangeMeters?: number | null;
+};
+
 export type Visit = {
   id: string;
   userId: string;
@@ -461,6 +473,12 @@ export const randishApi = {
 
   getRandomHistoryRestaurant: (baseUrl: ApiBaseUrlInput, historyId: string) =>
     request<Restaurant>(baseUrl, `api/random-histories/${historyId}/restaurant`),
+
+  addRandomHistory: (baseUrl: ApiBaseUrlInput, history: RandomHistoryCreateParams) =>
+    request<RandomHistory>(baseUrl, 'api/random-histories', undefined, {
+      method: 'POST',
+      body: history,
+    }),
 
   addFavorite: (baseUrl: ApiBaseUrlInput, favorite: FavoriteCreateParams) =>
     request<Favorite>(baseUrl, 'api/favorites', undefined, {

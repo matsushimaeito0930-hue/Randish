@@ -8,6 +8,7 @@ import {
   Image,
   ImageSourcePropType,
   Keyboard,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   NativeModules,
@@ -243,13 +244,6 @@ type AiMonthlyReport = {
 
 type AiReportStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-type AiReportGenrePlan = {
-  label: string;
-  count: number;
-  budget: number;
-  budgets?: number[];
-};
-
 type GenreItem = {
   label: string;
   color: string;
@@ -346,7 +340,7 @@ const PLACES_CACHE_TTL_SECONDS = Number((globalThis as typeof globalThis & { pro
 const PLACES_CACHE_DISTANCE_METERS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_DISTANCE_METERS ?? 300);
 const FEATURE_MEAL_TICKETS_ENABLED = true;
 const DEV_DISABLE_MEAL_TICKET_LIMIT = true;
-const DEV_LAN_API_BASE_URLS = ['http://192.168.40.33:8080'];
+const DEV_LAN_API_BASE_URLS: string[] = [];
 const LOCAL_API_BASE_URLS = Platform.select({
   android: ['http://10.0.2.2:8080', 'http://localhost:8080', 'http://127.0.0.1:8080'],
   web: ['http://localhost:8080', 'http://127.0.0.1:8080'],
@@ -605,8 +599,16 @@ const getRuntimeApiBaseUrls = () =>
     getConfiguredApiBaseUrl(),
   ].filter((value): value is string => Boolean(value)));
 
+const isLocalNetworkApiBaseUrl = (baseUrl: string) => {
+  const host = getHostFromUrl(baseUrl);
+  return Boolean(host && LOCAL_NETWORK_HOST_PATTERN.test(host));
+};
+
 const isDevFallbackApiBaseUrl = (baseUrl: string) =>
-  DEV_LAN_API_BASE_URLS.includes(baseUrl) || LOCAL_API_BASE_URLS.includes(baseUrl) || TETHER_HOST_PATTERN.test(baseUrl);
+  DEV_LAN_API_BASE_URLS.includes(baseUrl)
+  || LOCAL_API_BASE_URLS.includes(baseUrl)
+  || TETHER_HOST_PATTERN.test(baseUrl)
+  || isLocalNetworkApiBaseUrl(baseUrl);
 
 const getRuntimeApiBaseUrl = () =>
   getRuntimeApiBaseUrls()[0] ?? DEV_LAN_API_BASE_URLS[0] ?? LOCAL_API_BASE_URLS[0];
@@ -751,7 +753,7 @@ function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]
         setSource('error');
       }
       if (!isApiConnectivityError(error)) {
-        console.warn('[RANDISH PRO] premium status check failed', error);
+        console.warn('[RANDISH Premium] premium status check failed', error);
       }
     }
   }, [apiBaseUrlCandidates, userId]);
@@ -762,7 +764,7 @@ function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]
 
   const startProPurchase = useCallback(() => {
     if (userId === APP_USER_ID) {
-      Alert.alert('会員登録が必要です', 'RANDISH PROはアカウントに紐づくため、先に会員登録またはログインしてください。');
+      Alert.alert('会員登録が必要です', 'RANDISH Premiumはアカウントに紐づくため、先に会員登録またはログインしてください。');
       return;
     }
 
@@ -781,13 +783,13 @@ function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]
         }
         await refresh();
         Alert.alert(
-          'RANDISH PRO',
+          'RANDISH Premium',
           result.isPro && !TRUST_NATIVE_REVENUECAT_STATUS
-            ? '購入状態を確認しました。サーバー同期後にRANDISH PROが反映されます。'
+            ? '購入状態を確認しました。サーバー同期後にRANDISH Premiumが反映されます。'
             : result.message,
         );
       } catch (error) {
-        console.warn('[RANDISH PRO] purchase failed', error);
+        console.warn('[RANDISH Premium] purchase failed', error);
         Alert.alert('購入を開始できませんでした', 'ストア設定または通信状態を確認して、もう一度試してください。');
       }
     })();
@@ -814,13 +816,13 @@ function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]
         }
         await refresh();
         Alert.alert(
-          'RANDISH PRO',
+          'RANDISH Premium',
           result.isPro && !TRUST_NATIVE_REVENUECAT_STATUS
-            ? '購入履歴を確認しました。サーバー同期後にRANDISH PROが反映されます。'
+            ? '購入履歴を確認しました。サーバー同期後にRANDISH Premiumが反映されます。'
             : result.message,
         );
       } catch (error) {
-        console.warn('[RANDISH PRO] restore failed', error);
+        console.warn('[RANDISH Premium] restore failed', error);
         Alert.alert('復元できませんでした', 'ストア設定または通信状態を確認して、もう一度試してください。');
       }
     })();
@@ -862,14 +864,14 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     notificationsValue: '食券リマインド',
     dailyAccess: '利用枠',
     todayAccessTitle: '今日の利用枠',
-    proLateNightGenres: 'Pro深夜ジャンル',
+    proLateNightGenres: 'Premium深夜ジャンル',
     ticketMorning: '朝',
     ticketLunch: '昼',
     ticketDinner: '夜',
     ticketMidnight: '深夜',
     ticketAvailable: 'いま使える',
     ticketUsed: '使用済み',
-    ticketProOnly: 'Pro限定',
+    ticketProOnly: 'Premium限定',
     ticketDoneToday: '本日終了',
     ticketUseThis: 'この一枚で引けます',
     ticketTomorrow: 'また明日',
@@ -998,7 +1000,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     savedEmptyTitle: 'お気に入りはまだありません',
     savedEmptyText: '結果カードのハートから追加できます。',
     analyticsTitle: '分析',
-    analyticsLead: '今月の食の傾向を、あとから見返せます。Proなら過去月も残せます。',
+    analyticsLead: '今月の食の傾向を、あとから見返せます。Premiumなら過去月も残せます。',
     registerTitle: '会員登録',
     registerDesc: 'アカウントを作成して、RANDISHをもっと便利に使いましょう。',
     passwordConfirmLabel: 'パスワード（確認）',
@@ -1032,14 +1034,14 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     notificationsValue: 'Meal ticket reminders',
     dailyAccess: 'Daily Access',
     todayAccessTitle: "Today's Access",
-    proLateNightGenres: 'Pro Late-Night Genres',
+    proLateNightGenres: 'Premium Late-Night Genres',
     ticketMorning: 'Morning',
     ticketLunch: 'Lunch',
     ticketDinner: 'Dinner',
     ticketMidnight: 'Late Night',
     ticketAvailable: 'Available now',
     ticketUsed: 'Used',
-    ticketProOnly: 'Pro only',
+    ticketProOnly: 'Premium only',
     ticketDoneToday: 'Done today',
     ticketUseThis: 'Use this ticket to draw',
     ticketTomorrow: 'Tomorrow',
@@ -1168,7 +1170,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     savedEmptyTitle: 'No favorites yet',
     savedEmptyText: 'Tap the heart on a result card to add one.',
     analyticsTitle: 'Stats',
-    analyticsLead: 'View this month for free. Pro keeps past months and deeper trends.',
+    analyticsLead: 'View this month for free. Premium keeps past months and deeper trends.',
     registerTitle: 'Create Account',
     registerDesc: 'Create an account to make RANDISH more useful.',
     passwordConfirmLabel: 'Confirm Password',
@@ -1202,14 +1204,14 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     notificationsValue: '餐券提醒',
     dailyAccess: '使用次数',
     todayAccessTitle: '今天的使用次数',
-    proLateNightGenres: 'Pro深夜类型',
+    proLateNightGenres: 'Premium深夜类型',
     ticketMorning: '早晨',
     ticketLunch: '午餐',
     ticketDinner: '晚餐',
     ticketMidnight: '深夜',
     ticketAvailable: '现在可用',
     ticketUsed: '已使用',
-    ticketProOnly: 'Pro限定',
+    ticketProOnly: 'Premium限定',
     ticketDoneToday: '今日结束',
     ticketUseThis: '可用这一张抽选',
     ticketTomorrow: '明天再来',
@@ -1372,14 +1374,14 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     notificationsValue: '식권 리마인드',
     dailyAccess: '이용 횟수',
     todayAccessTitle: '오늘의 이용권',
-    proLateNightGenres: 'Pro 심야 장르',
+    proLateNightGenres: 'Premium 심야 장르',
     ticketMorning: '아침',
     ticketLunch: '점심',
     ticketDinner: '저녁',
     ticketMidnight: '심야',
     ticketAvailable: '지금 사용 가능',
     ticketUsed: '사용 완료',
-    ticketProOnly: 'Pro 전용',
+    ticketProOnly: 'Premium 전용',
     ticketDoneToday: '오늘 종료',
     ticketUseThis: '이 한 장으로 뽑을 수 있어요',
     ticketTomorrow: '내일 다시',
@@ -1707,12 +1709,33 @@ const MEAL_TICKET_DEFINITIONS: MealTicketDefinition[] = [
 ];
 
 const PRO_FEATURE_SUMMARY = [
-  '深夜の一食カードと深夜ジャンル',
-  'ひとり/デート/友達などシチュエーション別提案',
-  '過去月の抽選履歴・外食費・月別グラフ',
-  'ジャンル/価格帯/お気に入り店の傾向分析',
-  '月次AIレポートと年末まとめの詳しい分析',
-  '3か月より前のアルバム写真とスライドショー',
+  'AIナビが次の一食を提案',
+  '月末AIレターで振り返り',
+  '深夜カード/深夜ジャンル',
+  'ひとり/デート/友達の提案',
+  '距離・予算目安を比較',
+  '過去月の抽選履歴を保存',
+  '外食費/月別グラフ',
+  'ジャンル/価格帯/保存店分析',
+  'アルバム/年末まとめ',
+];
+
+const PRO_ANALYSIS_FEATURES: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  detail: string;
+  color: string;
+  backgroundColor: string;
+}[] = [
+  { icon: 'compass-outline', title: 'AIナビ', detail: '次の一食', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'mail-unread-outline', title: 'AIレター', detail: '月末に届く', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'moon-outline', title: '深夜カード', detail: '深夜ジャンル', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'people-outline', title: 'シーン提案', detail: 'ひとり/デート', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'navigate-outline', title: '距離/料金', detail: '目安を比較', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'time-outline', title: '過去月履歴', detail: '履歴保存', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'bar-chart-outline', title: '外食費グラフ', detail: '月別支出', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'heart-outline', title: '保存店分析', detail: '好みを把握', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'images-outline', title: 'アルバム', detail: '写真/年末', color: '#7161f2', backgroundColor: '#f8f6ff' },
 ];
 
 const PRO_SITUATION_FEATURE_LINES = [
@@ -2390,40 +2413,6 @@ const GENRES: GenreItem[] = [
 ];
 
 const AI_REPORT_MONTHLY_NOTICE = 'ルーレットで出た結果を月次レポートに直接反映します。ジャンルや金額は手入力せず、今月の履歴から届きます。';
-const AI_REPORT_SAMPLE_MEAL_COUNT = 10;
-const AI_REPORT_SAMPLE_GENRE_PLANS: AiReportGenrePlan[] = [
-  { label: 'ラーメン', count: 2, budget: 1200, budgets: [980, 1380] },
-  { label: 'ファストフード', count: 2, budget: 900, budgets: [780, 920] },
-  { label: '寿司', count: 1, budget: 3200, budgets: [3200] },
-  { label: '焼肉', count: 1, budget: 5200, budgets: [5200] },
-  { label: '洋食', count: 1, budget: 1900, budgets: [1900] },
-  { label: 'カレー', count: 1, budget: 1300, budgets: [1300] },
-  { label: '定食', count: 1, budget: 1100, budgets: [1100] },
-  { label: 'カフェ', count: 1, budget: 1450, budgets: [1450] },
-];
-const YEARLY_WRAPPED_DEMO_PLANS = [
-  { genre: 'ラーメン', area: '大阪府', budget: 1180 },
-  { genre: '寿司', area: '東京都', budget: 3600 },
-  { genre: '焼肉', area: '福岡県', budget: 5200 },
-  { genre: 'カフェ', area: '京都府', budget: 1450 },
-  { genre: '定食', area: '兵庫県', budget: 1280 },
-  { genre: 'イタリアン', area: '神奈川県', budget: 3100 },
-  { genre: '中華', area: '愛知県', budget: 1850 },
-  { genre: '海鮮', area: '北海道', budget: 4300 },
-  { genre: 'カレー', area: '大阪府', budget: 1350 },
-  { genre: 'うどん', area: '香川県', budget: 920 },
-  { genre: 'そば', area: '長野県', budget: 1600 },
-  { genre: '韓国料理', area: '東京都', budget: 2700 },
-  { genre: '粉もの', area: '大阪府', budget: 1700 },
-  { genre: '焼き鳥', area: '福岡県', budget: 2800 },
-  { genre: 'ピザ', area: '神奈川県', budget: 2400 },
-  { genre: '洋食', area: '京都府', budget: 2200 },
-  { genre: '餃子', area: '栃木県', budget: 1250 },
-  { genre: 'スイーツ', area: '兵庫県', budget: 1100 },
-  { genre: '居酒屋', area: '広島県', budget: 3800 },
-  { genre: '郷土料理', area: '沖縄県', budget: 3300 },
-] as const;
-
 const hexToRgba = (hex: string, alpha: number) => {
   const normalized = hex.replace('#', '');
   if (normalized.length !== 6) {
@@ -2585,7 +2574,7 @@ const buildMealTicketState = (now: Date, drawHistories: DrawHistoryEntry[], isPr
       : used
         ? '使用済み'
         : proLocked
-          ? 'Pro限定'
+          ? 'Premium限定'
           : past
             ? '本日終了'
             : `${ticket.timeLabel.split('-')[0]}から`;
@@ -2730,50 +2719,6 @@ const getEstimatedBudget = (restaurant: Restaurant) => {
 };
 
 const formatYen = (value: number) => `${Math.round(value).toLocaleString()}円`;
-
-const getAiReportPlanTotal = (plans: AiReportGenrePlan[]) =>
-  plans.reduce((total, plan) => total + Math.max(0, plan.count), 0);
-
-const normalizeAiReportBudget = (value: number, fallback = 1500) => {
-  if (!Number.isFinite(value) || value <= 0) {
-    return fallback;
-  }
-  return Math.min(50000, Math.max(500, Math.round(value)));
-};
-
-const getAiReportPlanBudgets = (plan: AiReportGenrePlan) => {
-  const count = Math.max(0, Math.round(plan.count));
-  const fallbackBudget = normalizeAiReportBudget(plan.budget);
-  return Array.from({ length: count }, (_, index) =>
-    normalizeAiReportBudget(plan.budgets?.[index] ?? fallbackBudget, fallbackBudget));
-};
-
-const normalizeAiReportPlans = (plans: AiReportGenrePlan[]) =>
-  plans
-    .map((plan) => {
-      const count = Math.max(0, Math.round(plan.count));
-      const fallbackBudget = normalizeAiReportBudget(plan.budget);
-      const budgets = Array.from({ length: count }, (_, index) =>
-        normalizeAiReportBudget(plan.budgets?.[index] ?? fallbackBudget, fallbackBudget));
-      return {
-        ...plan,
-        count,
-        budget: budgets[budgets.length - 1] ?? fallbackBudget,
-        budgets,
-      };
-    })
-    .filter((plan) => plan.count > 0);
-
-const trimAiReportPlansToMealCount = (plans: AiReportGenrePlan[], mealCount: number) => {
-  const nextPlans = plans.map((plan) => ({ ...plan }));
-  let total = getAiReportPlanTotal(nextPlans);
-  for (let index = nextPlans.length - 1; index >= 0 && total > mealCount; index -= 1) {
-    const removable = Math.min(nextPlans[index].count, total - mealCount);
-    nextPlans[index].count -= removable;
-    total -= removable;
-  }
-  return normalizeAiReportPlans(nextPlans);
-};
 
 const parseDistanceMeters = (value?: string | null) => {
   const normalized = value?.trim().toLowerCase();
@@ -2961,6 +2906,11 @@ const getProviderPlaceId = (restaurant: Restaurant) =>
 
 const shouldPersistRestaurantId = (restaurant: Restaurant) =>
   (restaurant.externalProvider || '').toUpperCase() === 'RANDISH_SEED';
+
+const SYNCABLE_HISTORY_PROVIDERS = new Set(['RANDISH_SEED', 'HOTPEPPER', 'GEOAPIFY', 'GOOGLE_PLACES']);
+
+const canSyncDrawHistoryProvider = (provider: string) =>
+  SYNCABLE_HISTORY_PROVIDERS.has(provider.toUpperCase());
 
 const toSavedRestaurantFromApi = (favorite: ApiFavorite): SavedRestaurant => ({
   id: favorite.id,
@@ -3367,40 +3317,6 @@ const getMonthlyAnalytics = (entries: DrawHistoryEntry[], monthDate: Date): Mont
 const getCurrentMonthAnalytics = (entries: DrawHistoryEntry[], now = new Date()) =>
   getMonthlyAnalytics(entries, now);
 
-const buildDemoYearlyWrappedEntries = (now = new Date()): DrawHistoryEntry[] => {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0, 0, 0);
-  const yearEnd = new Date(now.getFullYear(), 11, 31, 20, 30, 0, 0);
-  const totalDays = Math.max(0, Math.round((yearEnd.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
-  const entryCount = Math.max(12, Math.min(54, Math.round(totalDays / 4)));
-  const spacing = entryCount > 1 ? totalDays / (entryCount - 1) : 0;
-
-  return Array.from({ length: entryCount }, (_, index) => {
-    const plan = YEARLY_WRAPPED_DEMO_PLANS[index % YEARLY_WRAPPED_DEMO_PLANS.length];
-    const date = addDays(start, Math.round(index * spacing));
-    date.setHours([12, 18, 19, 20][index % 4], [10, 25, 40, 5][index % 4], 0, 0);
-    const monthlyLift = date.getMonth() === 11 ? 1.14 : date.getMonth() === 7 ? 1.08 : 1;
-    const swing = ((index % 5) - 2) * 120;
-    const budget = Math.max(700, Math.round((plan.budget * monthlyLift + swing) / 10) * 10);
-    const margin = budget >= 4000 ? 700 : budget >= 2500 ? 450 : budget >= 1500 ? 260 : 160;
-    const budgetMin = Math.max(500, Math.round((budget - margin) / 10) * 10);
-    const budgetMax = Math.round((budget + margin) / 10) * 10;
-
-    return {
-      id: `yearly-demo-${now.getFullYear()}-${index}`,
-      provider: 'RANDISH_DEMO',
-      providerPlaceId: `yearly-demo-${index}`,
-      restaurantId: null,
-      restaurant: null,
-      area: plan.area,
-      genre: plan.genre,
-      budgetMin,
-      budgetMax,
-      rangeMeters: null,
-      createdAt: date.toISOString(),
-    };
-  });
-};
-
 const getYearlyAnalytics = (entries: DrawHistoryEntry[], yearDate = new Date()): YearlyAnalytics => {
   const yearStart = getYearStart(yearDate);
   const yearEntries = entries
@@ -3460,7 +3376,7 @@ const buildYearlyWrappedReport = (analytics: YearlyAnalytics): YearlyWrappedRepo
         : 'これから記録が育つ一年';
 
   return {
-    title: `${analytics.yearLabel}の食べ歩きまとめ`,
+    title: `${analytics.yearLabel}の外食まとめ`,
     subtitle: '12月31日に、今年の外食ログを1年分まとめて振り返ります。',
     heroLine: analytics.drawCount
       ? `あなたの今年の主役は「${topGenre}」。${analytics.drawCount}回の外食ログから見えた食のクセです。`
@@ -3493,46 +3409,6 @@ const buildYearlyWrappedReport = (analytics: YearlyAnalytics): YearlyWrappedRepo
       ? `来年は「${topGenre}を残しつつ、${secondGenre ?? '未開拓ジャンル'}を月1回混ぜる」をミッションにすると、年末まとめの見え方が変わります。`
       : '来年はまず3回ルーレットを回して、あなたの食の軸を育てましょう。',
   };
-};
-
-const buildDemoAiReportAnalytics = (
-  genrePlans: AiReportGenrePlan[],
-  mealCount: number,
-  area: string,
-  now = new Date(),
-): MonthlyAnalytics => {
-  const plans = trimAiReportPlansToMealCount(genrePlans, mealCount);
-  const monthStart = getMonthStart(now);
-  const reportArea = area?.trim() || '現在地周辺';
-  const entries: DrawHistoryEntry[] = [];
-
-  plans.forEach((plan) => {
-    getAiReportPlanBudgets(plan).forEach((budget, visitIndex) => {
-      const normalizedBudget = Math.max(500, Math.round(budget));
-      const spread = normalizedBudget >= 2000 ? 400 : 250;
-      const budgetMin = Math.max(300, normalizedBudget - spread);
-      const budgetMax = normalizedBudget + spread;
-      const index = entries.length;
-      const createdAt = new Date(monthStart);
-      createdAt.setDate(Math.min(28, 2 + index * 5));
-      createdAt.setHours(12 + (index % 6), 0, 0, 0);
-      entries.push({
-        id: `demo-ai-report-${plan.label}-${visitIndex}`,
-        provider: 'RANDISH_DEMO',
-        providerPlaceId: `demo-ai-report-${plan.label}-${visitIndex}`,
-        restaurantId: null,
-        restaurant: null,
-        area: reportArea,
-        genre: plan.label,
-        budgetMin,
-        budgetMax,
-        rangeMeters: 1500,
-        createdAt: createdAt.toISOString(),
-      });
-    });
-  });
-
-  return getMonthlyAnalytics(entries, now);
 };
 
 const buildAiReportPayload = (
@@ -3624,7 +3500,7 @@ const buildLocalAiReport = (
     recommendations: [
       `${topGenre}は残しつつ、次の3回のうち1回だけ${otherGenres ? '未開拓ジャンル' : '別ジャンル'}を固定すると、レポートに差が出ます。`,
       `次回は${topPrice}のまま、${topArea}から少しだけ場所をずらすと「価格は同じで発見だけ増える」動きになります。`,
-      '行った店は写真かお気に入りを1つ残すと、月末スライドショーと年次レポートの材料になります。',
+      '行った店は写真かお気に入りを1つ残すと、月末AIレターと年次レポートの材料になります。',
     ],
     savingsTips: [
       currentAnalytics.budgetSampleCount
@@ -4975,23 +4851,54 @@ export default function App() {
 
   const recordDrawForAnalytics = useCallback((restaurant: Restaurant) => {
     const createdAt = new Date().toISOString();
+    const provider = (restaurant.externalProvider || 'RANDISH_SEED').toUpperCase();
+    const providerPlaceId = getProviderPlaceId(restaurant);
+    const localEntry: DrawHistoryEntry = {
+      id: `local-${createdAt}-${restaurant.id}`,
+      provider,
+      providerPlaceId,
+      restaurantId: shouldPersistRestaurantId(restaurant) ? restaurant.id : null,
+      restaurant,
+      area: cleanTextOrNull(area === '現在地' ? '現在地周辺' : area),
+      genre: cleanTextOrNull(genre === 'すべて' ? null : genre),
+      budgetMin: parseBudgetNumber(budgetMin),
+      budgetMax: parseBudgetNumber(budgetMax),
+      rangeMeters: parseDistanceMeters(distance),
+      createdAt,
+    };
     setDrawHistories((current) => [
-      {
-        id: `local-${createdAt}-${restaurant.id}`,
-        provider: (restaurant.externalProvider || 'RANDISH_SEED').toUpperCase(),
-        providerPlaceId: getProviderPlaceId(restaurant),
-        restaurantId: shouldPersistRestaurantId(restaurant) ? restaurant.id : null,
-        restaurant,
-        area: cleanTextOrNull(area === '現在地' ? '現在地周辺' : area),
-        genre: cleanTextOrNull(genre === 'すべて' ? null : genre),
-        budgetMin: parseBudgetNumber(budgetMin),
-        budgetMax: parseBudgetNumber(budgetMax),
-        rangeMeters: parseDistanceMeters(distance),
-        createdAt,
-      },
+      localEntry,
       ...current,
     ].slice(0, 100));
-  }, [area, budgetMax, budgetMin, distance, genre]);
+
+    if (userId === APP_USER_ID || !canSyncDrawHistoryProvider(provider)) {
+      return;
+    }
+
+    void randishApi.addRandomHistory(apiBaseUrlCandidates, {
+      userId,
+      restaurantId: localEntry.restaurantId,
+      provider: localEntry.provider,
+      providerPlaceId: localEntry.providerPlaceId,
+      area: localEntry.area,
+      genre: localEntry.genre,
+      budgetMin: localEntry.budgetMin,
+      budgetMax: localEntry.budgetMax,
+      rangeMeters: localEntry.rangeMeters,
+    })
+      .then((history) => {
+        syncWorkingApiBaseUrl();
+        const syncedEntry = {
+          ...toDrawHistoryEntry(history),
+          restaurant: history.restaurant ? normalizeRestaurant(history.restaurant) : restaurant,
+        };
+        setDrawHistories((current) => [
+          syncedEntry,
+          ...current.filter((item) => item.id !== localEntry.id),
+        ].slice(0, 100));
+      })
+      .catch(() => undefined);
+  }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, distance, genre, syncWorkingApiBaseUrl, userId]);
 
   useEffect(() => {
     if (didRestoreAuth.current) {
@@ -6070,7 +5977,7 @@ export default function App() {
     const currentTicket = mealTicketState.current;
     if (FEATURE_MEAL_TICKETS_ENABLED && !currentTicket.available) {
       if (currentTicket.proOnly && !mealTicketState.isProUser) {
-        setMessage(`深夜の抽選はPro限定です。${mealTicketState.nextUnlockLabel}で朝の一回が使えます。`);
+        setMessage(`深夜の抽選はPremium限定です。${mealTicketState.nextUnlockLabel}で朝の一回が使えます。`);
       } else if (currentTicket.used) {
         setMessage(`${currentTicket.label}の抽選枠は使用済みです。${mealTicketState.nextUnlockLabel}で次の一回が使えます。`);
       } else {
@@ -6553,6 +6460,38 @@ export default function App() {
     scrollToContentTop(false);
   }, [openRandomTab, scrollToContentTop]);
 
+  const openRegistration = useCallback(() => {
+    Keyboard.dismiss();
+    randishApi.setAuthToken(null);
+    void clearStoredAuthSession();
+    setFreshOAuthSessionPreferred(true);
+    void Linking.getInitialURL()
+      .then((url) => {
+        if (url && isOAuthCallbackUrl(url)) {
+          consumedOAuthCallbackUrls.add(url);
+        }
+      })
+      .catch(() => undefined);
+    setActiveTab('home');
+    setStage('login');
+  }, []);
+
+  const startPremiumPurchase = useCallback(() => {
+    if (!isRegisteredUser) {
+      openRegistration();
+      return;
+    }
+    subscription.startProPurchase();
+  }, [isRegisteredUser, openRegistration, subscription.startProPurchase]);
+
+  const restorePremiumPurchase = useCallback(() => {
+    if (!isRegisteredUser) {
+      openRegistration();
+      return;
+    }
+    subscription.restoreProPurchase();
+  }, [isRegisteredUser, openRegistration, subscription.restoreProPurchase]);
+
   const handleLogout = useCallback(() => {
     randishApi.setAuthToken(null);
     void clearStoredAuthSession();
@@ -6689,7 +6628,7 @@ export default function App() {
             onAreaRandomPress={openAreaRandomConditions}
             onLocationPress={requestCurrentLocation}
             onCurrentLocationSearch={prepareCurrentLocationSearch}
-            onRequireRegistration={() => setStage('login')}
+            onRequireRegistration={openRegistration}
             onLogout={handleLogout}
           />
         )}
@@ -6794,7 +6733,7 @@ export default function App() {
             onAttachPhoto={attachSavedFoodPhoto}
             onUploadAlbumPhoto={uploadAlbumPhoto}
             onCaptureAlbumPhoto={captureAlbumPhoto}
-            onRequireRegistration={() => setStage('login')}
+            onRequireRegistration={openRegistration}
           />
         )}
         {activeTab === 'analytics' && (
@@ -6809,8 +6748,8 @@ export default function App() {
             drawHistories={drawHistories}
             savedRestaurants={savedRestaurants}
             isPro={subscription.isPro}
-            onStartPro={subscription.startProPurchase}
-            onRestorePro={subscription.restoreProPurchase}
+            onStartPro={startPremiumPurchase}
+            onRestorePro={restorePremiumPurchase}
             onAreaPress={() => setActiveTab('home')}
           />
         )}
@@ -7175,7 +7114,6 @@ function RegisterSocialButton({
 }
 
 function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { state: MealTicketState; compact?: boolean; uiText?: Record<string, string> }) {
-  const midnightTicket = state.tickets.find((ticket) => ticket.key === 'midnight');
   const current = state.current;
   const currentDisplay = getMealTicketDisplay(current, state, uiText);
   const ticketMeta = current.available
@@ -7203,6 +7141,7 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
         {state.tickets.map((ticket) => {
           const iconColor = ticket.available ? '#ffffff' : ticket.accent;
           const ticketDisplay = getMealTicketDisplay(ticket, state, uiText);
+          const midnightUnlocked = ticket.key === 'midnight' && state.isProUser;
           const ticketFrameStyle = ticket.available
             ? { borderColor: ticket.accent, borderWidth: 2, backgroundColor: hexToRgba(ticket.accent, 0.09) }
             : { borderColor: hexToRgba(ticket.accent, 0.36), borderWidth: 1 };
@@ -7218,9 +7157,14 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
                 ticketFrameStyle,
               ]}
             >
-              {ticket.key === 'midnight' && (
-                <View style={[styles.mealTicketLockBadge, { backgroundColor: ticket.accent }]}>
-                  <Ionicons name="lock-closed" size={13} color="#ffffff" />
+              {ticket.key === 'midnight' && !midnightUnlocked && (
+                <View
+                  style={[
+                    styles.mealTicketLockBadge,
+                    { backgroundColor: ticket.accent },
+                  ]}
+                >
+                  <Ionicons name="lock-closed" size={18} color="#ffffff" />
                 </View>
               )}
               <View style={styles.mealTicketCardTop}>
@@ -7259,32 +7203,6 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
           );
         })}
       </View>
-      {!compact && midnightTicket && (
-        <View style={styles.mealTicketNightRail}>
-          <View style={styles.mealTicketNightTitleRow}>
-            <Ionicons name="lock-closed" size={16} color={midnightTicket.accent} />
-            <Text style={styles.mealTicketNightTitle}>{uiText.proLateNightGenres}</Text>
-          </View>
-          <Text style={styles.mealTicketNightLead}>Proで開ける機能をまとめました。</Text>
-          <View style={styles.mealTicketNightFeatureList}>
-            {PRO_FEATURE_SUMMARY.map((feature) => (
-              <View key={feature} style={styles.mealTicketNightFeatureRow}>
-                <Ionicons name="checkmark-circle" size={14} color={midnightTicket.accent} />
-                <Text style={styles.mealTicketNightFeatureText}>{feature}</Text>
-              </View>
-            ))}
-          </View>
-          {midnightTicket.genreHints.length > 0 && (
-            <View style={styles.mealTicketNightChips}>
-              {midnightTicket.genreHints.map((hint, index) => (
-                <View key={`${hint}-${index}`} style={styles.mealTicketNightChip}>
-                  <Text style={styles.mealTicketNightChipText}>{hint}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
     </View>
   );
 }
@@ -7688,20 +7606,17 @@ function HomeLocationPanel({
     onProfileNameChange(nextName || 'RANDISH Guest');
   };
 
-  const promptRegistration = () => {
+  const closeAccountMenu = () => {
     Keyboard.dismiss();
-    Alert.alert(t.registrationPromptTitle, t.registrationPromptMessage, [
-      { text: t.registrationPromptCancel, style: 'cancel' },
-      {
-        text: t.registrationPromptAction,
-        onPress: () => {
-          setProfileEditorOpen(false);
-          setLanguageMenuOpen(false);
-          setAccountMenuOpen(false);
-          onRequireRegistration();
-        },
-      },
-    ]);
+    setProfileEditorOpen(false);
+    setLanguageMenuOpen(false);
+    setAccountMenuOpen(false);
+  };
+
+  const promptRegistration = () => {
+    closeAccountMenu();
+    setLogoutSheetOpen(false);
+    onRequireRegistration();
   };
 
   const confirmLogout = () => {
@@ -7753,6 +7668,10 @@ function HomeLocationPanel({
     } catch (error) {
       if (error instanceof RandishApiError && error.status === 401) {
         setAdminError('パスワードが違います。');
+      } else if (error instanceof RandishApiError && error.status && error.status >= 500) {
+        setAdminError('API使用量のサーバー処理でエラーが出ています。Spring Bootを再起動してもう一度試してください。');
+      } else if (isApiConnectivityError(error)) {
+        setAdminError('APIサーバーに接続できませんでした。Spring Bootが起動しているか確認してください。');
       } else {
         setAdminError('API使用量を取得できませんでした。');
       }
@@ -7822,56 +7741,102 @@ function HomeLocationPanel({
         transparent
         animationType="fade"
         onRequestClose={closeAdminPanel}
+        statusBarTranslucent
       >
-        <View style={styles.adminModalOverlay}>
-          <View style={styles.adminSheet}>
-            <View style={styles.adminSheetHeader}>
-              <View style={styles.adminSheetIcon}>
-                <Ionicons name="analytics-outline" size={23} color={INK} />
+        <KeyboardAvoidingView
+          style={styles.adminKeyboardView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+        >
+          <View style={styles.adminModalOverlay}>
+            <ScrollView
+              contentContainerStyle={styles.adminScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.adminSheet}>
+                <View style={styles.adminSheetHeader}>
+                  <View style={styles.adminSheetIcon}>
+                    <Ionicons name="analytics-outline" size={23} color={ORANGE} />
+                  </View>
+                  <View style={styles.adminSheetHeaderText}>
+                    <Text style={styles.adminSheetKicker}>RANDISH OPS</Text>
+                    <Text style={styles.adminSheetTitle}>API使用量</Text>
+                    <Text style={styles.adminSheetLead}>外部APIの残り具合を確認します。</Text>
+                  </View>
+                </View>
+                <View style={styles.adminPasswordBox}>
+                  <Ionicons name="lock-closed-outline" size={16} color="#8d7b6d" />
+                  <TextInput
+                    value={adminPassword}
+                    onChangeText={setAdminPassword}
+                    style={styles.adminPasswordInput}
+                    placeholder="管理パスワード"
+                    placeholderTextColor="#a49a90"
+                    secureTextEntry
+                    returnKeyType="done"
+                    onSubmitEditing={loadAdminUsage}
+                  />
+                </View>
+                {adminError ? (
+                  <View style={styles.adminErrorBox}>
+                    <Ionicons name="alert-circle-outline" size={15} color="#b93422" />
+                    <Text style={styles.adminErrorText}>{adminError}</Text>
+                  </View>
+                ) : null}
+                {adminUsage ? (
+                  <View style={styles.adminUsageList}>
+                    {adminUsage.providers.map((provider) => {
+                      const used = Number.isFinite(provider.used) ? Math.max(0, Math.floor(provider.used)) : 0;
+                      const limit = Number.isFinite(provider.limit) ? Math.max(0, Math.floor(provider.limit)) : 0;
+                      const percent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+                      return (
+                        <View key={provider.key} style={styles.adminUsageRow}>
+                          <View style={styles.adminUsageTopRow}>
+                            <View style={styles.adminUsageProviderText}>
+                              <Text style={styles.adminUsageName}>{provider.name}</Text>
+                              <Text style={styles.adminUsageMeta}>{provider.available === false ? 'APIキー未設定' : `${percent}% 使用`}</Text>
+                            </View>
+                            <Text style={styles.adminUsageCount}>{used.toLocaleString('ja-JP')} / {limit.toLocaleString('ja-JP')}</Text>
+                          </View>
+                          <View style={styles.adminUsageBarTrack}>
+                            <View
+                              style={[
+                                styles.adminUsageBarFill,
+                                {
+                                  width: `${percent}%`,
+                                  backgroundColor: provider.available === false ? '#c8bdb2' : ORANGE,
+                                },
+                              ]}
+                            />
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <View style={styles.adminEmptyState}>
+                    <Ionicons name="receipt-outline" size={18} color="#9a8f84" />
+                    <Text style={styles.adminEmptyText}>パスワードを入れると使用量が表示されます。</Text>
+                  </View>
+                )}
+                <View style={styles.adminActions}>
+                  <Pressable style={styles.adminGhostButton} onPress={closeAdminPanel}>
+                    <Text style={styles.adminGhostButtonText}>閉じる</Text>
+                  </Pressable>
+                  <Pressable style={[styles.adminActionButton, adminLoading && styles.adminActionButtonDisabled]} onPress={loadAdminUsage} disabled={adminLoading}>
+                    {adminLoading ? <ActivityIndicator color="#ffffff" /> : (
+                      <>
+                        <Ionicons name="sync-outline" size={15} color="#ffffff" />
+                        <Text style={styles.adminActionButtonText}>確認</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
               </View>
-              <View style={styles.adminSheetHeaderText}>
-                <Text style={styles.adminSheetTitle}>API使用量</Text>
-                <Text style={styles.adminSheetLead}>RANDISH経由で外部APIへ送った回数です。</Text>
-              </View>
-            </View>
-            <TextInput
-              value={adminPassword}
-              onChangeText={setAdminPassword}
-              style={styles.adminPasswordInput}
-              placeholder="管理パスワード"
-              placeholderTextColor="#a49a90"
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={loadAdminUsage}
-            />
-            {adminError ? <Text style={styles.adminErrorText}>{adminError}</Text> : null}
-            {adminUsage ? (
-              <View style={styles.adminUsageList}>
-                {adminUsage.providers.map((provider) => {
-                  const used = Number.isFinite(provider.used) ? Math.max(0, Math.floor(provider.used)) : 0;
-                  const limit = Number.isFinite(provider.limit) ? Math.max(0, Math.floor(provider.limit)) : 0;
-                  return (
-                    <View key={provider.key} style={styles.adminUsageRow}>
-                      <View style={styles.adminUsageProviderText}>
-                        <Text style={styles.adminUsageName}>{provider.name}</Text>
-                        <Text style={styles.adminUsageMeta}>{provider.available === false ? 'APIキー未設定' : '利用可能'}</Text>
-                      </View>
-                      <Text style={styles.adminUsageCount}>{limit.toLocaleString('ja-JP')}回中 {used.toLocaleString('ja-JP')}回</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            ) : null}
-            <View style={styles.adminActions}>
-              <Pressable style={styles.adminGhostButton} onPress={closeAdminPanel}>
-                <Text style={styles.adminGhostButtonText}>閉じる</Text>
-              </Pressable>
-              <Pressable style={styles.adminActionButton} onPress={loadAdminUsage} disabled={adminLoading}>
-                {adminLoading ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.adminActionButtonText}>確認</Text>}
-              </Pressable>
-            </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
       <View style={styles.homeTopBar}>
         <View style={styles.homeLogoButton}>
@@ -7886,7 +7851,15 @@ function HomeLocationPanel({
             )}
           </Pressable>
           {accountMenuOpen && (
-            <View style={styles.homeAccountMenu}>
+            <Modal
+              visible
+              transparent
+              animationType="fade"
+              onRequestClose={closeAccountMenu}
+              statusBarTranslucent
+            >
+              <View style={styles.homeAccountMenuModalOverlay}>
+                <View style={styles.homeAccountMenuModalCard}>
               <View style={styles.homeAccountMenuHeader}>
                 <Pressable style={[styles.homeAccountAvatar, !isRegisteredUser && styles.homeAccountAvatarLocked]} onPress={pickProfileImage}>
                   {isRegisteredUser && profileImageUri ? (
@@ -8007,18 +7980,15 @@ function HomeLocationPanel({
                 </Pressable>
                 <Pressable
                   style={styles.homeAccountCloseButton}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setProfileEditorOpen(false);
-                    setLanguageMenuOpen(false);
-                    setAccountMenuOpen(false);
-                  }}
+                  onPress={closeAccountMenu}
                 >
                   <Text style={styles.homeAccountCloseText}>{t.close}</Text>
                   <Ionicons name="close" size={15} color="#ffffff" />
                 </Pressable>
               </View>
-            </View>
+                </View>
+              </View>
+            </Modal>
           )}
         </View>
       </View>
@@ -9042,7 +9012,7 @@ function RandomTab({
       : 'READY TO DRAW';
   const startText = FEATURE_MEAL_TICKETS_ENABLED && !ticketAvailable
     ? currentTicket.proOnly && !mealTicketState.isProUser
-      ? '深夜はPro限定'
+      ? '深夜はPremium限定'
       : '次の抽選を待つ'
     : isEverythingRandom
       ? '完全ランダム START'
@@ -9800,9 +9770,7 @@ function SaveTab({
     : '';
   const albumViews = [
     { key: 'photos', label: '写真', count: `${diaryCount}枚`, icon: 'images-outline' },
-    { key: 'slideshow', label: 'スライド', count: `${slideshowBaseItems.length}枚`, icon: 'play-circle-outline' },
     { key: 'favorites', label: 'お気に入り', count: `${savedRestaurants.length}件`, icon: 'heart-outline' },
-    { key: 'history', label: '履歴', count: `${drawHistories.length || history.length}件`, icon: 'time-outline' },
   ] as const;
 
   useEffect(() => {
@@ -9873,8 +9841,8 @@ function SaveTab({
               <Text style={styles.albumCameraStatText}>{savedRestaurants.length}件</Text>
             </View>
             <View style={styles.albumCameraStatChip}>
-              <Ionicons name="time-outline" size={14} color="#81776b" />
-              <Text style={styles.albumCameraStatText}>{albumHistory.length}件</Text>
+              <Ionicons name="camera-outline" size={14} color="#81776b" />
+              <Text style={styles.albumCameraStatText}>{savedPhotoEntries.length}枚写真あり</Text>
             </View>
           </View>
         </View>
@@ -9924,7 +9892,7 @@ function SaveTab({
             <View style={styles.albumRetentionNote}>
               <Ionicons name="time-outline" size={16} color={ORANGE} />
               <Text style={styles.albumRetentionText}>
-                Freeプランでは直近3か月分を表示します。古い写真 {hiddenByPlanCount} 枚はProで見返せます。
+                Freeプランでは直近3か月分を表示します。古い写真 {hiddenByPlanCount} 枚はPremiumで見返せます。
               </Text>
             </View>
           )}
@@ -10012,8 +9980,8 @@ function SaveTab({
         <View style={styles.albumViewPanel}>
           {slideshowItems.length === 0 ? (
             <View style={styles.emptyPanel}>
-              <Text style={styles.emptyTitle}>スライドはまだありません</Text>
-              <Text style={styles.emptyText}>写真を追加すると、ごはんの思い出をスライドで見返せます。</Text>
+              <Text style={styles.emptyTitle}>写真プレビューはまだありません</Text>
+              <Text style={styles.emptyText}>写真を追加すると、ごはんの思い出をまとめて見返せます。</Text>
             </View>
           ) : (
             <View style={styles.albumSlideshowCard}>
@@ -10153,7 +10121,7 @@ function SaveTab({
               ) : (
                 <View style={styles.albumSlideshowEmpty}>
                   <Text style={styles.albumEmptyMonthTitle}>この月の写真はまだありません</Text>
-                  <Text style={styles.albumEmptyMonthText}>別の月か、すべて表示を選ぶとスライドを確認できます。</Text>
+                  <Text style={styles.albumEmptyMonthText}>別の月か、すべて表示を選ぶと写真を確認できます。</Text>
                 </View>
               )}
             </View>
@@ -10298,18 +10266,23 @@ function AlbumMemoryCard({ item, onPress }: { item: AlbumDiaryItem; onPress: () 
   );
 }
 
-function GenreIconVisual({ genre }: { genre?: string | null }) {
+function GenreIconVisual({ genre, compact = false }: { genre?: string | null; compact?: boolean }) {
   const genreVisual = getGenreVisual(genre);
   return (
     <View
       style={[
         styles.restaurantVisual,
+        compact && styles.restaurantVisualCompact,
         styles.restaurantVisualFrame,
         { backgroundColor: hexToRgba(genreVisual.color, 0.09) },
       ]}
     >
-      <View style={[styles.genreVisualGlow, { backgroundColor: hexToRgba(genreVisual.color, 0.12) }]} />
-      <Image source={genreVisual.image} style={[styles.genreVisualImage, styles.genreVisualImageSmall]} resizeMode="contain" />
+      <View style={[styles.genreVisualGlow, compact && styles.genreVisualGlowCompact, { backgroundColor: hexToRgba(genreVisual.color, 0.12) }]} />
+      <Image
+        source={genreVisual.image}
+        style={[styles.genreVisualImage, styles.genreVisualImageSmall, compact && styles.genreVisualImageCompact]}
+        resizeMode="contain"
+      />
     </View>
   );
 }
@@ -10339,7 +10312,7 @@ function SavedPlaceCard({
         </View>
       ) : (
         <View style={styles.savedPlaceThumb}>
-          <GenreIconVisual genre={savedGenre} />
+          <GenreIconVisual genre={savedGenre} compact />
         </View>
       )}
       <View style={styles.savedPlaceBody}>
@@ -10370,7 +10343,7 @@ function SavedPlaceCard({
   );
 }
 
-function ProBadge({ label = 'Pro', dark = false }: { label?: string; dark?: boolean }) {
+function ProBadge({ label = 'Premium', dark = false }: { label?: string; dark?: boolean }) {
   return (
     <View style={[styles.proBadge, dark && styles.proBadgeDark]}>
       <Text style={[styles.proBadgeText, dark && styles.proBadgeTextDark]}>{label}</Text>
@@ -10386,18 +10359,18 @@ function ProTeaserCard({ isPro, onPress }: { isPro: boolean; onPress: () => void
           <View style={styles.proTeaserLogoBadge}>
             <Image source={RANDISH_LOGO} style={styles.proTeaserLogo} resizeMode="contain" />
           </View>
-          <Text style={styles.proTeaserLabel}>RANDISH PRO</Text>
+          <Text style={styles.proTeaserLabel}>RANDISH Premium</Text>
         </View>
         <View style={styles.proTeaserChip}>
-          <Ionicons name="receipt-outline" size={13} color={ORANGE} />
-          <Text style={styles.proTeaserChipText}>あとから見返す</Text>
+          <Ionicons name="sparkles-outline" size={13} color={ORANGE} />
+          <Text style={styles.proTeaserChipText}>9機能</Text>
         </View>
       </View>
       <Text style={styles.proTeaserTitle}>{isPro ? '過去の傾向を、残して見る。' : '今月だけで終わらせない。'}</Text>
       <Text style={styles.proTeaserLead}>
         {isPro
-          ? 'Pro機能が有効です。下の機能を使って食の記録を深く見返せます。'
-          : 'Proで開ける機能をこのカードにまとめました。今入っているPro要素です。'}
+          ? 'Premium機能が有効です。AIナビと分析で食の記録を深く見返せます。'
+          : 'AIナビ、月末AIレター、分析保存まで。月480円で使えるPremium機能です。'}
       </Text>
       <View style={styles.proTeaserFeatureList}>
         {PRO_FEATURE_SUMMARY.map((feature) => (
@@ -10409,7 +10382,7 @@ function ProTeaserCard({ isPro, onPress }: { isPro: boolean; onPress: () => void
       </View>
       <Pressable style={[styles.proTeaserButton, isPro && styles.proTeaserButtonActive]} onPress={onPress}>
         <Text style={[styles.proTeaserButtonText, isPro && styles.proTeaserButtonTextActive]}>
-          {isPro ? 'Pro有効' : 'Pro機能をみる'}
+          {isPro ? 'Premium有効' : 'Premium機能をみる'}
         </Text>
         {!isPro && <Ionicons name="arrow-forward" size={15} color={ORANGE} />}
       </Pressable>
@@ -10457,12 +10430,12 @@ function ProFeatureCard({
         {isPro ? <ProBadge /> : (
           <View style={styles.proFeatureLock}>
             <Ionicons name="lock-closed-outline" size={14} color={ORANGE} />
-            <Text style={styles.proFeatureLockText}>Proで表示</Text>
+            <Text style={styles.proFeatureLockText}>Premiumで表示</Text>
           </View>
         )}
       </View>
       <Text style={styles.proFeatureTitle}>{title}</Text>
-      <Text style={styles.proFeatureValue} numberOfLines={2}>{isPro ? (value ?? '分析中') : 'Proで表示'}</Text>
+      <Text style={styles.proFeatureValue} numberOfLines={2}>{isPro ? (value ?? '分析中') : 'Premiumで表示'}</Text>
       <Text style={styles.proFeatureDescription}>{description}</Text>
       {isPro && detailLines.map((line, index) => (
         <Text key={`${line}-${index}`} style={styles.proFeatureDetail} numberOfLines={1}>{line}</Text>
@@ -10496,36 +10469,67 @@ function AiMonthlyReportEntryCard({
   status,
   hasReport,
   isPro,
-  isSamplePreview,
   isMonthEndUnlocked,
-  isMonthEndSimulation,
   deliveryLabel,
   countdownLabel,
   onOpen,
-  onToggleSample,
-  onToggleMonthEndSimulation,
 }: {
   analytics: MonthlyAnalytics;
   status: AiReportStatus;
   hasReport: boolean;
   isPro: boolean;
-  isSamplePreview: boolean;
   isMonthEndUnlocked: boolean;
-  isMonthEndSimulation: boolean;
   deliveryLabel: string;
   countdownLabel: string;
   onOpen: () => void;
-  onToggleSample: () => void;
-  onToggleMonthEndSimulation: () => void;
 }) {
   const isLoading = status === 'loading';
   const hasHistory = analytics.drawCount > 0;
-  const envelopeDelivered = isMonthEndUnlocked && (hasHistory || isMonthEndSimulation || isSamplePreview);
-  const estimatedSpendLabel = analytics.budgetSampleCount ? `約${formatYen(analytics.estimatedSpend)}` : '未計測';
-  const actionLabel = isLoading
+  const envelopeDelivered = isMonthEndUnlocked && hasHistory;
+  const openEnvelopeProgress = useRef(new Animated.Value(0)).current;
+  const [openingEnvelope, setOpeningEnvelope] = useState(false);
+  const [openingEnvelopeStep, setOpeningEnvelopeStep] = useState<'idle' | 'seal' | 'letter' | 'ai'>('idle');
+  const topGenreLabel = analytics.genreAnalytics[0]?.label ?? 'ジャンル';
+  const reportSignals: {
+    label: string;
+    detail: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    color: string;
+    backgroundColor: string;
+  }[] = [
+    {
+      label: '履歴を集計',
+      detail: hasHistory ? `${analytics.drawCount}件の抽選結果` : '抽選結果を保存',
+      icon: 'scan-outline',
+      color: '#c47b86',
+      backgroundColor: '#fcf5f6',
+    },
+    {
+      label: 'クセを抽出',
+      detail: hasHistory ? `${topGenreLabel}と予算傾向` : 'ジャンルと予算の偏り',
+      icon: 'sparkles-outline',
+      color: '#77a494',
+      backgroundColor: '#f5faf8',
+    },
+    {
+      label: '月末に届ける',
+      detail: isMonthEndUnlocked ? '今月分を開封' : countdownLabel,
+      icon: 'mail-unread-outline',
+      color: '#8d86b4',
+      backgroundColor: '#f7f6fb',
+    },
+  ];
+  const canPlayOpenAnimation = isPro && envelopeDelivered && !hasReport && !isLoading;
+  const actionLabel = openingEnvelope
+    ? openingEnvelopeStep === 'seal'
+      ? '封を切っています'
+      : openingEnvelopeStep === 'letter'
+        ? 'レポートを取り出しています'
+        : 'AIが仕上げています'
+    : isLoading
     ? '読み込み中'
     : !isPro
-      ? 'Proで受け取る'
+      ? 'レポートを受け取る'
       : !hasHistory
         ? '履歴を集める'
         : !isMonthEndUnlocked
@@ -10533,14 +10537,56 @@ function AiMonthlyReportEntryCard({
           : hasReport
             ? 'レポートを見る'
             : '封筒を開く';
-  const disabled = isLoading || !hasHistory || (isPro && !isMonthEndUnlocked);
+  const disabled = isLoading || openingEnvelope || !hasHistory || (isPro && !isMonthEndUnlocked);
   const title = envelopeDelivered ? '月末レポートが届きました' : '月末に封筒で届きます';
+  const handleOpenPress = useCallback(() => {
+    if (!canPlayOpenAnimation) {
+      onOpen();
+      return;
+    }
+
+    setOpeningEnvelope(true);
+    setOpeningEnvelopeStep('seal');
+    openEnvelopeProgress.setValue(0);
+    Animated.sequence([
+      Animated.timing(openEnvelopeProgress, {
+        toValue: 0.22,
+        duration: 360,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.delay(120),
+      Animated.timing(openEnvelopeProgress, {
+        toValue: 0.48,
+        duration: 420,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(openEnvelopeProgress, {
+        toValue: 1,
+        duration: 720,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        setOpeningEnvelopeStep('ai');
+        onOpen();
+      }
+      setTimeout(() => {
+        setOpeningEnvelope(false);
+        setOpeningEnvelopeStep('idle');
+        openEnvelopeProgress.setValue(0);
+      }, finished ? 420 : 0);
+    });
+    setTimeout(() => setOpeningEnvelopeStep('letter'), 520);
+  }, [canPlayOpenAnimation, onOpen, openEnvelopeProgress]);
 
   return (
     <View style={styles.aiReportBuilderCard}>
       <View style={styles.aiReportBuilderHeader}>
         <View style={styles.aiReportBuilderHeaderText}>
-          <Text style={styles.aiReportBuilderKicker}>{isSamplePreview ? 'SAMPLE REPORT' : 'MONTHLY REPORT'}</Text>
+          <Text style={styles.aiReportBuilderKicker}>MONTHLY REPORT</Text>
           <Text style={styles.aiReportBuilderTitle}>{hasHistory ? title : 'レポートは抽選後に届きます'}</Text>
         </View>
         <View style={styles.aiReportBuilderBadge}>
@@ -10548,79 +10594,75 @@ function AiMonthlyReportEntryCard({
           <Text style={styles.aiReportBuilderBadgeText}>{analytics.monthLabel}</Text>
         </View>
       </View>
-      <Text style={styles.aiReportBuilderLead}>
-        ルーレットで出たお店のジャンル・予算・場所をもとに、1か月ごとの食傾向をまとめます。
+      <Text style={styles.aiReportBuilderLead} numberOfLines={2}>
+        月末になると、抽選で出たお店のジャンル・予算・場所を一通のレポートにまとめます。
       </Text>
+      <View style={styles.aiReportPostmarkRow}>
+        <View style={styles.aiReportPostmarkPill}>
+          <Ionicons name="calendar-clear-outline" size={13} color="#6f54e8" />
+          <Text style={styles.aiReportPostmarkText}>月末ポスト</Text>
+        </View>
+        <View style={styles.aiReportPostmarkPill}>
+          <Ionicons name="mail-outline" size={13} color="#008b74" />
+          <Text style={styles.aiReportPostmarkText}>1通/月</Text>
+        </View>
+        <View style={styles.aiReportPostmarkPill}>
+          <Ionicons name="sparkles-outline" size={13} color="#e25b7a" />
+          <Text style={styles.aiReportPostmarkText}>開封演出</Text>
+        </View>
+      </View>
       <AiReportEnvelopePreview
         analytics={analytics}
         delivered={envelopeDelivered}
-        isSimulation={isMonthEndSimulation}
+        isSimulation={false}
         deliveryLabel={deliveryLabel}
         countdownLabel={countdownLabel}
+        openingProgress={openEnvelopeProgress}
       />
       <View style={styles.aiReportBuilderNotice}>
         <Ionicons name="information-circle-outline" size={17} color={ORANGE} />
         <Text style={styles.aiReportBuilderNoticeText}>{AI_REPORT_MONTHLY_NOTICE}</Text>
       </View>
 
-      <View style={styles.aiReportAutoStats}>
-        <View style={styles.aiReportAutoStat}>
-          <Text style={styles.aiReportAutoStatLabel}>今月のルーレット</Text>
-          <Text style={styles.aiReportAutoStatValue}>{analytics.drawCount}回</Text>
-        </View>
-        <View style={styles.aiReportAutoStat}>
-          <Text style={styles.aiReportAutoStatLabel}>推定外食費</Text>
-          <Text style={styles.aiReportAutoStatValue}>{estimatedSpendLabel}</Text>
-        </View>
-        <View style={styles.aiReportAutoStat}>
-          <Text style={styles.aiReportAutoStatLabel}>多いジャンル</Text>
-          <Text style={styles.aiReportAutoStatValue}>{analytics.topGenre}</Text>
-        </View>
-        <View style={styles.aiReportAutoStat}>
-          <Text style={styles.aiReportAutoStatLabel}>よく出た場所</Text>
-          <Text style={styles.aiReportAutoStatValue} numberOfLines={1}>{analytics.topArea}</Text>
-        </View>
+      <View style={styles.aiReportThinkingGrid}>
+        {reportSignals.map((item) => (
+          <View
+            key={item.label}
+            style={[
+              styles.aiReportThinkingCard,
+              { backgroundColor: item.backgroundColor, borderColor: item.color },
+            ]}
+          >
+            <View style={[styles.aiReportThinkingIcon, { backgroundColor: item.color }]}>
+              <Ionicons name={item.icon} size={15} color="#ffffff" />
+            </View>
+            <Text style={styles.aiReportThinkingLabel} numberOfLines={1}>{item.label}</Text>
+            <Text
+              style={styles.aiReportThinkingDetail}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.72}
+            >
+              {item.detail}
+            </Text>
+          </View>
+        ))}
       </View>
 
       <View style={styles.aiReportBuilderSummary}>
         <Text style={styles.aiReportBuilderSummaryText} numberOfLines={2}>
           {hasHistory
-            ? isSamplePreview
-              ? '10回分のサンプル外食履歴で、スマホ上の見え方を確認しています。'
-              : '自分でジャンルや金額を選ばず、抽選結果をそのままレポートに反映します。'
+            ? '今月の食べ方が、月末に封筒で届くように積み上がっています。'
             : 'ルーレット結果が入ると、月次AIレポートがここに届きます。'}
         </Text>
       </View>
 
-      <View style={styles.aiReportPreviewActions}>
-        <Pressable
-          style={[styles.aiReportSampleButton, isSamplePreview && styles.aiReportSampleButtonActive]}
-          onPress={onToggleSample}
-          disabled={isLoading}
-        >
-          <Ionicons name={isSamplePreview ? 'refresh-outline' : 'phone-portrait-outline'} size={16} color={isSamplePreview ? '#ffffff' : ORANGE} />
-          <Text style={[styles.aiReportSampleButtonText, isSamplePreview && styles.aiReportSampleButtonTextActive]}>
-            {isSamplePreview ? '実データに戻す' : `${AI_REPORT_SAMPLE_MEAL_COUNT}回サンプル`}
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.aiReportSampleButton, isMonthEndSimulation && styles.aiReportSampleButtonActive]}
-          onPress={onToggleMonthEndSimulation}
-          disabled={isLoading}
-        >
-          <Ionicons name={isMonthEndSimulation ? 'time' : 'calendar-clear-outline'} size={16} color={isMonthEndSimulation ? '#ffffff' : ORANGE} />
-          <Text style={[styles.aiReportSampleButtonText, isMonthEndSimulation && styles.aiReportSampleButtonTextActive]}>
-            {isMonthEndSimulation ? '通常日に戻す' : '月末到着を試す'}
-          </Text>
-        </Pressable>
-      </View>
-
       <Pressable
         style={[styles.aiReportOpenButton, disabled && styles.aiReportOpenButtonDisabled]}
-        onPress={onOpen}
+        onPress={handleOpenPress}
         disabled={disabled}
       >
-        {isLoading ? <ActivityIndicator size="small" color="#ffffff" /> : <Ionicons name="document-text-outline" size={18} color="#ffffff" />}
+        {isLoading || openingEnvelope ? <ActivityIndicator size="small" color="#ffffff" /> : <Ionicons name={canPlayOpenAnimation ? 'mail-open-outline' : 'document-text-outline'} size={18} color="#ffffff" />}
         <Text style={styles.aiReportOpenButtonText}>{actionLabel}</Text>
       </Pressable>
     </View>
@@ -10633,15 +10675,19 @@ function AiReportEnvelopePreview({
   isSimulation,
   deliveryLabel,
   countdownLabel,
+  openingProgress,
 }: {
   analytics: MonthlyAnalytics;
   delivered: boolean;
   isSimulation: boolean;
   deliveryLabel: string;
   countdownLabel: string;
+  openingProgress?: Animated.Value;
 }) {
   const envelopeProgress = useRef(new Animated.Value(delivered ? 1 : 0)).current;
   const pulseProgress = useRef(new Animated.Value(0)).current;
+  const idleOpeningProgress = useRef(new Animated.Value(0)).current;
+  const activeOpeningProgress = openingProgress ?? idleOpeningProgress;
   const envelopeStatus = delivered
     ? isSimulation
       ? '月末の到着状態をシミュレーション中'
@@ -10650,17 +10696,66 @@ function AiReportEnvelopePreview({
   const envelopeLead = delivered
     ? `${analytics.monthLabel}の外食傾向を封筒にまとめました。`
     : `${countdownLabel}。届くまで抽選履歴をためられます。`;
-  const flapRotate = envelopeProgress.interpolate({
+  const letterBaseTranslateY = envelopeProgress.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '-22deg'],
+    outputRange: [8, 0],
+    extrapolate: 'clamp',
   });
-  const letterTranslateY = envelopeProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [9, -18],
+  const letterOpenTranslateY = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.42, 1],
+    outputRange: [0, 0, -28],
+    extrapolate: 'clamp',
   });
+  const letterTranslateY = Animated.add(letterBaseTranslateY, letterOpenTranslateY);
   const letterOpacity = envelopeProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.68, 1],
+    inputRange: [0, 0.7, 1],
+    outputRange: [0.62, 0.9, 1],
+    extrapolate: 'clamp',
+  });
+  const letterScale = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.45, 0.78, 1],
+    outputRange: [1, 1, 1.06, 1.02],
+    extrapolate: 'clamp',
+  });
+  const envelopeScale = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.18, 0.48, 1],
+    outputRange: [1, 1.04, 1.06, 1],
+    extrapolate: 'clamp',
+  });
+  const flapTranslateY = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.2, 0.55, 1],
+    outputRange: [0, -2, -18, -23],
+    extrapolate: 'clamp',
+  });
+  const flapScaleY = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.22, 0.58, 1],
+    outputRange: [1, 0.92, 0.38, 0.12],
+    extrapolate: 'clamp',
+  });
+  const flapOpacity = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.55, 0.86, 1],
+    outputRange: [1, 1, 0.42, 0],
+    extrapolate: 'clamp',
+  });
+  const sealScale = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.14, 0.32, 1],
+    outputRange: [1, 1.18, 0.2, 0],
+    extrapolate: 'clamp',
+  });
+  const sealOpacity = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.18, 0.34, 1],
+    outputRange: [1, 1, 0, 0],
+    extrapolate: 'clamp',
+  });
+  const sparkleScale = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.28, 0.68, 1],
+    outputRange: [1, 1.1, 1.85, 1.08],
+    extrapolate: 'clamp',
+  });
+  const sparkleOpacity = activeOpeningProgress.interpolate({
+    inputRange: [0, 0.24, 0.78, 1],
+    outputRange: [0.82, 1, 1, 0.72],
+    extrapolate: 'clamp',
   });
   const pulseOpacity = pulseProgress.interpolate({
     inputRange: [0, 0.5, 1],
@@ -10670,6 +10765,16 @@ function AiReportEnvelopePreview({
     inputRange: [0, 1],
     outputRange: [0.92, 1.08],
   });
+  const reportChartSize = 28;
+  const reportChartCenter = reportChartSize / 2;
+  const reportChartRadius = 9.75;
+  const reportChartStroke = 5.5;
+  const reportChartCircumference = 2 * Math.PI * reportChartRadius;
+  const reportChartSegments = [
+    { color: '#7161f2', value: 0.52, offset: 0 },
+    { color: '#79b8a6', value: 0.28, offset: 0.52 },
+    { color: '#e9c7a0', value: 0.20, offset: 0.80 },
+  ];
 
   useEffect(() => {
     Animated.timing(envelopeProgress, {
@@ -10714,9 +10819,15 @@ function AiReportEnvelopePreview({
             {envelopeStatus}
           </Text>
         </View>
-        <Text style={styles.aiReportEnvelopeLead}>{envelopeLead}</Text>
+        <Text style={styles.aiReportEnvelopeLead} numberOfLines={2}>{envelopeLead}</Text>
       </View>
-      <View style={styles.aiReportEnvelopeArt}>
+      <Animated.View style={[styles.aiReportEnvelopeArt, { transform: [{ scale: envelopeScale }] }]}>
+        <Animated.View style={[styles.aiReportEnvelopeSparkleOne, { opacity: sparkleOpacity, transform: [{ scale: sparkleScale }] }]}>
+          <Ionicons name="sparkles" size={13} color="#ff8aa3" />
+        </Animated.View>
+        <Animated.View style={[styles.aiReportEnvelopeSparkleTwo, { opacity: sparkleOpacity, transform: [{ scale: sparkleScale }] }]}>
+          <Ionicons name="star" size={10} color="#69cdb7" />
+        </Animated.View>
         {delivered && (
           <Animated.View
             pointerEvents="none"
@@ -10729,33 +10840,109 @@ function AiReportEnvelopePreview({
             ]}
           />
         )}
+        <View style={styles.aiReportEnvelopeBack} />
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.aiReportLetterBaseShadow,
+            {
+              opacity: letterOpacity,
+              transform: [{ translateY: letterTranslateY }, { scale: letterScale }],
+            },
+          ]}
+        />
         <Animated.View
           style={[
             styles.aiReportLetterSheet,
             {
               opacity: letterOpacity,
-              transform: [{ translateY: letterTranslateY }],
+              transform: [{ translateY: letterTranslateY }, { scale: letterScale }],
             },
           ]}
         >
-          <Text style={styles.aiReportLetterMonth}>{analytics.monthLabel}</Text>
-          <View style={styles.aiReportLetterLineWide} />
-          <View style={styles.aiReportLetterLineShort} />
-          <View style={styles.aiReportLetterMetricRow}>
-            <View style={styles.aiReportLetterMetricDot} />
-            <Text style={styles.aiReportLetterMetricText}>{analytics.drawCount}回</Text>
+          <View style={styles.aiReportLetterHeader}>
+            <View style={styles.aiReportLetterAiMark}>
+              <Ionicons name="sparkles" size={9} color="#ffffff" />
+              <Text style={styles.aiReportLetterAiText}>AI</Text>
+            </View>
+            <Text style={styles.aiReportLetterMonth} numberOfLines={1}>{analytics.monthLabel}</Text>
+          </View>
+          <Text style={styles.aiReportLetterTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.86}>
+            AI FOOD REPORT
+          </Text>
+          <View style={styles.aiReportLetterInsightRow}>
+            <View style={styles.aiReportLetterPie}>
+              <Svg width={reportChartSize} height={reportChartSize}>
+                <G rotation={-90} originX={reportChartCenter} originY={reportChartCenter}>
+                  <Circle
+                    cx={reportChartCenter}
+                    cy={reportChartCenter}
+                    r={reportChartRadius}
+                    stroke="#eee9ff"
+                    strokeWidth={reportChartStroke}
+                    fill="none"
+                  />
+                  {reportChartSegments.map((segment) => (
+                    <Circle
+                      key={segment.color}
+                      cx={reportChartCenter}
+                      cy={reportChartCenter}
+                      r={reportChartRadius}
+                      stroke={segment.color}
+                      strokeWidth={reportChartStroke}
+                      strokeDasharray={`${reportChartCircumference * segment.value} ${reportChartCircumference * (1 - segment.value)}`}
+                      strokeDashoffset={-(reportChartCircumference * segment.offset)}
+                      strokeLinecap="butt"
+                      fill="none"
+                    />
+                  ))}
+                </G>
+                <Circle
+                  cx={reportChartCenter}
+                  cy={reportChartCenter}
+                  r={4.8}
+                  fill="#ffffff"
+                />
+              </Svg>
+            </View>
+            <View style={styles.aiReportLetterBarStack}>
+              <View style={styles.aiReportLetterBarLong} />
+              <View style={styles.aiReportLetterBarMid} />
+              <View style={styles.aiReportLetterBarShort} />
+            </View>
           </View>
         </Animated.View>
-        <View style={styles.aiReportEnvelopeBack} />
         <View style={styles.aiReportEnvelopeBody}>
           <View style={styles.aiReportEnvelopeFoldLeft} />
           <View style={styles.aiReportEnvelopeFoldRight} />
-          <View style={styles.aiReportEnvelopeSeal}>
-            <Ionicons name={delivered ? 'sparkles' : 'lock-closed'} size={13} color="#ffffff" />
+          <View style={styles.aiReportEnvelopePostmark}>
+            <View style={styles.aiReportEnvelopePostmarkLine} />
+            <View style={styles.aiReportEnvelopePostmarkLineShort} />
           </View>
         </View>
-        <Animated.View style={[styles.aiReportEnvelopeFlap, { transform: [{ rotate: flapRotate }] }]} />
-      </View>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.aiReportEnvelopeFlap,
+            {
+              opacity: flapOpacity,
+              transform: [{ translateY: flapTranslateY }, { scaleY: flapScaleY }],
+            },
+          ]}
+        />
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.aiReportEnvelopeSeal,
+            {
+              opacity: sealOpacity,
+              transform: [{ scale: sealScale }],
+            },
+          ]}
+        >
+          <Ionicons name="sparkles" size={12} color="#ffffff" />
+        </Animated.View>
+      </Animated.View>
     </View>
   );
 }
@@ -10894,32 +11081,32 @@ function YearlyWrappedCard({
   report,
   open,
   now,
-  isDemoPreview,
   isPro,
   onToggle,
-  onToggleDemo,
   onOpenPro,
 }: {
   analytics: YearlyAnalytics;
   report: YearlyWrappedReport;
   open: boolean;
   now: Date;
-  isDemoPreview: boolean;
   isPro: boolean;
   onToggle: () => void;
-  onToggleDemo: () => void;
   onOpenPro: () => void;
 }) {
   const isYearEndWindow = now.getMonth() === 11 && now.getDate() >= 31;
-  const releaseLabel = isDemoPreview ? 'デモ表示' : isYearEndWindow ? '公開中' : '12/31公開';
-  const activeMonthsLabel = analytics.activeMonthCount ? `${analytics.activeMonthCount}か月分` : '記録待ち';
-  const demoRangeLabel = `${now.getMonth() + 1}/${now.getDate()}〜12/31`;
+  const isReleased = isYearEndWindow;
+  const releaseLabel = isYearEndWindow ? '公開中' : '12/31開封';
+  const activeMonthsLabel = isReleased
+    ? analytics.activeMonthCount ? `${analytics.activeMonthCount}か月分` : '記録待ち'
+    : '育成中';
+  const genreCountLabel = isReleased ? `${analytics.genreAnalytics.length}ジャンル` : 'お楽しみ';
+  const areaCountLabel = isReleased ? `${analytics.areaAnalytics.length}県` : '12/31';
   const freeHighlights = report.highlights.slice(0, 3);
   const proHighlights = report.highlights.slice(3);
   const proFeatureLines = [
     '節約のコツと来年の食べ方ミッション',
     '月別のピーク・価格帯・ジャンル偏り',
-    'アルバム/スライドショーと過去年度保存',
+    'アルバム写真と過去年度保存',
   ];
 
   return (
@@ -10937,36 +11124,10 @@ function YearlyWrappedCard({
 
       <Text style={styles.yearWrappedSubtitle}>{report.subtitle}</Text>
       <Text style={styles.yearWrappedSourceText}>
-        {isDemoPreview ? `${demoRangeLabel}のデモ外食ログで表示中` : '実際のルーレット履歴から年末まとめを作成します。'}
+        {isReleased
+          ? '実際のルーレット履歴から年末まとめを作成します。'
+          : '外食ログ・推定外食費・トップジャンルは、12/31まで封印して育てます。'}
       </Text>
-      <Text style={styles.yearWrappedHero}>{report.heroLine}</Text>
-
-      <View style={styles.yearWrappedMetricGrid}>
-        <View style={styles.yearWrappedMetric}>
-          <Text style={styles.yearWrappedMetricLabel}>外食ログ</Text>
-          <Text style={styles.yearWrappedMetricValue}>{report.totalMealsLabel}</Text>
-        </View>
-        <View style={styles.yearWrappedMetric}>
-          <Text style={styles.yearWrappedMetricLabel}>推定外食費</Text>
-          <Text style={styles.yearWrappedMetricValue}>{report.totalSpendLabel}</Text>
-        </View>
-        <View style={styles.yearWrappedMetric}>
-          <Text style={styles.yearWrappedMetricLabel}>トップジャンル</Text>
-          <Text style={styles.yearWrappedMetricValue}>{report.topGenreLabel}</Text>
-        </View>
-        <View style={styles.yearWrappedMetric}>
-          <Text style={styles.yearWrappedMetricLabel}>よく行った県</Text>
-          <Text style={styles.yearWrappedMetricValue}>{report.topAreaLabel}</Text>
-        </View>
-        <View style={styles.yearWrappedMetric}>
-          <Text style={styles.yearWrappedMetricLabel}>一番濃い月</Text>
-          <Text style={styles.yearWrappedMetricValue}>{report.topMonthLabel}</Text>
-        </View>
-        <View style={styles.yearWrappedMetric}>
-          <Text style={styles.yearWrappedMetricLabel}>平均単価</Text>
-          <Text style={styles.yearWrappedMetricValue}>{report.averageBudgetLabel}</Text>
-        </View>
-      </View>
 
       <View style={styles.yearWrappedMiniRow}>
         <View style={styles.yearWrappedMiniPill}>
@@ -10975,83 +11136,119 @@ function YearlyWrappedCard({
         </View>
         <View style={styles.yearWrappedMiniPill}>
           <Ionicons name="restaurant-outline" size={13} color="#9bd37f" />
-          <Text style={styles.yearWrappedMiniText}>{analytics.genreAnalytics.length}ジャンル</Text>
+          <Text style={styles.yearWrappedMiniText}>{genreCountLabel}</Text>
         </View>
         <View style={styles.yearWrappedMiniPill}>
           <Ionicons name="map-outline" size={13} color="#a7c7ff" />
-          <Text style={styles.yearWrappedMiniText}>{analytics.areaAnalytics.length}県</Text>
+          <Text style={styles.yearWrappedMiniText}>{areaCountLabel}</Text>
         </View>
       </View>
 
       <View style={styles.yearWrappedActionRow}>
-        <Pressable
-          style={[styles.yearWrappedGhostButton, isDemoPreview && styles.yearWrappedGhostButtonActive]}
-          onPress={onToggleDemo}
-        >
-          <Ionicons name="sparkles-outline" size={15} color={isDemoPreview ? '#15120f' : '#f2c27f'} />
-          <Text style={[styles.yearWrappedGhostText, isDemoPreview && styles.yearWrappedGhostTextActive]}>
-            {isDemoPreview ? '実データに戻す' : '年末デモを見る'}
-          </Text>
-        </Pressable>
         <Pressable style={styles.yearWrappedToggleButton} onPress={onToggle}>
-          <Text style={styles.yearWrappedToggleText}>{open ? '閉じる' : '詳細を見る'}</Text>
+          <Text style={styles.yearWrappedToggleText}>{open ? '閉じる' : isReleased ? '詳細を見る' : '予告を見る'}</Text>
           <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color="#16130f" />
         </Pressable>
       </View>
 
       {open ? (
         <View style={styles.yearWrappedDetail}>
-          <Text style={styles.yearWrappedSectionTitle}>無料で見られるまとめ</Text>
-          {freeHighlights.map((item, index) => (
-            <View key={`${item}-${index}`} style={styles.yearWrappedHighlightRow}>
-              <Text style={styles.yearWrappedHighlightIndex}>{index + 1}</Text>
-              <Text style={styles.yearWrappedHighlightText}>{item}</Text>
-            </View>
-          ))}
-
-          {isPro ? (
+          {isReleased ? (
             <>
-              <View style={styles.yearWrappedProHeader}>
-                <Text style={styles.yearWrappedSectionTitle}>Proの詳しい分析</Text>
-                <ProBadge label="Pro" dark />
+              <Text style={styles.yearWrappedHero}>{report.heroLine}</Text>
+
+              <View style={styles.yearWrappedMetricGrid}>
+                <View style={styles.yearWrappedMetric}>
+                  <Text style={styles.yearWrappedMetricLabel}>外食ログ</Text>
+                  <Text style={styles.yearWrappedMetricValue}>{report.totalMealsLabel}</Text>
+                </View>
+                <View style={styles.yearWrappedMetric}>
+                  <Text style={styles.yearWrappedMetricLabel}>推定外食費</Text>
+                  <Text style={styles.yearWrappedMetricValue}>{report.totalSpendLabel}</Text>
+                </View>
+                <View style={styles.yearWrappedMetric}>
+                  <Text style={styles.yearWrappedMetricLabel}>トップジャンル</Text>
+                  <Text style={styles.yearWrappedMetricValue}>{report.topGenreLabel}</Text>
+                </View>
+                <View style={styles.yearWrappedMetric}>
+                  <Text style={styles.yearWrappedMetricLabel}>よく行った県</Text>
+                  <Text style={styles.yearWrappedMetricValue}>{report.topAreaLabel}</Text>
+                </View>
+                <View style={styles.yearWrappedMetric}>
+                  <Text style={styles.yearWrappedMetricLabel}>一番濃い月</Text>
+                  <Text style={styles.yearWrappedMetricValue}>{report.topMonthLabel}</Text>
+                </View>
+                <View style={styles.yearWrappedMetric}>
+                  <Text style={styles.yearWrappedMetricLabel}>平均単価</Text>
+                  <Text style={styles.yearWrappedMetricValue}>{report.averageBudgetLabel}</Text>
+                </View>
               </View>
-              {proHighlights.map((item, index) => (
+
+              <Text style={styles.yearWrappedSectionTitle}>無料で見られるまとめ</Text>
+              {freeHighlights.map((item, index) => (
                 <View key={`${item}-${index}`} style={styles.yearWrappedHighlightRow}>
-                  <Text style={styles.yearWrappedHighlightIndex}>{freeHighlights.length + index + 1}</Text>
+                  <Text style={styles.yearWrappedHighlightIndex}>{index + 1}</Text>
                   <Text style={styles.yearWrappedHighlightText}>{item}</Text>
                 </View>
               ))}
-              <View style={styles.yearWrappedMissionBox}>
-                <Ionicons name="flag-outline" size={18} color="#d8b77d" />
-                <Text style={styles.yearWrappedMissionText}>{report.nextYearMission}</Text>
-              </View>
+
+              {isPro ? (
+                <>
+                  <View style={styles.yearWrappedProHeader}>
+                    <Text style={styles.yearWrappedSectionTitle}>Premiumの詳しい分析</Text>
+                    <ProBadge label="Premium" dark />
+                  </View>
+                  {proHighlights.map((item, index) => (
+                    <View key={`${item}-${index}`} style={styles.yearWrappedHighlightRow}>
+                      <Text style={styles.yearWrappedHighlightIndex}>{freeHighlights.length + index + 1}</Text>
+                      <Text style={styles.yearWrappedHighlightText}>{item}</Text>
+                    </View>
+                  ))}
+                  <View style={styles.yearWrappedMissionBox}>
+                    <Ionicons name="flag-outline" size={18} color="#d8b77d" />
+                    <Text style={styles.yearWrappedMissionText}>{report.nextYearMission}</Text>
+                  </View>
+                </>
+              ) : (
+                <Pressable style={styles.yearWrappedProLockBox} onPress={onOpenPro}>
+                  <View style={styles.yearWrappedProLockTop}>
+                    <View style={styles.yearWrappedProLockIcon}>
+                      <Ionicons name="lock-closed-outline" size={17} color="#16130f" />
+                    </View>
+                    <View style={styles.yearWrappedProLockCopy}>
+                      <Text style={styles.yearWrappedProLockTitle}>年間レポートの詳しい分析はPremium</Text>
+                      <Text style={styles.yearWrappedProLockText}>
+                        無料では年1回の基本まとめまで。Premiumなら節約・月別比較・保存まで見られます。
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.yearWrappedProList}>
+                    {proFeatureLines.map((line) => (
+                      <View key={line} style={styles.yearWrappedProListRow}>
+                        <Ionicons name="checkmark-circle-outline" size={15} color="#d8b77d" />
+                        <Text style={styles.yearWrappedProListText}>{line}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={styles.yearWrappedProButton}>
+                    <Text style={styles.yearWrappedProButtonText}>Premiumで詳しい分析を見る</Text>
+                    <Ionicons name="arrow-forward" size={15} color="#16130f" />
+                  </View>
+                </Pressable>
+              )}
             </>
           ) : (
-            <Pressable style={styles.yearWrappedProLockBox} onPress={onOpenPro}>
-              <View style={styles.yearWrappedProLockTop}>
-                <View style={styles.yearWrappedProLockIcon}>
-                  <Ionicons name="lock-closed-outline" size={17} color="#16130f" />
-                </View>
-                <View style={styles.yearWrappedProLockCopy}>
-                  <Text style={styles.yearWrappedProLockTitle}>年間レポートの詳しい分析はPro</Text>
-                  <Text style={styles.yearWrappedProLockText}>
-                    無料では年1回の基本まとめまで。Proなら節約・月別比較・保存まで見られます。
-                  </Text>
-                </View>
+            <View style={styles.yearWrappedRevealBox}>
+              <View style={styles.yearWrappedRevealIcon}>
+                <Ionicons name="lock-closed-outline" size={18} color="#16130f" />
               </View>
-              <View style={styles.yearWrappedProList}>
-                {proFeatureLines.map((line) => (
-                  <View key={line} style={styles.yearWrappedProListRow}>
-                    <Ionicons name="checkmark-circle-outline" size={15} color="#d8b77d" />
-                    <Text style={styles.yearWrappedProListText}>{line}</Text>
-                  </View>
-                ))}
+              <View style={styles.yearWrappedRevealCopy}>
+                <Text style={styles.yearWrappedRevealTitle}>年末までのお楽しみ</Text>
+                <Text style={styles.yearWrappedRevealText}>
+                  外食ログ・推定外食費・トップジャンルなど6項目は、12/31にまとめて開封されます。
+                </Text>
               </View>
-              <View style={styles.yearWrappedProButton}>
-                <Text style={styles.yearWrappedProButtonText}>Proで詳しい分析を見る</Text>
-                <Ionicons name="arrow-forward" size={15} color="#16130f" />
-              </View>
-            </Pressable>
+            </View>
           )}
         </View>
       ) : null}
@@ -11074,68 +11271,127 @@ function ProPaywall({
   onRestorePro: () => void;
   onClose: () => void;
 }) {
-  const features = PRO_FEATURE_SUMMARY;
+  const features = PRO_ANALYSIS_FEATURES;
 
   return (
     <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
       <View style={styles.proPaywallBackdrop}>
         <View style={styles.proPaywallCard}>
-          <View style={styles.proPaywallHeader}>
-            <View>
-              <Text style={styles.proPaywallKicker}>RANDISH PRO</Text>
-              <Text style={styles.proPaywallTitle}>今月だけで終わらせない。</Text>
-            </View>
-            <Pressable style={styles.proPaywallClose} onPress={onClose}>
-              <Ionicons name="close" size={21} color={INK} />
-            </Pressable>
-          </View>
-          <Text style={styles.proPaywallContextTitle}>{title ?? 'RANDISH PRO'}</Text>
-          <Text style={styles.proPaywallLead}>
-            {message ?? '過去の抽選・外食費・ジャンル傾向を残して見返せます。'}
-          </Text>
-          <View style={styles.proPaywallFeatureList}>
-            {features.map((feature, index) => (
-              <View key={`${feature}-${index}`} style={styles.proPaywallFeatureRow}>
-                <Ionicons name="checkmark-circle" size={18} color={ORANGE} />
-                <Text style={styles.proPaywallFeatureText}>{feature}</Text>
+          <View style={styles.proPaywallGrabber} />
+          <ScrollView
+            style={styles.proPaywallScroll}
+            contentContainerStyle={styles.proPaywallScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.proPaywallHeader}>
+              <View style={styles.proPaywallBrandRow}>
+                <View style={styles.proPaywallLogoMark}>
+                  <Image source={RANDISH_LOGO} style={styles.proPaywallLogo} resizeMode="contain" />
+                </View>
+                <View>
+                  <Text style={styles.proPaywallKicker}>RANDISH Premium</Text>
+                  <Text style={styles.proPaywallBrandSub}>AIナビを含む9つのPremium機能</Text>
+                </View>
               </View>
-            ))}
+              <Pressable style={styles.proPaywallClose} onPress={onClose}>
+                <Ionicons name="close" size={21} color={INK} />
+              </Pressable>
+            </View>
+
+            <View style={styles.proPaywallHero}>
+              <View style={styles.proPaywallHeroTop}>
+                <View style={styles.proPaywallHeroBadge}>
+                  <Text style={styles.proPaywallHeroBadgeCount}>9</Text>
+                  <Text style={styles.proPaywallHeroBadgeText}>機能</Text>
+                </View>
+                <View style={styles.proPaywallHeroPill}>
+                  <Ionicons name="wallet-outline" size={13} color="#7161f2" />
+                  <Text style={styles.proPaywallHeroPillText}>月480円</Text>
+                </View>
+              </View>
+              <Text style={styles.proPaywallTitle}>次の一食まで導くPremium。</Text>
+              <Text style={styles.proPaywallLead}>
+                {message ?? 'AIナビ、月末AIレター、外食費・ジャンル・保存店の傾向をまとめて見返せます。'}
+              </Text>
+              <View style={styles.proPaywallMiniStatRow}>
+                <View style={styles.proPaywallMiniStat}>
+                  <Ionicons name="compass-outline" size={15} color="#9f4654" />
+                  <Text style={styles.proPaywallMiniStatText}>AIナビ</Text>
+                </View>
+                <View style={styles.proPaywallMiniStat}>
+                  <Ionicons name="mail-unread-outline" size={15} color="#7161f2" />
+                  <Text style={styles.proPaywallMiniStatText}>AIレター</Text>
+                </View>
+                <View style={styles.proPaywallMiniStat}>
+                  <Ionicons name="grid-outline" size={15} color="#3f7b68" />
+                  <Text style={styles.proPaywallMiniStatText}>9機能</Text>
+                </View>
+              </View>
+            </View>
+
+            <Text style={styles.proPaywallContextTitle}>{title ?? '開放されるPremium機能'}</Text>
+            <View style={styles.proPaywallFeatureGrid}>
+              {features.map((feature) => (
+                <View
+                  key={feature.title}
+                  style={[
+                    styles.proPaywallFeatureCard,
+                    { backgroundColor: feature.backgroundColor, borderColor: feature.color },
+                  ]}
+                >
+                  <View style={styles.proPaywallFeatureIcon}>
+                    <Ionicons name={feature.icon} size={18} color={feature.color} />
+                  </View>
+                  <View style={[styles.proPaywallFeatureCheck, { borderColor: feature.color }]}>
+                    <Ionicons name="lock-closed" size={10} color={feature.color} />
+                  </View>
+                  <Text style={styles.proPaywallFeatureTitle} numberOfLines={1}>{feature.title}</Text>
+                  <Text style={styles.proPaywallFeatureDetail} numberOfLines={1}>{feature.detail}</Text>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+
+          <View style={styles.proPaywallActionPanel}>
+            <Pressable
+              style={styles.proPaywallPrimaryButton}
+              onPress={() => {
+                onStartPro();
+                onClose();
+              }}
+            >
+              <Ionicons name="sparkles" size={17} color="#ffffff" />
+              <Text style={styles.proPaywallPrimaryText}>月480円でPremiumを始める</Text>
+            </Pressable>
+            <View style={styles.proPaywallSecondaryRow}>
+              <Pressable
+                style={styles.proPaywallRestoreButton}
+                onPress={() => {
+                  onRestorePro();
+                  onClose();
+                }}
+              >
+                <Text style={styles.proPaywallRestoreText}>購入を復元</Text>
+              </Pressable>
+              <Pressable style={styles.proPaywallSecondaryButton} onPress={onClose}>
+                <Text style={styles.proPaywallSecondaryText}>あとで</Text>
+              </Pressable>
+            </View>
           </View>
-          <Pressable
-            style={styles.proPaywallPrimaryButton}
-            onPress={() => {
-              onStartPro();
-              onClose();
-            }}
-          >
-            <Text style={styles.proPaywallPrimaryText}>RANDISH PROを始める</Text>
-          </Pressable>
-          <Pressable
-            style={styles.proPaywallRestoreButton}
-            onPress={() => {
-              onRestorePro();
-              onClose();
-            }}
-          >
-            <Text style={styles.proPaywallRestoreText}>購入を復元</Text>
-          </Pressable>
-          <Pressable style={styles.proPaywallSecondaryButton} onPress={onClose}>
-            <Text style={styles.proPaywallSecondaryText}>あとで</Text>
-          </Pressable>
         </View>
       </View>
     </Modal>
   );
 }
 
-const ANALYSIS_DONUT_COLORS = ['#f05a28', '#f2a51a', '#9b6b43', '#4f7f58', '#d89a68'];
+const ANALYSIS_DONUT_COLORS = ['#77a494', '#c47b86', '#8d86b4', '#bd9665', '#f05a28'];
 type DonutMetricMode = 'auto' | 'count' | 'spend';
 
 function GenreSpendDonut({
   items,
   totalLabel,
   metric = 'auto',
-  kicker = 'GENRE PIE',
+  kicker = '支出内訳',
   summaryText,
   emptyText = '推定できる予算データがまだありません。',
   showSpendArrow = false,
@@ -11175,8 +11431,8 @@ function GenreSpendDonut({
     );
   }
 
-  const chartSize = 138;
-  const strokeWidth = 32;
+  const chartSize = 148;
+  const strokeWidth = 28;
   const radius = (chartSize - strokeWidth) / 2;
   const center = chartSize / 2;
   const circumference = 2 * Math.PI * radius;
@@ -11222,7 +11478,14 @@ function GenreSpendDonut({
           </Svg>
           <View style={styles.analysisDonutCenter}>
             <Text style={styles.analysisDonutCenterLabel}>今月</Text>
-            <Text style={styles.analysisDonutCenterValue} numberOfLines={1}>{shouldUseSpend ? totalLabel : `${totalCount}回`}</Text>
+            <Text
+              style={styles.analysisDonutCenterValue}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.68}
+            >
+              {shouldUseSpend ? totalLabel : `${totalCount}回`}
+            </Text>
           </View>
           <View style={styles.analysisDonutShareBadge}>
             <Text style={styles.analysisDonutShareText}>{primaryPercent}%</Text>
@@ -11230,9 +11493,11 @@ function GenreSpendDonut({
         </View>
         <View style={styles.analysisDonutSummary}>
           <Text style={styles.analysisDonutSummaryKicker}>{kicker}</Text>
-          <Text style={styles.analysisDonutSummaryTitle}>{chartItems[0].label}</Text>
+          <Text style={styles.analysisDonutSummaryTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>
+            {chartItems[0].label}
+          </Text>
           <Text style={styles.analysisDonutSummaryText}>
-            {summaryText ?? '今月いちばん多いジャンル。下に結果のgenre・回数・割合を表示します。'}
+            {summaryText ?? '今月いちばん多いジャンル。ジャンルごとの回数・割合・支出目安をまとめます。'}
           </Text>
         </View>
       </View>
@@ -11242,7 +11507,16 @@ function GenreSpendDonut({
           const percent = Math.round((getMetric(item) / totalMetric) * 100);
           const spendLabel = item.estimatedSpend > 0 ? `約${formatYen(item.estimatedSpend)}` : '未計測';
           return (
-            <View key={`${item.label}-${index}`} style={styles.analysisDonutLegendRow}>
+            <View
+              key={`${item.label}-${index}`}
+              style={[
+                styles.analysisDonutLegendRow,
+                {
+                  backgroundColor: hexToRgba(color, 0.08),
+                  borderColor: hexToRgba(color, 0.38),
+                },
+              ]}
+            >
               <View style={[styles.analysisDonutLegendDot, { backgroundColor: color }]} />
               <View style={styles.analysisDonutLegendBody}>
                 <Text style={styles.analysisDonutLegendLabel} numberOfLines={1}>{item.label}</Text>
@@ -11251,7 +11525,7 @@ function GenreSpendDonut({
                     ? `支出 → ${spendLabel} / ${percent}% / ${item.count}回`
                     : `${item.count}回 / ${percent}%${shouldUseSpend && item.estimatedSpend > 0 ? ` / ${spendLabel}` : ''}`}
                 </Text>
-                <View style={styles.analysisDonutLegendTrack}>
+                <View style={[styles.analysisDonutLegendTrack, { backgroundColor: hexToRgba(color, 0.16) }]}>
                   <View style={[styles.analysisDonutLegendFill, { width: `${percent}%`, backgroundColor: color }]} />
                 </View>
               </View>
@@ -11278,59 +11552,210 @@ function AnalysisDigestCard({
   totalLabel,
   averageBudgetLabel,
   savedCount,
+  spendOpen,
+  isPro,
   onSpendPress,
+  onProPress,
 }: {
   analytics: MonthlyAnalytics;
   totalLabel: string;
   averageBudgetLabel: string;
   savedCount: number;
+  spendOpen: boolean;
+  isPro: boolean;
   onSpendPress: () => void;
+  onProPress: () => void;
 }) {
   const sampleLabel = analytics.budgetSampleCount ? `${analytics.budgetSampleCount}件から推定` : '推定データなし';
+  const [premiumOpen, setPremiumOpen] = useState(false);
   const metrics = [
-    { label: '抽選', value: `${analytics.drawCount}回` },
-    { label: 'お気に入り', value: `${savedCount}件` },
-    { label: '多いジャンル', value: analytics.topGenre },
-    { label: '平均単価', value: averageBudgetLabel },
+    {
+      label: '抽選',
+      value: `${analytics.drawCount}回`,
+      detail: '今月の履歴',
+      icon: 'restaurant-outline' as keyof typeof Ionicons.glyphMap,
+      color: '#c47b86',
+      backgroundColor: '#fcf5f6',
+    },
+    {
+      label: '外食費',
+      value: totalLabel,
+      detail: sampleLabel,
+      icon: 'wallet-outline' as keyof typeof Ionicons.glyphMap,
+      color: '#77a494',
+      backgroundColor: '#f5faf8',
+    },
+    {
+      label: 'ジャンル',
+      value: analytics.topGenre,
+      detail: 'よく出る傾向',
+      icon: 'pie-chart-outline' as keyof typeof Ionicons.glyphMap,
+      color: '#8d86b4',
+      backgroundColor: '#f7f6fb',
+    },
+    {
+      label: '保存',
+      value: `${savedCount}件`,
+      detail: `平均 ${averageBudgetLabel}`,
+      icon: 'bookmark-outline' as keyof typeof Ionicons.glyphMap,
+      color: '#bd9665',
+      backgroundColor: '#fbf7f1',
+    },
   ];
 
   return (
     <View style={styles.analysisDigestCard}>
-      <View pointerEvents="none" style={styles.analysisDigestMapArt}>
-        <View style={[styles.analysisDigestRoad, styles.analysisDigestRoadOne]} />
-        <View style={[styles.analysisDigestRoad, styles.analysisDigestRoadTwo]} />
-        <View style={styles.analysisDigestPin}>
-          <View style={styles.analysisDigestPinCore} />
-        </View>
-        <View style={styles.analysisDigestBars}>
-          <View style={[styles.analysisDigestBar, styles.analysisDigestBarOne]} />
-          <View style={[styles.analysisDigestBar, styles.analysisDigestBarTwo]} />
-          <View style={[styles.analysisDigestBar, styles.analysisDigestBarThree]} />
-        </View>
-      </View>
       <View style={styles.analysisDigestTopRow}>
         <View>
-          <Text style={styles.analysisDigestKicker}>MONTHLY DIGEST</Text>
-          <Text style={styles.analysisDigestTitle}>今月の外食ログ</Text>
+          <Text style={styles.analysisDigestKicker}>MONTHLY ACCESS</Text>
+          <Text style={styles.analysisDigestTitle}>今月の分析</Text>
         </View>
-        <View style={styles.analysisDigestMonth}>
-          <Text style={styles.analysisDigestMonthText}>{analytics.monthLabel}</Text>
+        <View style={styles.analysisDigestBadge}>
+          <Ionicons name="calendar-clear-outline" size={14} color="#8d7b6d" />
+          <Text style={styles.analysisDigestBadgeText}>{analytics.monthLabel}</Text>
         </View>
       </View>
-      <Text style={styles.analysisDigestAmount} numberOfLines={1}>{totalLabel}</Text>
-      <Text style={styles.analysisDigestLead}>{sampleLabel}。抽選した店の平均予算をざっくり見返せます。</Text>
+      <Text style={styles.analysisDigestLead}>
+        抽選したお店から、外食費・ジャンル・保存した店の傾向をまとめます。
+      </Text>
       <View style={styles.analysisDigestMetricGrid}>
         {metrics.map((item) => (
-          <View key={item.label} style={styles.analysisDigestMetric}>
-            <Text style={styles.analysisDigestMetricLabel}>{item.label}</Text>
-            <Text style={styles.analysisDigestMetricValue} numberOfLines={1}>{item.value}</Text>
+          <View
+            key={item.label}
+            style={[
+              styles.analysisDigestMetric,
+              { borderColor: item.color, backgroundColor: item.backgroundColor },
+            ]}
+          >
+            <View style={[styles.analysisDigestMetricIcon, { backgroundColor: item.color }]}>
+              <Ionicons name={item.icon} size={16} color="#ffffff" />
+            </View>
+            <Text
+              style={styles.analysisDigestMetricLabel}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.72}
+            >
+              {item.label}
+            </Text>
+            <Text
+              style={styles.analysisDigestMetricValue}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.68}
+            >
+              {item.value}
+            </Text>
+            <Text
+              style={styles.analysisDigestMetricDetail}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.68}
+            >
+              {item.detail}
+            </Text>
           </View>
         ))}
       </View>
       <Pressable style={styles.analysisDigestButton} onPress={onSpendPress}>
-        <Text style={styles.analysisDigestButtonText}>内訳を見る</Text>
-        <Ionicons name="chevron-down" size={16} color={ORANGE} />
+        <Ionicons name={spendOpen ? 'chevron-up' : 'chevron-down'} size={14} color={ORANGE} />
+        <Text style={styles.analysisDigestButtonText}>{spendOpen ? '支出内訳を閉じる' : '支出内訳を見る'}</Text>
       </Pressable>
+
+      {spendOpen && (
+        <View style={styles.analysisDigestSpendDetail}>
+          <View style={styles.analysisDigestSpendHeader}>
+            <View>
+              <Text style={styles.analysisDigestSpendKicker}>SPEND DETAIL</Text>
+              <Text style={styles.analysisDigestSpendTitle}>今月の推定外食費</Text>
+            </View>
+            <Text
+              style={styles.analysisDigestSpendAmount}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.72}
+            >
+              {totalLabel}
+            </Text>
+          </View>
+          <Text style={styles.analysisDigestSpendText}>
+            抽選時の平均予算から、今月の支出目安をまとめます。
+          </Text>
+          <GenreSpendDonut items={analytics.genreAnalytics} totalLabel={totalLabel} />
+          <View style={styles.analysisDigestSpendMetaRow}>
+            <View style={styles.analysisDigestSpendMetaItem}>
+              <Text style={styles.analysisDigestSpendMetaLabel}>平均予算</Text>
+              <Text style={styles.analysisDigestSpendMetaValue}>{averageBudgetLabel}</Text>
+            </View>
+            <View style={styles.analysisDigestSpendMetaItem}>
+              <Text style={styles.analysisDigestSpendMetaLabel}>対象</Text>
+              <Text style={styles.analysisDigestSpendMetaValue}>{analytics.monthLabel}</Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      <View style={styles.analysisDigestProPanel}>
+        <Pressable style={styles.analysisDigestProHeader} onPress={() => setPremiumOpen((current) => !current)}>
+          <View style={styles.analysisDigestProTitleRow}>
+            <View style={[styles.analysisDigestProTitleIcon, isPro && styles.analysisDigestProTitleIconActive]}>
+              <Ionicons name={isPro ? 'sparkles' : 'lock-closed'} size={17} color="#ffffff" />
+            </View>
+            <View style={styles.analysisDigestProTitleTextBox}>
+              <Text style={styles.analysisDigestProTitle}>{isPro ? 'Premium有効' : 'Premium Plan'}</Text>
+              <Text style={styles.analysisDigestProSubtitle} numberOfLines={1}>AIナビを含む9つの機能</Text>
+            </View>
+          </View>
+          <View style={styles.analysisDigestProHeaderActions}>
+            {!isPro && (
+              <View style={styles.analysisDigestProPill}>
+                <Text style={styles.analysisDigestProPillText}>月480円</Text>
+              </View>
+            )}
+            <View style={styles.analysisDigestProToggle}>
+              <Ionicons name={premiumOpen ? 'chevron-up' : 'chevron-down'} size={16} color="#7161f2" />
+            </View>
+          </View>
+        </Pressable>
+        {premiumOpen && (
+          <>
+            <View style={styles.analysisDigestProList}>
+              {PRO_ANALYSIS_FEATURES.map((feature) => (
+                <View
+                  key={feature.title}
+                  style={[
+                    styles.analysisDigestProFeature,
+                    { backgroundColor: feature.backgroundColor, borderColor: feature.color },
+                  ]}
+                >
+                  <View style={styles.analysisDigestProFeatureIcon}>
+                    <Ionicons name={feature.icon} size={18} color={feature.color} />
+                  </View>
+                  <View
+                    style={[
+                      styles.analysisDigestProFeatureStatus,
+                      {
+                        backgroundColor: isPro ? feature.color : '#ffffff',
+                        borderColor: feature.color,
+                      },
+                    ]}
+                  >
+                    <Ionicons name={isPro ? 'checkmark' : 'lock-closed'} size={11} color={isPro ? '#ffffff' : feature.color} />
+                  </View>
+                  <Text style={styles.analysisDigestProFeatureTitle} numberOfLines={1}>{feature.title}</Text>
+                  <Text style={styles.analysisDigestProFeatureDetail} numberOfLines={1}>{feature.detail}</Text>
+                </View>
+              ))}
+            </View>
+            {!isPro && (
+              <Pressable style={styles.analysisDigestProCta} onPress={onProPress}>
+                <Text style={styles.analysisDigestProCtaText}>Premiumをみる</Text>
+                <Ionicons name="arrow-forward" size={15} color="#ffffff" />
+              </Pressable>
+            )}
+          </>
+        )}
+      </View>
     </View>
   );
 }
@@ -11370,12 +11795,9 @@ function AnalyticsTab({
   const [aiReportStatus, setAiReportStatus] = useState<AiReportStatus>('idle');
   const [aiReport, setAiReport] = useState<AiMonthlyReport | null>(null);
   const [aiReportUsed, setAiReportUsed] = useState(false);
-  const [aiReportSamplePreview, setAiReportSamplePreview] = useState(false);
-  const [aiReportMonthEndSimulation, setAiReportMonthEndSimulation] = useState(false);
   const [yearlyWrappedOpen, setYearlyWrappedOpen] = useState(false);
-  const [yearlyWrappedDemoPreview, setYearlyWrappedDemoPreview] = useState(false);
   const now = useMemo(() => new Date(), []);
-  const aiReportMonthEndUnlocked = isMonthEndReportDay(now) || aiReportMonthEndSimulation;
+  const aiReportMonthEndUnlocked = isMonthEndReportDay(now);
   const aiReportDeliveryLabel = formatMonthEndDeliveryLabel(now);
   const aiReportCountdownLabel = getMonthEndCountdownLabel(now);
 
@@ -11400,17 +11822,10 @@ function AnalyticsTab({
   }, [drawHistories, history]);
 
   const currentAnalytics = useMemo(() => getCurrentMonthAnalytics(analyticsEntries, now), [analyticsEntries, now]);
-  const yearlyDemoEntries = useMemo(() => buildDemoYearlyWrappedEntries(now), [now]);
-  const yearlyWrappedEntries = yearlyWrappedDemoPreview ? yearlyDemoEntries : analyticsEntries;
-  const yearlyAnalytics = useMemo(() => getYearlyAnalytics(yearlyWrappedEntries, now), [now, yearlyWrappedEntries]);
+  const yearlyAnalytics = useMemo(() => getYearlyAnalytics(analyticsEntries, now), [analyticsEntries, now]);
   const yearlyWrappedReport = useMemo(() => buildYearlyWrappedReport(yearlyAnalytics), [yearlyAnalytics]);
-  const comparison = useMemo(() => getPreviousMonthComparison(analyticsEntries, now), [analyticsEntries, now]);
   const savedAnalytics = useMemo(() => getSavedRestaurantAnalytics(savedRestaurants), [savedRestaurants]);
-  const sampleReportAnalytics = useMemo(
-    () => buildDemoAiReportAnalytics(AI_REPORT_SAMPLE_GENRE_PLANS, AI_REPORT_SAMPLE_MEAL_COUNT, area, now),
-    [area, now],
-  );
-  const reportAnalytics = aiReportSamplePreview ? sampleReportAnalytics : currentAnalytics;
+  const reportAnalytics = currentAnalytics;
   const localAiReportPreview = useMemo(() => buildLocalAiReport(reportAnalytics, savedAnalytics), [reportAnalytics, savedAnalytics]);
   const reportDataSignature = useMemo(
     () => [
@@ -11419,13 +11834,9 @@ function AnalyticsTab({
       reportAnalytics.estimatedSpend,
       reportAnalytics.genreAnalytics.map((item) => `${item.label}:${item.count}:${item.estimatedSpend}`).join(','),
       savedAnalytics.totalSaved,
-      aiReportSamplePreview ? 'sample' : 'live',
+      'live',
     ].join('|'),
-    [aiReportSamplePreview, reportAnalytics, savedAnalytics],
-  );
-  const monthSeries = useMemo(
-    () => [5, 4, 3, 2, 1, 0].map((offset) => getMonthlyAnalytics(analyticsEntries, addMonthsToStart(now, -offset))),
-    [analyticsEntries, now],
+    [reportAnalytics, savedAnalytics],
   );
 
   useEffect(() => {
@@ -11443,41 +11854,13 @@ function AnalyticsTab({
 
   const monthlyTotalLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.estimatedSpend)}` : '0円';
   const averageBudgetLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.averageBudget)}` : '0円';
-  const topPriceRange = currentAnalytics.priceRangeAnalytics[0]?.label ?? 'まだなし';
-  const topSavedGenre = savedAnalytics.genreAnalytics[0]?.label ?? 'まだなし';
-  const topSavedPrice = savedAnalytics.priceRangeAnalytics[0]?.label ?? 'まだなし';
-  const situationFeatureValue = topSavedGenre !== 'まだなし'
-    ? `${topSavedGenre}から提案`
-    : currentAnalytics.topGenre !== 'まだなし'
-      ? `${currentAnalytics.topGenre}から提案`
-      : 'ひとり向きから提案';
 
-  const openPaywall = useCallback((title = 'RANDISH PRO', message = '過去の抽選・外食費・ジャンル傾向を残して見返せます。') => {
+  const openPaywall = useCallback((title = 'RANDISH Premium', message = '過去の抽選・外食費・ジャンル傾向を残して見返せます。') => {
     setPaywallContext({ title, message });
-  }, []);
-
-  const openGenrePaywall = useCallback(() => {
-    openPaywall(
-      'ジャンル別の傾向はPro機能です。',
-      '過去の抽選から、よく出るジャンル・価格帯・お気に入り傾向を確認できます。',
-    );
-  }, [openPaywall]);
-
-  const toggleAiReportSamplePreview = useCallback(() => {
-    setAiReportSamplePreview((current) => !current);
-  }, []);
-
-  const toggleAiReportMonthEndSimulation = useCallback(() => {
-    setAiReportMonthEndSimulation((current) => !current);
   }, []);
 
   const toggleYearlyWrapped = useCallback(() => {
     setYearlyWrappedOpen((current) => !current);
-  }, []);
-
-  const toggleYearlyWrappedDemoPreview = useCallback(() => {
-    setYearlyWrappedDemoPreview((current) => !current);
-    setYearlyWrappedOpen(true);
   }, []);
 
   const loadAiReport = useCallback(async () => {
@@ -11496,7 +11879,7 @@ function AnalyticsTab({
   const openAiReport = useCallback(() => {
     if (!isPro) {
       openPaywall(
-        '月次AIレポートはPro機能です。',
+        '月次AIレポートはPremium機能です。',
         'ルーレット履歴から外食傾向、節約のヒント、次の選び方までまとめます。',
       );
       return;
@@ -11516,27 +11899,26 @@ function AnalyticsTab({
 
   return (
     <View style={styles.analysisScreen}>
-      <View style={styles.analysisTitleBlock}>
-        <View style={styles.analysisTitleRow}>
-          <View style={styles.analysisTitleBar} />
-          <Text style={styles.analysisTitle}>{uiText.analyticsTitle}</Text>
-        </View>
-        <Text style={styles.analysisLead}>{uiText.analyticsLead}</Text>
-      </View>
+      <AnalysisDigestCard
+        analytics={currentAnalytics}
+        totalLabel={monthlyTotalLabel}
+        averageBudgetLabel={averageBudgetLabel}
+        savedCount={savedRestaurants.length}
+        spendOpen={spendOpen}
+        isPro={isPro}
+        onSpendPress={() => setSpendOpen((current) => !current)}
+        onProPress={() => openPaywall()}
+      />
 
       <AiMonthlyReportEntryCard
         analytics={reportAnalytics}
         status={aiReportStatus}
         hasReport={Boolean(aiReport)}
         isPro={isPro}
-        isSamplePreview={aiReportSamplePreview}
         isMonthEndUnlocked={aiReportMonthEndUnlocked}
-        isMonthEndSimulation={aiReportMonthEndSimulation}
         deliveryLabel={aiReportDeliveryLabel}
         countdownLabel={aiReportCountdownLabel}
         onOpen={openAiReport}
-        onToggleSample={toggleAiReportSamplePreview}
-        onToggleMonthEndSimulation={toggleAiReportMonthEndSimulation}
       />
 
       {aiReportOpen && (
@@ -11555,133 +11937,10 @@ function AnalyticsTab({
         report={yearlyWrappedReport}
         open={yearlyWrappedOpen}
         now={now}
-        isDemoPreview={yearlyWrappedDemoPreview}
         isPro={isPro}
         onToggle={toggleYearlyWrapped}
-        onToggleDemo={toggleYearlyWrappedDemoPreview}
-        onOpenPro={() => openPaywall('年末まとめの詳しい分析はPro機能です。', '無料では年1回の基本まとめまで。Proなら節約のコツ、月別比較、アルバム/スライドショー、過去年度保存まで見られます。')}
+        onOpenPro={() => openPaywall('年末まとめの詳しい分析はPremium機能です。', '無料では年1回の基本まとめまで。Premiumなら節約のコツ、月別比較、アルバム写真、過去年度保存まで見られます。')}
       />
-
-      <AnalysisDigestCard
-        analytics={currentAnalytics}
-        totalLabel={monthlyTotalLabel}
-        averageBudgetLabel={averageBudgetLabel}
-        savedCount={savedRestaurants.length}
-        onSpendPress={() => setSpendOpen(true)}
-      />
-
-      <ProTeaserCard isPro={isPro} onPress={isPro ? () => undefined : () => openPaywall()} />
-
-      <AnalysisSectionHeader
-        kicker="FREE ANALYTICS"
-        title="今月の支出をざっくり見る"
-        lead="手入力なし。抽選結果の平均予算から、外食費の目安だけを軽く見返せます。"
-      />
-
-      <View style={styles.analysisFreeCard}>
-        <View style={styles.analysisFreeTopRow}>
-          <View>
-            <Text style={styles.analysisFreeLabel}>FREE PLAN</Text>
-            <Text style={styles.analysisFreeTitle}>今月の推定外食費</Text>
-          </View>
-          <View style={styles.analysisFreeBadge}>
-            <Text style={styles.analysisFreeBadgeText}>{currentAnalytics.monthLabel}</Text>
-          </View>
-        </View>
-        <Text style={styles.analysisFreeAmount} numberOfLines={1}>{monthlyTotalLabel}</Text>
-        <Pressable style={styles.analysisFreeToggle} onPress={() => setSpendOpen((current) => !current)}>
-          <Text style={styles.analysisFreeToggleText}>{spendOpen ? '閉じる' : '内訳を見る'}</Text>
-          <Ionicons name={spendOpen ? 'chevron-up' : 'chevron-down'} size={16} color={ORANGE} />
-        </Pressable>
-
-        {spendOpen && (
-          <>
-            <Text style={styles.analysisFreeText}>
-              抽選時の条件から平均予算を自動で合計しています。手入力なしで、ざっくり支出を見られます。
-            </Text>
-
-            <GenreSpendDonut items={currentAnalytics.genreAnalytics} totalLabel={monthlyTotalLabel} />
-
-            <View style={styles.analysisFreeMetaRow}>
-              <View style={styles.analysisFreeMetaItem}>
-                <Text style={styles.analysisFreeMetaLabel}>計算方法</Text>
-                <Text style={styles.analysisFreeMetaValue}>平均予算</Text>
-              </View>
-              <View style={styles.analysisFreeMetaItem}>
-                <Text style={styles.analysisFreeMetaLabel}>対象</Text>
-                <Text style={styles.analysisFreeMetaValue}>{currentAnalytics.monthLabel}の履歴</Text>
-              </View>
-            </View>
-          </>
-        )}
-      </View>
-
-      <AnalysisSectionHeader
-        kicker="RANDISH PRO"
-        title="あとから見返す分析"
-        lead={isPro ? '過去月の流れまで表示中です。' : '過去月・比較・お気に入り店の傾向はProで開けます。'}
-      />
-
-      <View style={styles.proFeatureGrid}>
-        <ProFeatureCard
-          icon="swap-vertical-outline"
-          title="先月との差"
-          description="先月より何円増えたか、節約できたかを見られます。"
-          value={comparison.label}
-          detailLines={[`先月: 約${formatYen(comparison.previous.estimatedSpend)}`, `今月: 約${formatYen(comparison.current.estimatedSpend)}`]}
-          isPro={isPro}
-          onPress={() => openPaywall('先月との差はPro機能です。', '先月より何円増えたか、節約できたかを見られます。')}
-        />
-        <ProFeatureCard
-          icon="bar-chart-outline"
-          title="月別の推定外食費"
-          description="過去月の分析を保存して、外食費の流れを見返せます。"
-          value={`今月 約${formatYen(currentAnalytics.estimatedSpend)}`}
-          isPro={isPro}
-          onPress={() => openPaywall('月別グラフはPro機能です。', '過去月の抽選結果と推定外食費を残して見返せます。')}
-        >
-          <ProMonthBars items={monthSeries} />
-        </ProFeatureCard>
-        <ProFeatureCard
-          icon="restaurant-outline"
-          title="ジャンル別傾向"
-          description="よく出るジャンルや偏りを確認できます。"
-          value={currentAnalytics.topGenre}
-          detailLines={currentAnalytics.genreAnalytics.slice(0, 3).map((item) => `${item.label}: ${item.count}回`)}
-          isPro={isPro}
-          onPress={openGenrePaywall}
-        />
-        <ProFeatureCard
-          icon="cash-outline"
-          title="価格帯の傾向"
-          description="抽選時の価格帯を月ごとに確認できます。"
-          value={topPriceRange}
-          detailLines={currentAnalytics.priceRangeAnalytics.slice(0, 3).map((item) => `${item.label}: ${item.count}回`)}
-          isPro={isPro}
-          onPress={() => openPaywall('価格帯の傾向はPro機能です。', '抽選時の価格帯を月ごとに確認できます。')}
-        />
-        <ProFeatureCard
-          icon="bookmark-outline"
-          title="お気に入り店の分析"
-          description="お気に入り店のジャンルや価格帯を見返せます。"
-          value={`${savedAnalytics.totalSaved}件お気に入り`}
-          detailLines={[`ジャンル: ${topSavedGenre}`, `価格帯: ${topSavedPrice}`]}
-          isPro={isPro}
-          onPress={() => openPaywall('お気に入り店の分析はPro機能です。', 'お気に入り店のジャンルや価格帯を見返せます。')}
-        />
-        <ProFeatureCard
-          icon="people-outline"
-          title="シチュエーション別提案"
-          description="ひとりでも入りやすい、デート向き、友達と行きたいなど目的別に候補を分けます。"
-          value={situationFeatureValue}
-          detailLines={PRO_SITUATION_FEATURE_LINES}
-          isPro={isPro}
-          onPress={() => openPaywall(
-            'シチュエーション別提案はPro機能です。',
-            'ひとりでも入りやすい店、デート向き、友達と行きたい店、仕事帰りや雨の日向けなどで候補を選べます。',
-          )}
-        />
-      </View>
 
       <AnalysisSectionHeader
         kicker="THIS MONTH"
@@ -11692,10 +11951,10 @@ function AnalyticsTab({
       <View style={styles.analysisHistoryCard}>
         <View style={styles.analysisHistoryHeader}>
           <Text style={styles.analysisHistoryTitle}>今月の履歴</Text>
-          {isPro ? <ProBadge label="Pro保存中" /> : (
-            <Pressable style={styles.analysisProMark} onPress={() => openPaywall('過去月の履歴保存はPro機能です。', 'Freeでは今月分だけ。Proなら過去月の抽選履歴を見返せます。')}>
+          {isPro ? <ProBadge label="Premium保存中" /> : (
+            <Pressable style={styles.analysisProMark} onPress={() => openPaywall('過去月の履歴保存はPremium機能です。', 'Freeでは今月分だけ。Premiumなら過去月の抽選履歴を見返せます。')}>
               <Ionicons name="lock-closed-outline" size={15} color={INK} />
-              <Text style={styles.analysisProMarkText}>先月はPro</Text>
+              <Text style={styles.analysisProMarkText}>先月はPremium</Text>
             </Pressable>
           )}
         </View>
@@ -11729,19 +11988,6 @@ function AnalyticsTab({
           })
         )}
       </View>
-
-      <AnalysisSectionHeader
-        kicker="REPORT"
-        title="月次レポート通知"
-        lead="ジャンルを並べる画面ではなく、抽選履歴から届いたレポートとして見せます。"
-      />
-
-      <AnalysisReportDeliveryCard
-        analytics={currentAnalytics}
-        status={aiReportStatus}
-        isPro={isPro}
-        onOpen={openAiReport}
-      />
       <ProPaywall
         visible={paywallContext != null}
         title={paywallContext?.title}
@@ -11771,7 +12017,7 @@ function AnalysisReportDeliveryCard({
   const actionLabel = isLoading
     ? '読み込み中'
     : hasHistory
-      ? isPro ? 'レポートを開く' : 'Proで受け取る'
+      ? isPro ? 'レポートを開く' : 'レポートを受け取る'
       : '抽選後に届きます';
   const metrics = [
     { label: 'ジャンル', value: analytics.topGenre },
