@@ -191,6 +191,8 @@ type MonthlyAnalytics = {
   topArea: string;
 };
 
+type AiReportGraphAnalytics = Pick<MonthlyAnalytics, 'genreAnalytics' | 'drawCount' | 'estimatedSpend'>;
+
 type SavedRestaurantAnalytics = {
   totalSaved: number;
   genreAnalytics: AnalyticsTrendItem[];
@@ -240,6 +242,16 @@ type AiMonthlyReport = {
   closingNotes: string[];
   generatedAt: string;
   source: 'gemini' | 'demo' | 'fallback';
+};
+
+type StoredAiMonthlyReport = {
+  userId: string;
+  year: number;
+  month: number;
+  monthLabel: string;
+  report: AiMonthlyReport;
+  analytics?: AiReportGraphAnalytics;
+  savedAt: string;
 };
 
 type AiReportStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -359,6 +371,7 @@ const HOTPEPPER_CREDIT_IMAGE_URL = 'https://webservice.recruit.co.jp/banner/hotp
 const NATIVE_OAUTH_REDIRECT_URI = 'randish://auth/callback';
 const OAUTH_CALLBACK_PATH = 'auth/callback';
 const AUTH_SESSION_STORAGE_KEY = 'randish.authSession.v1';
+const AI_MONTHLY_REPORT_STORAGE_KEY_PREFIX = 'randish.aiMonthlyReport.latest.v1';
 
 const OAUTH_PROVIDER_NAMES: Record<OAuthProvider, string> = {
   google: 'Google',
@@ -4282,6 +4295,122 @@ const writeLocalValue = async (key: string, value: string) => {
     } catch {
       // Local storage can be unavailable in private windows; the app can still continue.
     }
+  }
+};
+
+const normalizeAiReportStorageUserId = (userId: string) => {
+  const cleanUserId = userId.trim();
+  return cleanUserId || APP_USER_ID;
+};
+
+const buildAiMonthlyReportStorageKey = (userId: string) =>
+  `${AI_MONTHLY_REPORT_STORAGE_KEY_PREFIX}:${encodeURIComponent(normalizeAiReportStorageUserId(userId))}`;
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string');
+
+const isAiMonthlyReport = (value: unknown): value is AiMonthlyReport => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const report = value as Partial<AiMonthlyReport>;
+  return typeof report.title === 'string'
+    && typeof report.summary === 'string'
+    && typeof report.mood === 'string'
+    && isStringArray(report.highlights)
+    && isStringArray(report.recommendations)
+    && isStringArray(report.savingsTips)
+    && typeof report.nextAction === 'string'
+    && isStringArray(report.closingNotes)
+    && typeof report.generatedAt === 'string'
+    && (report.source === 'gemini' || report.source === 'demo' || report.source === 'fallback');
+};
+
+const isAnalyticsTrendItemArray = (value: unknown): value is AnalyticsTrendItem[] =>
+  Array.isArray(value)
+  && value.every((item) => (
+    item
+    && typeof item === 'object'
+    && typeof (item as AnalyticsTrendItem).label === 'string'
+    && typeof (item as AnalyticsTrendItem).count === 'number'
+    && typeof (item as AnalyticsTrendItem).estimatedSpend === 'number'
+  ));
+
+const isAiReportGraphAnalytics = (value: unknown): value is AiReportGraphAnalytics => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const analytics = value as Partial<AiReportGraphAnalytics>;
+  return isAnalyticsTrendItemArray(analytics.genreAnalytics)
+    && typeof analytics.drawCount === 'number'
+    && typeof analytics.estimatedSpend === 'number';
+};
+
+const parseStoredAiMonthlyReport = (value: string | null): StoredAiMonthlyReport | null => {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as Partial<StoredAiMonthlyReport>;
+    return typeof parsed.userId === 'string'
+      && typeof parsed.year === 'number'
+      && Number.isInteger(parsed.year)
+      && typeof parsed.month === 'number'
+      && Number.isInteger(parsed.month)
+      && typeof parsed.monthLabel === 'string'
+      && typeof parsed.savedAt === 'string'
+      && isAiMonthlyReport(parsed.report)
+      ? {
+        userId: parsed.userId,
+        year: parsed.year,
+        month: parsed.month,
+        monthLabel: parsed.monthLabel,
+        report: parsed.report,
+        analytics: isAiReportGraphAnalytics(parsed.analytics) ? parsed.analytics : undefined,
+        savedAt: parsed.savedAt,
+      }
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const readStoredAiMonthlyReport = async (userId: string) => {
+  try {
+    return parseStoredAiMonthlyReport(await readLocalValue(buildAiMonthlyReportStorageKey(userId)));
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredAiMonthlyReport = async ({
+  userId,
+  year,
+  month,
+  monthLabel,
+  report,
+  analytics,
+}: {
+  userId: string;
+  year: number;
+  month: number;
+  monthLabel: string;
+  report: AiMonthlyReport;
+  analytics?: AiReportGraphAnalytics;
+}) => {
+  const payload: StoredAiMonthlyReport = {
+    userId: normalizeAiReportStorageUserId(userId),
+    year,
+    month,
+    monthLabel,
+    report,
+    analytics,
+    savedAt: new Date().toISOString(),
+  };
+  try {
+    await writeLocalValue(buildAiMonthlyReportStorageKey(userId), JSON.stringify(payload));
+  } catch {
+    // A failed cache write should not block the report from opening.
   }
 };
 
@@ -10468,6 +10597,7 @@ function AiMonthlyReportEntryCard({
   analytics,
   status,
   hasReport,
+  reportMonthLabel,
   isPro,
   isMonthEndUnlocked,
   deliveryLabel,
@@ -10477,6 +10607,7 @@ function AiMonthlyReportEntryCard({
   analytics: MonthlyAnalytics;
   status: AiReportStatus;
   hasReport: boolean;
+  reportMonthLabel?: string;
   isPro: boolean;
   isMonthEndUnlocked: boolean;
   deliveryLabel: string;
@@ -10485,7 +10616,8 @@ function AiMonthlyReportEntryCard({
 }) {
   const isLoading = status === 'loading';
   const hasHistory = analytics.drawCount > 0;
-  const envelopeDelivered = isMonthEndUnlocked && hasHistory;
+  const displayMonthLabel = hasReport && reportMonthLabel ? reportMonthLabel : analytics.monthLabel;
+  const envelopeDelivered = hasReport || (isMonthEndUnlocked && hasHistory);
   const openEnvelopeProgress = useRef(new Animated.Value(0)).current;
   const [openingEnvelope, setOpeningEnvelope] = useState(false);
   const [openingEnvelopeStep, setOpeningEnvelopeStep] = useState<'idle' | 'seal' | 'letter' | 'ai'>('idle');
@@ -10499,21 +10631,21 @@ function AiMonthlyReportEntryCard({
   }[] = [
     {
       label: '履歴を集計',
-      detail: hasHistory ? `${analytics.drawCount}件の抽選結果` : '抽選結果を保存',
+      detail: hasReport ? `${displayMonthLabel}の履歴` : hasHistory ? `${analytics.drawCount}件の抽選結果` : '抽選結果を保存',
       icon: 'scan-outline',
       color: '#c47b86',
       backgroundColor: '#fcf5f6',
     },
     {
       label: 'クセを抽出',
-      detail: hasHistory ? `${topGenreLabel}と予算傾向` : 'ジャンルと予算の偏り',
+      detail: hasReport ? '前回の傾向を保存中' : hasHistory ? `${topGenreLabel}と予算傾向` : 'ジャンルと予算の偏り',
       icon: 'sparkles-outline',
       color: '#77a494',
       backgroundColor: '#f5faf8',
     },
     {
       label: '月末に届ける',
-      detail: isMonthEndUnlocked ? '今月分を開封' : countdownLabel,
+      detail: hasReport ? `${displayMonthLabel}を保存済み` : isMonthEndUnlocked ? '今月分を開封' : countdownLabel,
       icon: 'mail-unread-outline',
       color: '#8d86b4',
       backgroundColor: '#f7f6fb',
@@ -10530,15 +10662,15 @@ function AiMonthlyReportEntryCard({
     ? '読み込み中'
     : !isPro
       ? 'レポートを受け取る'
-      : !hasHistory
-        ? '履歴を集める'
+      : hasReport
+        ? 'レポートを見る'
+        : !hasHistory
+          ? '履歴を集める'
         : !isMonthEndUnlocked
           ? '月末まで封印中'
-          : hasReport
-            ? 'レポートを見る'
-            : '封筒を開く';
-  const disabled = isLoading || openingEnvelope || !hasHistory || (isPro && !isMonthEndUnlocked);
-  const title = envelopeDelivered ? '月末レポートが届きました' : '月末に封筒で届きます';
+          : '封筒を開く';
+  const disabled = isLoading || openingEnvelope || (!hasHistory && !hasReport) || (isPro && !isMonthEndUnlocked && !hasReport);
+  const title = hasReport ? '前回の月末レポートを見返せます' : envelopeDelivered ? '月末レポートが届きました' : '月末に封筒で届きます';
   const handleOpenPress = useCallback(() => {
     if (!canPlayOpenAnimation) {
       onOpen();
@@ -10587,15 +10719,17 @@ function AiMonthlyReportEntryCard({
       <View style={styles.aiReportBuilderHeader}>
         <View style={styles.aiReportBuilderHeaderText}>
           <Text style={styles.aiReportBuilderKicker}>MONTHLY REPORT</Text>
-          <Text style={styles.aiReportBuilderTitle}>{hasHistory ? title : 'レポートは抽選後に届きます'}</Text>
+          <Text style={styles.aiReportBuilderTitle}>{hasHistory || hasReport ? title : 'レポートは抽選後に届きます'}</Text>
         </View>
         <View style={styles.aiReportBuilderBadge}>
           <Ionicons name={envelopeDelivered ? 'mail-open-outline' : 'mail-unread-outline'} size={15} color={ORANGE} />
-          <Text style={styles.aiReportBuilderBadgeText}>{analytics.monthLabel}</Text>
+          <Text style={styles.aiReportBuilderBadgeText}>{displayMonthLabel}</Text>
         </View>
       </View>
       <Text style={styles.aiReportBuilderLead} numberOfLines={2}>
-        月末になると、抽選で出たお店のジャンル・予算・場所を一通のレポートにまとめます。
+        {hasReport
+          ? `${displayMonthLabel}のレポートは、新しいレポートが届くまでここから見返せます。`
+          : '月末になると、抽選で出たお店のジャンル・予算・場所を一通のレポートにまとめます。'}
       </Text>
       <View style={styles.aiReportPostmarkRow}>
         <View style={styles.aiReportPostmarkPill}>
@@ -10617,6 +10751,7 @@ function AiMonthlyReportEntryCard({
         isSimulation={false}
         deliveryLabel={deliveryLabel}
         countdownLabel={countdownLabel}
+        monthLabel={displayMonthLabel}
         openingProgress={openEnvelopeProgress}
       />
       <View style={styles.aiReportBuilderNotice}>
@@ -10651,8 +10786,10 @@ function AiMonthlyReportEntryCard({
 
       <View style={styles.aiReportBuilderSummary}>
         <Text style={styles.aiReportBuilderSummaryText} numberOfLines={2}>
-          {hasHistory
-            ? '今月の食べ方が、月末に封筒で届くように積み上がっています。'
+          {hasReport
+            ? '保存済みのAIレターを、新しい月末レポートが届くまで開き直せます。'
+            : hasHistory
+              ? '今月の食べ方が、月末に封筒で届くように積み上がっています。'
             : 'ルーレット結果が入ると、月次AIレポートがここに届きます。'}
         </Text>
       </View>
@@ -10675,6 +10812,7 @@ function AiReportEnvelopePreview({
   isSimulation,
   deliveryLabel,
   countdownLabel,
+  monthLabel,
   openingProgress,
 }: {
   analytics: MonthlyAnalytics;
@@ -10682,6 +10820,7 @@ function AiReportEnvelopePreview({
   isSimulation: boolean;
   deliveryLabel: string;
   countdownLabel: string;
+  monthLabel?: string;
   openingProgress?: Animated.Value;
 }) {
   const envelopeProgress = useRef(new Animated.Value(delivered ? 1 : 0)).current;
@@ -10693,8 +10832,9 @@ function AiReportEnvelopePreview({
       ? '月末の到着状態をシミュレーション中'
       : '月末レポートが到着しました'
     : `${deliveryLabel}に到着予定`;
+  const displayMonthLabel = monthLabel ?? analytics.monthLabel;
   const envelopeLead = delivered
-    ? `${analytics.monthLabel}の外食傾向を封筒にまとめました。`
+    ? `${displayMonthLabel}の外食傾向を封筒にまとめました。`
     : `${countdownLabel}。届くまで抽選履歴をためられます。`;
   const letterBaseTranslateY = envelopeProgress.interpolate({
     inputRange: [0, 1],
@@ -10865,7 +11005,7 @@ function AiReportEnvelopePreview({
               <Ionicons name="sparkles" size={9} color="#ffffff" />
               <Text style={styles.aiReportLetterAiText}>AI</Text>
             </View>
-            <Text style={styles.aiReportLetterMonth} numberOfLines={1}>{analytics.monthLabel}</Text>
+            <Text style={styles.aiReportLetterMonth} numberOfLines={1}>{displayMonthLabel}</Text>
           </View>
           <Text style={styles.aiReportLetterTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.86}>
             AI FOOD REPORT
@@ -10956,7 +11096,7 @@ function AiMonthlyReportCard({
   limitNotice,
 }: {
   report: AiMonthlyReport;
-  analytics?: MonthlyAnalytics;
+  analytics?: AiReportGraphAnalytics;
   status: AiReportStatus;
   onRefresh: () => void;
   canRefresh?: boolean;
@@ -11795,6 +11935,8 @@ function AnalyticsTab({
   const [aiReportStatus, setAiReportStatus] = useState<AiReportStatus>('idle');
   const [aiReport, setAiReport] = useState<AiMonthlyReport | null>(null);
   const [aiReportUsed, setAiReportUsed] = useState(false);
+  const [aiReportPeriod, setAiReportPeriod] = useState<{ year: number; month: number; monthLabel: string } | null>(null);
+  const [aiReportGraphAnalytics, setAiReportGraphAnalytics] = useState<AiReportGraphAnalytics | null>(null);
   const [yearlyWrappedOpen, setYearlyWrappedOpen] = useState(false);
   const now = useMemo(() => new Date(), []);
   const aiReportMonthEndUnlocked = isMonthEndReportDay(now);
@@ -11826,6 +11968,8 @@ function AnalyticsTab({
   const yearlyWrappedReport = useMemo(() => buildYearlyWrappedReport(yearlyAnalytics), [yearlyAnalytics]);
   const savedAnalytics = useMemo(() => getSavedRestaurantAnalytics(savedRestaurants), [savedRestaurants]);
   const reportAnalytics = currentAnalytics;
+  const reportYear = reportAnalytics.monthDate.getFullYear();
+  const reportMonth = reportAnalytics.monthDate.getMonth();
   const localAiReportPreview = useMemo(() => buildLocalAiReport(reportAnalytics, savedAnalytics), [reportAnalytics, savedAnalytics]);
   const reportDataSignature = useMemo(
     () => [
@@ -11840,11 +11984,38 @@ function AnalyticsTab({
   );
 
   useEffect(() => {
+    let cancelled = false;
     setAiReportOpen(false);
     setAiReport(null);
     setAiReportStatus('idle');
     setAiReportUsed(false);
-  }, [reportDataSignature]);
+    setAiReportPeriod(null);
+    setAiReportGraphAnalytics(null);
+
+    void readStoredAiMonthlyReport(userId).then((storedReport) => {
+      if (cancelled || !storedReport) {
+        return;
+      }
+      const isCurrentReport = storedReport.year === reportYear && storedReport.month === reportMonth;
+      const canKeepLatestReport = isCurrentReport || !aiReportMonthEndUnlocked;
+      if (!canKeepLatestReport) {
+        return;
+      }
+      setAiReport(storedReport.report);
+      setAiReportPeriod({
+        year: storedReport.year,
+        month: storedReport.month,
+        monthLabel: storedReport.monthLabel,
+      });
+      setAiReportGraphAnalytics(storedReport.analytics ?? null);
+      setAiReportUsed(true);
+      setAiReportStatus(storedReport.report.source === 'fallback' ? 'error' : 'ready');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [aiReportMonthEndUnlocked, reportDataSignature, reportMonth, reportYear, userId]);
 
   useEffect(() => {
     if (!aiReportMonthEndUnlocked) {
@@ -11870,11 +12041,26 @@ function AnalyticsTab({
     setAiReportOpen(false);
     setAiReportStatus('loading');
     const nextReport = await requestAiMonthlyReport(reportAnalytics, savedAnalytics, apiBaseUrlCandidates, userId);
+    const nextReportGraphAnalytics = {
+      genreAnalytics: reportAnalytics.genreAnalytics,
+      drawCount: reportAnalytics.drawCount,
+      estimatedSpend: reportAnalytics.estimatedSpend,
+    };
     setAiReport(nextReport);
+    setAiReportPeriod({ year: reportYear, month: reportMonth, monthLabel: reportAnalytics.monthLabel });
+    setAiReportGraphAnalytics(nextReportGraphAnalytics);
     setAiReportUsed(true);
     setAiReportStatus(nextReport.source === 'fallback' ? 'error' : 'ready');
     setAiReportOpen(true);
-  }, [aiReportMonthEndUnlocked, aiReportStatus, apiBaseUrlCandidates, reportAnalytics, savedAnalytics, userId]);
+    void writeStoredAiMonthlyReport({
+      userId,
+      year: reportYear,
+      month: reportMonth,
+      monthLabel: reportAnalytics.monthLabel,
+      report: nextReport,
+      analytics: nextReportGraphAnalytics,
+    });
+  }, [aiReportMonthEndUnlocked, aiReportStatus, apiBaseUrlCandidates, reportAnalytics, reportMonth, reportYear, savedAnalytics, userId]);
 
   const openAiReport = useCallback(() => {
     if (!isPro) {
@@ -11884,11 +12070,11 @@ function AnalyticsTab({
       );
       return;
     }
-    if (!aiReportMonthEndUnlocked) {
-      return;
-    }
     if (aiReportUsed && aiReport) {
       setAiReportOpen(true);
+      return;
+    }
+    if (!aiReportMonthEndUnlocked) {
       return;
     }
     if (!aiReportUsed && aiReportStatus === 'idle') {
@@ -11896,6 +12082,8 @@ function AnalyticsTab({
       return;
     }
   }, [aiReport, aiReportMonthEndUnlocked, aiReportStatus, aiReportUsed, isPro, loadAiReport, openPaywall]);
+
+  const aiReportMatchesCurrentAnalytics = aiReportPeriod?.year === reportYear && aiReportPeriod.month === reportMonth;
 
   return (
     <View style={styles.analysisScreen}>
@@ -11914,6 +12102,7 @@ function AnalyticsTab({
         analytics={reportAnalytics}
         status={aiReportStatus}
         hasReport={Boolean(aiReport)}
+        reportMonthLabel={aiReportPeriod?.monthLabel}
         isPro={isPro}
         isMonthEndUnlocked={aiReportMonthEndUnlocked}
         deliveryLabel={aiReportDeliveryLabel}
@@ -11924,7 +12113,7 @@ function AnalyticsTab({
       {aiReportOpen && (
         <AiMonthlyReportCard
           report={aiReport ?? localAiReportPreview}
-          analytics={reportAnalytics}
+          analytics={aiReportMatchesCurrentAnalytics ? reportAnalytics : aiReportGraphAnalytics ?? undefined}
           status={aiReportStatus}
           onRefresh={loadAiReport}
           canRefresh={false}

@@ -141,9 +141,26 @@ public class AuthController {
     if (host == null || host.isBlank()) {
       host = request.getServerName() + (request.getServerPort() > 0 ? ":" + request.getServerPort() : "");
     }
+    host = bridgeHostForAppRedirect(host, appRedirectTo);
     String contextPath = request.getContextPath() == null ? "" : request.getContextPath();
     return scheme + "://" + host + contextPath + "/api/auth/oauth/callback?app_redirect="
         + URLEncoder.encode(appRedirectTo.trim(), StandardCharsets.UTF_8);
+  }
+
+  private String bridgeHostForAppRedirect(String requestHost, String appRedirectTo) {
+    if (requestHost == null || requestHost.isBlank() || !isLoopbackHost(hostWithoutPort(requestHost))) {
+      return requestHost;
+    }
+    try {
+      URI appUri = URI.create(appRedirectTo.trim());
+      String appHost = appUri.getHost();
+      if (appHost == null || appHost.isBlank() || !isLocalDevelopmentHost(appHost)) {
+        return requestHost;
+      }
+      return appHost + ":8080";
+    } catch (IllegalArgumentException exception) {
+      return requestHost;
+    }
   }
 
   private String oauthBridgePage(String appRedirectTo) {
@@ -216,7 +233,7 @@ public class AuthController {
     if (host == null || host.isBlank()) {
       return false;
     }
-    if ("localhost".equals(host) || "127.0.0.1".equals(host) || "::1".equals(host)) {
+    if (isLoopbackHost(host)) {
       return true;
     }
     if (host.startsWith("192.168.") || host.startsWith("10.")) {
@@ -235,6 +252,25 @@ public class AuthController {
     } catch (NumberFormatException exception) {
       return false;
     }
+  }
+
+  private boolean isLoopbackHost(String host) {
+    return "localhost".equals(host) || "127.0.0.1".equals(host) || "::1".equals(host);
+  }
+
+  private String hostWithoutPort(String host) {
+    if (host == null) {
+      return "";
+    }
+    String trimmed = host.trim();
+    if (trimmed.startsWith("[") && trimmed.contains("]")) {
+      return trimmed.substring(1, trimmed.indexOf(']'));
+    }
+    int portSeparator = trimmed.lastIndexOf(':');
+    if (portSeparator > -1 && trimmed.indexOf(':') == portSeparator) {
+      return trimmed.substring(0, portSeparator);
+    }
+    return trimmed;
   }
 
   private String firstForwardedValue(String value) {
