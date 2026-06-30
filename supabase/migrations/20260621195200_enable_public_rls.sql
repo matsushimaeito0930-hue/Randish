@@ -23,7 +23,6 @@ alter table if exists public.random_histories enable row level security;
 alter table if exists public.favorite_restaurants enable row level security;
 alter table if exists public.visit_collections enable row level security;
 alter table if exists public.expense_memos enable row level security;
-alter table if exists public.stamps enable row level security;
 
 do $$
 declare
@@ -45,8 +44,7 @@ begin
     'random_histories',
     'favorite_restaurants',
     'visit_collections',
-    'expense_memos',
-    'stamps'
+    'expense_memos'
   ]
   loop
     if to_regclass(format('public.%I', target_table)) is not null then
@@ -76,7 +74,6 @@ begin
       ('random_histories', 'select, insert'),
       ('visit_collections', 'select, insert, update, delete'),
       ('expense_memos', 'select, insert, update, delete'),
-      ('stamps', 'select'),
       ('feature_usage_counters', 'select')
     ) as grants(table_name, privileges)
   loop
@@ -217,14 +214,6 @@ begin
         'expense_memos',
         'users can delete own expense memos',
         'delete',
-        'auth.uid()::text = user_id',
-        null::text,
-        true
-      ),
-      (
-        'stamps',
-        'users can read own stamps',
-        'select',
         'auth.uid()::text = user_id',
         null::text,
         true

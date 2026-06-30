@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
@@ -49,6 +50,18 @@ public class ApiExceptionHandler {
   public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException exception) {
     return ResponseEntity.status(HttpStatus.NOT_FOUND)
         .body(new ErrorResponse("NOT_FOUND", "Resource not found.", List.of()));
+  }
+
+  @ExceptionHandler(ResponseStatusException.class)
+  public ResponseEntity<ErrorResponse> handleResponseStatus(ResponseStatusException exception) {
+    HttpStatus status = HttpStatus.resolve(exception.getStatusCode().value());
+    HttpStatus resolvedStatus = status == null ? HttpStatus.INTERNAL_SERVER_ERROR : status;
+    String code = resolvedStatus.name();
+    String message = exception.getReason() == null || exception.getReason().isBlank()
+        ? resolvedStatus.getReasonPhrase()
+        : exception.getReason();
+    return ResponseEntity.status(resolvedStatus)
+        .body(new ErrorResponse(code, message, List.of()));
   }
 
   @ExceptionHandler(Exception.class)

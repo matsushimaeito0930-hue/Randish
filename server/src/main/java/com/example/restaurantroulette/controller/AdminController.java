@@ -1,23 +1,22 @@
 package com.example.restaurantroulette.controller;
 
+import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.service.external.GeoapifyRestaurantProvider;
 import com.example.restaurantroulette.service.external.GooglePlacesEnrichmentService;
 import com.example.restaurantroulette.service.external.HotPepperRestaurantProvider;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
-  private static final String DEFAULT_ADMIN_PASSWORD = "matsushima0930-eito";
+  private static final String DEFAULT_ADMIN_PASSWORD = "eito0930";
 
   private final HotPepperRestaurantProvider hotPepperRestaurantProvider;
   private final GeoapifyRestaurantProvider geoapifyRestaurantProvider;
@@ -37,7 +36,7 @@ public class AdminController {
       @RequestHeader(value = "X-Randish-Admin-Password", required = false) String headerPassword,
       @RequestParam(required = false) String password) {
     if (!adminPassword().equals(firstNonBlank(headerPassword, password))) {
-      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Admin password is required.");
+      throw new UnauthorizedException("Admin password is incorrect.");
     }
     return Map.of(
         "generatedAt", Instant.now().toString(),
@@ -48,7 +47,7 @@ public class AdminController {
   }
 
   private String adminPassword() {
-    String configured = System.getenv("RANDISH_ADMIN_PASSWORD");
+    String configured = firstNonBlank(System.getProperty("RANDISH_ADMIN_PASSWORD"), System.getenv("RANDISH_ADMIN_PASSWORD"));
     return configured == null || configured.isBlank() ? DEFAULT_ADMIN_PASSWORD : configured.trim();
   }
 

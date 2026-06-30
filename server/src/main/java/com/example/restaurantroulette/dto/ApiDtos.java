@@ -1,6 +1,5 @@
 package com.example.restaurantroulette.dto;
 
-import com.example.restaurantroulette.entity.StampType;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -230,14 +229,6 @@ public final class ApiDtos {
   }
 
   public record VisitCheckResponse(boolean visited) {
-  }
-
-  public record StampResponse(
-      String id,
-      String userId,
-      String restaurantId,
-      StampType stampType,
-      Instant awardedAt) {
   }
 
   public record StatisticsResponse(

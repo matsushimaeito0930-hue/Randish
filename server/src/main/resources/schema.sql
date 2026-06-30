@@ -362,20 +362,6 @@ CREATE TABLE IF NOT EXISTS expense_memos (
   CONSTRAINT ck_expense_memos_amount CHECK (amount >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS stamps (
-  id VARCHAR(120) PRIMARY KEY,
-  user_id VARCHAR(120) NOT NULL,
-  restaurant_id VARCHAR(120) NOT NULL,
-  stamp_type VARCHAR(80) NOT NULL,
-  awarded_at TIMESTAMP WITH TIME ZONE NOT NULL,
-  CONSTRAINT fk_stamps_restaurant
-    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id),
-  CONSTRAINT ck_stamps_type CHECK (
-    stamp_type IN ('FIRST_VISIT', 'GENRE_COLLECTOR', 'AREA_COLLECTOR', 'REPEAT_VISIT')
-  ),
-  CONSTRAINT uk_stamp_user_restaurant_type UNIQUE (user_id, restaurant_id, stamp_type)
-);
-
 ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS source_synced_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP;
@@ -445,5 +431,3 @@ CREATE INDEX IF NOT EXISTS idx_visits_restaurant ON visit_collections(restaurant
 CREATE INDEX IF NOT EXISTS idx_expense_memos_user ON expense_memos(user_id, spent_on);
 CREATE INDEX IF NOT EXISTS idx_expense_memos_visit ON expense_memos(visit_collection_id);
 CREATE INDEX IF NOT EXISTS idx_expense_memos_restaurant ON expense_memos(restaurant_id);
-CREATE INDEX IF NOT EXISTS idx_stamps_user ON stamps(user_id, awarded_at);
-CREATE INDEX IF NOT EXISTS idx_stamps_restaurant ON stamps(restaurant_id);

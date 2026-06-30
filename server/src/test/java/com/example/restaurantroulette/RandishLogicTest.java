@@ -23,7 +23,6 @@ import com.example.restaurantroulette.repository.PremiumRepository;
 import com.example.restaurantroulette.repository.RandomHistoryRepository;
 import com.example.restaurantroulette.repository.RevenueCatWebhookRepository;
 import com.example.restaurantroulette.repository.RestaurantRepository;
-import com.example.restaurantroulette.repository.StampRepository;
 import com.example.restaurantroulette.repository.VisitCollectionRepository;
 import com.example.restaurantroulette.service.AuthService;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
@@ -38,7 +37,6 @@ import com.example.restaurantroulette.service.RandomHistoryService;
 import com.example.restaurantroulette.service.RandomRestaurantService;
 import com.example.restaurantroulette.service.RevenueCatWebhookService;
 import com.example.restaurantroulette.service.RestaurantQueryService;
-import com.example.restaurantroulette.service.StampService;
 import com.example.restaurantroulette.service.StatisticsService;
 import com.example.restaurantroulette.service.SupabaseAuthService;
 import com.example.restaurantroulette.service.UserService;
@@ -91,8 +89,7 @@ class RandishLogicTest {
   private final PasswordHashService passwordHashService = new PasswordHashService();
   private final UserService userService = new UserService(new AppUserRepository(jdbcClient), mapper, passwordHashService);
   private final PremiumService premiumService = new PremiumService(new PremiumRepository(jdbcClient));
-  private final StampService stampService = new StampService(new StampRepository(jdbcClient), mapper, validationService);
-  private final VisitCollectionService visitCollectionService = new VisitCollectionService(new VisitCollectionRepository(jdbcClient), restaurantQueryService, stampService, mapper, validationService);
+  private final VisitCollectionService visitCollectionService = new VisitCollectionService(new VisitCollectionRepository(jdbcClient), restaurantQueryService, mapper, validationService);
   private final StatisticsService statisticsService = new StatisticsService(visitCollectionService, restaurantQueryService, favoriteService, validationService);
 
   @Test
@@ -436,14 +433,12 @@ class RandishLogicTest {
   }
 
   @Test
-  void visitAwardsFirstVisitStampAndStatistics() {
+  void visitCreatesCollectionAndStatistics() {
     visitCollectionService.create(new VisitCreateRequest("user-visit", "seed-umeda-ramen", null, null, "good", 5));
     favoriteService.create(new FavoriteCreateRequest("user-visit", "seed-umeda-ramen"));
 
-    var stamps = stampService.findByUserId("user-visit");
     var statistics = statisticsService.calculate("user-visit");
 
-    assertThat(stamps).hasSize(1);
     assertThat(statistics.totalVisits()).isEqualTo(1);
     assertThat(statistics.visitedRestaurantCount()).isEqualTo(1);
     assertThat(statistics.favoriteGenre()).isEqualTo("ラーメン");
@@ -451,16 +446,14 @@ class RandishLogicTest {
   }
 
   @Test
-  void repeatedVisitsAreTrackedWithoutDuplicatingFirstVisitStamp() {
+  void repeatedVisitsAreTrackedWithoutDuplicatingVisitedRestaurants() {
     visitCollectionService.create(new VisitCreateRequest("user-repeat", "seed-umeda-ramen", null, null, "first", 5));
     visitCollectionService.create(new VisitCreateRequest("user-repeat", "seed-umeda-ramen", null, null, "again", 4));
 
     var visits = visitCollectionService.findByUserId("user-repeat");
-    var stamps = stampService.findByUserId("user-repeat");
     var statistics = statisticsService.calculate("user-repeat");
 
     assertThat(visits).hasSize(2);
-    assertThat(stamps).hasSize(1);
     assertThat(statistics.totalVisits()).isEqualTo(2);
     assertThat(statistics.visitedRestaurantCount()).isEqualTo(1);
   }

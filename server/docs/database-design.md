@@ -2,7 +2,7 @@
 
 ## Scope
 
-RANDISH is a restaurant roulette app. The database keeps the canonical restaurant cache and the user's actions around it: draws, favorites, visits, stamps, auth/profile data, and Premium billing state.
+RANDISH is a restaurant roulette app. The database keeps the canonical restaurant cache and the user's actions around it: draws, favorites, visits, auth/profile data, and Premium billing state.
 
 This design is applied to the current Spring Boot + JDBC + H2 setup in `src/main/resources/schema.sql`, while keeping the shape close to PostgreSQL/Supabase so it can be migrated later.
 
@@ -13,7 +13,7 @@ This design is applied to the current Spring Boot + JDBC + H2 setup in `src/main
 - External data is upserted by stable provider identity: `external_provider + external_id`.
 - A draw history stores the selected restaurant and the filter snapshot used at that time.
 - Visits are append-only events, so the same user can visit the same restaurant multiple times.
-- Favorites and stamps are deduplicated by business rules with unique constraints.
+- Favorites are deduplicated by business rules with unique constraints.
 - Google/other provider enrichment can be cached separately from the base restaurant row.
 - Paid Premium state is normalized across Stripe, App Store, and Google Play in `subscriptions`.
 - Admin-granted Premium is kept separate in `premium_grants`.
@@ -28,13 +28,11 @@ erDiagram
   app_users ||--o{ random_histories : "future FK by user_id"
   app_users ||--o{ favorite_restaurants : "future FK by user_id"
   app_users ||--o{ visit_collections : "future FK by user_id"
-  app_users ||--o{ stamps : "future FK by user_id"
 
   restaurants ||--o{ restaurant_enrichments : enriches
   restaurants ||--o{ random_histories : selected
   restaurants ||--o{ favorite_restaurants : saved
   restaurants ||--o{ visit_collections : visited
-  restaurants ||--o{ stamps : awarded_for
 
   app_users {
     varchar id PK
@@ -108,13 +106,6 @@ erDiagram
     timestamptz created_at
   }
 
-  stamps {
-    varchar id PK
-    varchar user_id
-    varchar restaurant_id FK
-    varchar stamp_type
-    timestamptz awarded_at
-  }
 ```
 
 ## Tables
@@ -185,29 +176,13 @@ Important constraints:
 
 `existsByUserIdAndRestaurantId` still supports the current "visited?" check.
 
-### `stamps`
-
-Achievements awarded from user activity.
-
-Current stamp types:
-- `FIRST_VISIT`
-- `GENRE_COLLECTOR`
-- `AREA_COLLECTOR`
-- `REPEAT_VISIT`
-
-Important constraints:
-- `FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)`
-- `UNIQUE (user_id, restaurant_id, stamp_type)`
-
-For future non-restaurant-specific achievements, add `scope_type` and `scope_value`, then relax `restaurant_id` to nullable.
-
 ## Access Patterns And Indexes
 
 The current schema indexes these paths:
 
 - Restaurant filtering: `area`, `genre`, `area + genre + budget_min + budget_max`
 - Location-backed search: `latitude + longitude`
-- User timelines: `random_histories(user_id, created_at)`, `favorite_restaurants(user_id, created_at)`, `visit_collections(user_id, visit_date)`, `stamps(user_id, awarded_at)`
+- User timelines: `random_histories(user_id, created_at)`, `favorite_restaurants(user_id, created_at)`, `visit_collections(user_id, visit_date)`
 - Existence checks: `visit_collections(user_id, restaurant_id)`
 - Reverse lookups by restaurant: action tables have `restaurant_id` indexes.
 - Enrichment cache expiry: `restaurant_enrichments(provider, expires_at)`
@@ -226,4 +201,3 @@ The current schema indexes these paths:
 - Whether `area` should stay provider-derived text or become a normalized prefecture/city/station model.
 - Whether favorites should support folders/tags.
 - Whether visit photos should remain URL-only or move to managed object storage metadata.
-- Whether stamps should become global achievements with scoped metadata.

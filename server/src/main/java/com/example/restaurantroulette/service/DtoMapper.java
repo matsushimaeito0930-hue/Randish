@@ -3,14 +3,12 @@ package com.example.restaurantroulette.service;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
-import com.example.restaurantroulette.dto.ApiDtos.StampResponse;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.dto.ApiDtos.VisitResponse;
 import com.example.restaurantroulette.entity.AppUser;
 import com.example.restaurantroulette.entity.FavoriteRestaurant;
 import com.example.restaurantroulette.entity.RandomHistory;
 import com.example.restaurantroulette.entity.Restaurant;
-import com.example.restaurantroulette.entity.Stamp;
 import com.example.restaurantroulette.entity.VisitCollection;
 import org.springframework.stereotype.Component;
 
@@ -95,9 +93,5 @@ public class DtoMapper {
         visit.memo(),
         visit.rating(),
         visit.createdAt());
-  }
-
-  public StampResponse toStampResponse(Stamp stamp) {
-    return new StampResponse(stamp.id(), stamp.userId(), stamp.restaurantId(), stamp.stampType(), stamp.awardedAt());
   }
 }

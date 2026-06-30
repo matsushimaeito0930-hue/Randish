@@ -15,19 +15,16 @@ import org.springframework.stereotype.Service;
 public class VisitCollectionService {
   private final VisitCollectionRepository visitRepository;
   private final RestaurantQueryService restaurantQueryService;
-  private final StampService stampService;
   private final DtoMapper mapper;
   private final ValidationService validationService;
 
   public VisitCollectionService(
       VisitCollectionRepository visitRepository,
       RestaurantQueryService restaurantQueryService,
-      StampService stampService,
       DtoMapper mapper,
       ValidationService validationService) {
     this.visitRepository = visitRepository;
     this.restaurantQueryService = restaurantQueryService;
-    this.stampService = stampService;
     this.mapper = mapper;
     this.validationService = validationService;
   }
@@ -36,7 +33,6 @@ public class VisitCollectionService {
     String userId = validationService.requirePersistentUserId(request.userId());
     String restaurantId = validationService.requireRestaurantId(request.restaurantId());
     var restaurant = restaurantQueryService.getEntityOrThrow(restaurantId);
-    boolean alreadyVisited = visitRepository.existsByUserIdAndRestaurantId(userId, restaurantId);
     VisitCollection visit = new VisitCollection(
         UUID.randomUUID().toString(),
         userId,
@@ -47,7 +43,6 @@ public class VisitCollectionService {
         validationService.validateRating(request.rating()),
         Instant.now());
     VisitCollection saved = visitRepository.save(visit);
-    stampService.awardFirstVisitIfNeeded(userId, restaurantId, alreadyVisited);
     return mapper.toVisitResponse(saved, restaurant);
   }
 
