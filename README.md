@@ -172,7 +172,19 @@ Expo Web: http://localhost:YOUR_WEB_PORT/auth/callback
 
 Add the exact local callback shown by your running app to Supabase Auth redirect URLs. You can force one with `EXPO_PUBLIC_RANDISH_OAUTH_REDIRECT_URI` when the host or port must stay fixed.
 
-The mobile app opens Supabase OAuth, receives the callback token, and asks the Spring Boot API to verify that token before syncing the user.
+The mobile app opens Supabase OAuth, receives the callback token, and asks the Spring Boot API to verify that token before syncing the user. Supabase requires the `redirectTo` URL to match its Auth redirect allow list.
+
+If a target runtime cannot return directly to the app callback, enable the Spring Boot OAuth bridge:
+
+```env
+EXPO_PUBLIC_RANDISH_OAUTH_USE_BRIDGE=true
+```
+
+When the bridge is enabled, add the API callback URL to Supabase Auth redirect URLs instead of the app callback:
+
+```text
+http://YOUR-PC-IP:8080/api/auth/oauth/callback
+```
 
 ## Database
 

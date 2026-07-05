@@ -377,6 +377,8 @@ const OAUTH_PROVIDER_NAMES: Record<OAuthProvider, string> = {
   google: 'Google',
   apple: 'Apple',
 };
+const HIDDEN_OPS_PROFILE_NAME = '@api0930';
+const normalizeHiddenProfileCommand = (value: string) => value.trim().toLowerCase();
 
 type StoredAuthSession = {
   accessToken: string;
@@ -520,6 +522,12 @@ const getConfiguredApiBaseUrl = () => {
 const getConfiguredOAuthRedirectUri = () => {
   const runtimeGlobal = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
   return runtimeGlobal.process?.env?.EXPO_PUBLIC_RANDISH_OAUTH_REDIRECT_URI?.trim() || null;
+};
+
+const isOAuthBridgeEnabled = () => {
+  const runtimeGlobal = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
+  const value = runtimeGlobal.process?.env?.EXPO_PUBLIC_RANDISH_OAUTH_USE_BRIDGE?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
 };
 
 const getMetroScriptUrl = () => {
@@ -7068,7 +7076,12 @@ function LoginScreen({
     setAuthNotice('');
     try {
       const oauthRedirectUri = getOAuthRedirectUri();
-      const authUrl = await randishApi.getOAuthAuthorizeUrl(apiBaseUrlCandidates, provider, oauthRedirectUri);
+      const authUrl = await randishApi.getOAuthAuthorizeUrl(
+        apiBaseUrlCandidates,
+        provider,
+        oauthRedirectUri,
+        isOAuthBridgeEnabled(),
+      );
       onApiConnected();
       const result = await WebBrowser.openAuthSessionAsync(authUrl.authorizationUrl, oauthRedirectUri, {
         dismissButtonStyle: 'cancel',
@@ -7600,6 +7613,7 @@ function HomeLocationPanel({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
+  const [notificationSheetOpen, setNotificationSheetOpen] = useState(false);
   const [logoutSheetOpen, setLogoutSheetOpen] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState(profileName);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
@@ -7727,7 +7741,7 @@ function HomeLocationPanel({
     }
     Keyboard.dismiss();
     const nextName = profileNameDraft.trim();
-    if (nextName.toLowerCase() === '@api') {
+    if (normalizeHiddenProfileCommand(nextName) === HIDDEN_OPS_PROFILE_NAME) {
       setProfileNameDraft(profileName);
       openAdminPanel();
       return;
@@ -7739,6 +7753,7 @@ function HomeLocationPanel({
     Keyboard.dismiss();
     setProfileEditorOpen(false);
     setLanguageMenuOpen(false);
+    setNotificationSheetOpen(false);
     setAccountMenuOpen(false);
   };
 
@@ -7770,8 +7785,18 @@ function HomeLocationPanel({
     Keyboard.dismiss();
     setProfileEditorOpen(false);
     setLanguageMenuOpen(false);
+    setNotificationSheetOpen(false);
     setAccountMenuOpen(false);
     setAdminPanelOpen(true);
+  };
+
+  const handleProfileNameDraftChange = (value: string) => {
+    if (normalizeHiddenProfileCommand(value) === HIDDEN_OPS_PROFILE_NAME) {
+      setProfileNameDraft(profileName);
+      openAdminPanel();
+      return;
+    }
+    setProfileNameDraft(value);
   };
 
   const closeAdminPanel = () => {
@@ -7967,6 +7992,45 @@ function HomeLocationPanel({
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <Modal
+        visible={notificationSheetOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNotificationSheetOpen(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.logoutModalOverlay}>
+          <View style={styles.logoutSheet}>
+            <View style={styles.logoutSheetIcon}>
+              <Ionicons name="notifications-outline" size={28} color={ORANGE} />
+            </View>
+            <Text style={styles.logoutSheetTitle}>食券リマインド</Text>
+            <Text style={styles.logoutSheetLead}>
+              朝・昼・夜・深夜の一食カードを忘れないように、利用枠の状態をここで確認できます。
+            </Text>
+            <View style={styles.logoutSheetNotice}>
+              <Ionicons name="ticket-outline" size={17} color={ORANGE} />
+              <Text style={styles.logoutSheetNoticeText}>
+                今日のFREE利用枠: {mealTicketState.usedFreeCount}/{mealTicketState.totalFreeCount}
+              </Text>
+            </View>
+            <View style={styles.logoutSheetActions}>
+              <Pressable style={styles.logoutSheetCancelButton} onPress={() => setNotificationSheetOpen(false)}>
+                <Text style={styles.logoutSheetCancelText}>閉じる</Text>
+              </Pressable>
+              <Pressable
+                style={styles.logoutSheetActionButton}
+                onPress={() => {
+                  setNotificationSheetOpen(false);
+                  setAccountMenuOpen(false);
+                }}
+              >
+                <Text style={styles.logoutSheetActionText}>確認</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <View style={styles.homeTopBar}>
         <View style={styles.homeLogoButton}>
           <Image source={RANDISH_LOGO} style={styles.homeLogoImage} resizeMode="contain" />
@@ -8031,7 +8095,7 @@ function HomeLocationPanel({
                   <Text style={styles.homeProfileEditorLabel}>{t.displayName}</Text>
                   <TextInput
                     value={profileNameDraft}
-                    onChangeText={setProfileNameDraft}
+                    onChangeText={handleProfileNameDraftChange}
                     style={styles.homeProfileNameInput}
                     placeholder={t.profilePlaceholder}
                     placeholderTextColor="#a49a90"
@@ -8079,7 +8143,11 @@ function HomeLocationPanel({
                 </View>
               )}
               {accountMenuItems.map((item, index) => (
-                <Pressable key={`${item.label}-${index}`} style={styles.homeAccountMenuItem}>
+                <Pressable
+                  key={`${item.label}-${index}`}
+                  style={styles.homeAccountMenuItem}
+                  onPress={index === 0 ? () => setNotificationSheetOpen(true) : undefined}
+                >
                   <View style={styles.homeAccountMenuIcon}>
                     <Ionicons name={item.icon} size={18} color={ORANGE} />
                   </View>
@@ -8103,10 +8171,6 @@ function HomeLocationPanel({
                 </Pressable>
               )}
               <View style={styles.homeAccountMenuFooter}>
-                <Pressable style={styles.homeAccountAdminButton} onPress={openAdminPanel}>
-                  <Ionicons name="analytics-outline" size={14} color="#b6aa9d" />
-                  <Text style={styles.homeAccountAdminButtonText}>ops</Text>
-                </Pressable>
                 <Pressable
                   style={styles.homeAccountCloseButton}
                   onPress={closeAccountMenu}

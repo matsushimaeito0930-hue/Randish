@@ -7,6 +7,7 @@ import com.example.restaurantroulette.dto.ApiDtos.OAuthRefreshRequest;
 import com.example.restaurantroulette.dto.ApiDtos.OAuthSessionRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
+import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.service.AuthService;
 import com.example.restaurantroulette.service.EmailRegistrationService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,7 +15,6 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -74,16 +74,14 @@ public class AuthController {
       @RequestParam(required = false) String redirectTo,
       @RequestParam(required = false) String appRedirectTo,
       HttpServletRequest request) {
-    String resolvedRedirectTo = appRedirectTo == null || appRedirectTo.isBlank()
-        ? redirectTo
-        : buildOAuthBridgeRedirect(request, appRedirectTo);
+    String resolvedRedirectTo = resolveOAuthRedirect(request, redirectTo, appRedirectTo);
     return authService.createOAuthAuthorizeUrl(provider, resolvedRedirectTo);
   }
 
   @GetMapping(value = "/oauth/callback", produces = MediaType.TEXT_HTML_VALUE)
   public ResponseEntity<String> oauthCallbackBridge(@RequestParam(name = "app_redirect") String appRedirectTo) {
     if (!isAllowedOAuthAppRedirect(appRedirectTo)) {
-      throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "OAuth redirect is not allowed.");
+      throw new BadRequestException("OAuth redirect is not allowed.");
     }
     return ResponseEntity.ok(oauthBridgePage(appRedirectTo));
   }
@@ -128,7 +126,7 @@ public class AuthController {
 
   private String buildOAuthBridgeRedirect(HttpServletRequest request, String appRedirectTo) {
     if (!isAllowedOAuthAppRedirect(appRedirectTo)) {
-      throw new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, "OAuth redirect is not allowed.");
+      throw new BadRequestException("OAuth redirect is not allowed.");
     }
     String scheme = firstForwardedValue(request.getHeader("X-Forwarded-Proto"));
     if (scheme == null || scheme.isBlank()) {
@@ -161,6 +159,19 @@ public class AuthController {
     } catch (IllegalArgumentException exception) {
       return requestHost;
     }
+  }
+
+  private String resolveOAuthRedirect(HttpServletRequest request, String redirectTo, String appRedirectTo) {
+    if (appRedirectTo != null && !appRedirectTo.isBlank()) {
+      return buildOAuthBridgeRedirect(request, appRedirectTo);
+    }
+    if (redirectTo == null || redirectTo.isBlank()) {
+      return redirectTo;
+    }
+    if (!isAllowedOAuthAppRedirect(redirectTo)) {
+      throw new BadRequestException("OAuth redirect is not allowed.");
+    }
+    return redirectTo.trim();
   }
 
   private String oauthBridgePage(String appRedirectTo) {

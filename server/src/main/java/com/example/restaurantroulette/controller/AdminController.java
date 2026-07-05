@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
-  private static final String DEFAULT_ADMIN_PASSWORD = "eito0930";
+  private static final String DEFAULT_ADMIN_PASSWORD = "eito";
 
   private final HotPepperRestaurantProvider hotPepperRestaurantProvider;
   private final GeoapifyRestaurantProvider geoapifyRestaurantProvider;
