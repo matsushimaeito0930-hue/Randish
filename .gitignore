@@ -46,3 +46,5 @@ mobile/server/
 server/App.tsx
 server/package.json
 server/package-lock.json
+tmp/
+.czrc
