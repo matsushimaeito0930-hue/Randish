@@ -911,6 +911,7 @@ export const styles = StyleSheet.create({
   homeLogoImage: {
     width: 36,
     height: 36,
+    borderRadius: 10,
   },
   homeAccountButton: {
     width: 42,
