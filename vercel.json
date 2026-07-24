@@ -5,9 +5,8 @@
   "buildCommand": "npm --prefix mobile run build:web",
   "outputDirectory": "mobile/dist",
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/api/auth/:action*", "destination": "/api/auth?action=:action*" },
+    { "source": "/api/data/:action*", "destination": "/api/data?action=:action*" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
