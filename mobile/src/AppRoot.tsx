@@ -22,7 +22,7 @@ import {
   View,
 } from 'react-native';
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
-import type { ApiUsageResponse, AuthResponse, CandidatePlace, Favorite as ApiFavorite, OAuthProvider, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory } from './services/randishApi';
+import type { ApiUsageResponse, AuthResponse, CandidatePlace, Favorite as ApiFavorite, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory } from './services/randishApi';
 import {
   getNativeBillingSetupMessage,
   presentPremiumPaywall,
@@ -31,17 +31,14 @@ import {
   TRUST_NATIVE_REVENUECAT_STATUS,
 } from './services/premiumBilling';
 import { JAPAN_MUNICIPALITY_PRESETS } from './data/japanMunicipalities';
-import { FontAwesome, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Svg, { Circle, G } from 'react-native-svg';
 import { getNativeMapModule } from './services/optionalMap';
-import * as AppleAuthentication from 'expo-apple-authentication';
-import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
+import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { FAVORITE_PINK, INK, ORANGE } from './constants/theme';
 import { styles } from './styles/appStyles';
-
-WebBrowser.maybeCompleteAuthSession();
 
 const consumedOAuthCallbackUrls = new Set<string>();
 const MIDNIGHT_PURPLE = '#6c63ff';
@@ -365,7 +362,6 @@ const RANDISH_LOGO = require('../assets/randish-logo-square1.png');
 const HOME_HEADER_MAP = require('../assets/home-map/homeHeader.png');
 const ALBUM_FOOD_ICON = require('../assets/album-food-icon.png');
 const ALBUM_FOOTER_ICON = require('../assets/album-footer-traced.png');
-const GOOGLE_CONTINUE_BUTTON = require('../assets/google-continue-light-ios-3x.png');
 const HOTPEPPER_CREDIT_URL = 'https://webservice.recruit.co.jp/';
 const HOTPEPPER_CREDIT_IMAGE_URL = 'https://webservice.recruit.co.jp/banner/hotpepper-m.gif';
 const NATIVE_OAUTH_REDIRECT_URI = 'randish://auth/callback';
@@ -373,10 +369,6 @@ const OAUTH_CALLBACK_PATH = 'auth/callback';
 const AUTH_SESSION_STORAGE_KEY = 'randish.authSession.v1';
 const AI_MONTHLY_REPORT_STORAGE_KEY_PREFIX = 'randish.aiMonthlyReport.latest.v1';
 
-const OAUTH_PROVIDER_NAMES: Record<OAuthProvider, string> = {
-  google: 'Google',
-  apple: 'Apple',
-};
 const HIDDEN_OPS_PROFILE_NAME = '@api0930';
 const normalizeHiddenProfileCommand = (value: string) => value.trim().toLowerCase();
 
@@ -493,8 +485,8 @@ const getDefaultDisplayName = (email: string) => {
   return localPart ? localPart.slice(0, 120) : 'RANDISHユーザー';
 };
 
-const normalizeApiBaseUrl = (value: string) =>
-  value.trim().replace(/\/+$/, '').replace(/\/api\/restaurants$/, '');
+const normalizeApiBaseUrl = (value?: string | null) =>
+  value?.trim().replace(/\/+$/, '').replace(/\/api\/restaurants$/, '') ?? '';
 
 const getHostFromUrl = (value?: string) => {
   if (!value) {
@@ -515,25 +507,26 @@ const toApiBaseUrlFromHost = (host: string | null) => {
 };
 
 const getConfiguredApiBaseUrl = () => {
-  const runtimeGlobal = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
-  return runtimeGlobal.process?.env?.EXPO_PUBLIC_RANDISH_API_BASE_URL ?? null;
+  return process.env.EXPO_PUBLIC_RANDISH_API_BASE_URL?.trim() || null;
 };
 
 const getConfiguredOAuthRedirectUri = () => {
-  const runtimeGlobal = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
-  return runtimeGlobal.process?.env?.EXPO_PUBLIC_RANDISH_OAUTH_REDIRECT_URI?.trim() || null;
+  return process.env.EXPO_PUBLIC_RANDISH_OAUTH_REDIRECT_URI?.trim() || null;
 };
 
 const isOAuthBridgeEnabled = () => {
-  const runtimeGlobal = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
-  const value = runtimeGlobal.process?.env?.EXPO_PUBLIC_RANDISH_OAUTH_USE_BRIDGE?.trim().toLowerCase();
+  const value = process.env.EXPO_PUBLIC_RANDISH_OAUTH_USE_BRIDGE?.trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
 };
 
 const getMetroScriptUrl = () => {
   try {
     const sourceCode = NativeModules?.SourceCode as { scriptURL?: string } | undefined;
-    return typeof sourceCode?.scriptURL === 'string' ? sourceCode.scriptURL : undefined;
+    if (typeof sourceCode?.scriptURL === 'string' && sourceCode.scriptURL) {
+      return sourceCode.scriptURL;
+    }
+    const hostUri = Constants.expoConfig?.hostUri;
+    return hostUri ? `http://${hostUri}` : undefined;
   } catch {
     return undefined;
   }
@@ -542,6 +535,23 @@ const getMetroScriptUrl = () => {
 const getWebLocationUrl = () => {
   const runtimeGlobal = globalThis as typeof globalThis & { location?: { href?: string } };
   return runtimeGlobal.location?.href;
+};
+
+const getProductionWebApiBaseUrl = () => {
+  const locationUrl = getWebLocationUrl();
+  if (!locationUrl) {
+    return null;
+  }
+  try {
+    const parsed = new URL(locationUrl);
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+        || LOCAL_NETWORK_HOST_PATTERN.test(parsed.hostname)) {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
 };
 
 const getWebOAuthRedirectUri = () => {
@@ -615,9 +625,10 @@ const getApiBaseUrlsFromRuntimeUrl = (value?: string) => {
 
 const getRuntimeApiBaseUrls = () =>
   uniqueApiBaseUrls([
+    getConfiguredApiBaseUrl(),
+    getProductionWebApiBaseUrl(),
     ...getApiBaseUrlsFromRuntimeUrl(getMetroScriptUrl()),
     ...getApiBaseUrlsFromRuntimeUrl(getWebLocationUrl()),
-    getConfiguredApiBaseUrl(),
   ].filter((value): value is string => Boolean(value)));
 
 const isLocalNetworkApiBaseUrl = (baseUrl: string) => {
@@ -634,7 +645,7 @@ const isDevFallbackApiBaseUrl = (baseUrl: string) =>
 const getRuntimeApiBaseUrl = () =>
   getRuntimeApiBaseUrls()[0] ?? DEV_LAN_API_BASE_URLS[0] ?? LOCAL_API_BASE_URLS[0];
 
-const uniqueApiBaseUrls = (baseUrls: string[]) => {
+const uniqueApiBaseUrls = (baseUrls: readonly (string | null | undefined)[]) => {
   const seen = new Set<string>();
   return baseUrls
     .map(normalizeApiBaseUrl)
@@ -648,7 +659,10 @@ const uniqueApiBaseUrls = (baseUrls: string[]) => {
     });
 };
 
-const buildApiBaseUrlCandidates = (primaryBaseUrl: string, runtimeBaseUrl: string) => {
+const buildApiBaseUrlCandidates = (
+  primaryBaseUrl?: string | null,
+  runtimeBaseUrl?: string | null,
+) => {
   const primary = normalizeApiBaseUrl(primaryBaseUrl);
   const primaryIsFallback = isDevFallbackApiBaseUrl(primary);
   return uniqueApiBaseUrls([
@@ -669,7 +683,10 @@ const toAbsoluteApiAssetUrl = (value?: string | null) => {
   return `${baseUrl}${value}`;
 };
 
-const shouldReplaceWithRuntimeApiBaseUrl = (currentBaseUrl: string, runtimeBaseUrl: string) => {
+const shouldReplaceWithRuntimeApiBaseUrl = (
+  currentBaseUrl?: string | null,
+  runtimeBaseUrl?: string | null,
+) => {
   const current = normalizeApiBaseUrl(currentBaseUrl);
   const runtime = normalizeApiBaseUrl(runtimeBaseUrl);
   return !current || (current !== runtime && isDevFallbackApiBaseUrl(current));
@@ -1022,23 +1039,35 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     savedEmptyText: '結果カードのハートから追加できます。',
     analyticsTitle: '分析',
     analyticsLead: '今月の食の傾向を、あとから見返せます。Premiumなら過去月も残せます。',
-    registerTitle: '会員登録',
-    registerDesc: 'アカウントを作成して、RANDISHをもっと便利に使いましょう。',
+    registerTitle: 'ログイン・会員登録',
+    registerDesc: 'メールで届くログインURLから、パスワードなしでRANDISHを始められます。',
     passwordConfirmLabel: 'パスワード（確認）',
     nicknameLabel: 'ニックネーム',
     required: '必須',
     optional: '任意',
-    authSocialLead: 'Google / Appleでログインできます。登録なしならゲストで使えます。',
+    authSocialLead: 'メールアドレスを入力すると、ログインURLをお送りします。',
+    authRegisterTitle: '会員登録',
+    authRegisterDesc: 'メールアドレスだけで会員登録できます。メールに届く認証コードを入力してください。',
+    authRegisterLead: 'メールアドレスを入力すると、会員登録用コードをお送りします。',
+    authRegisterUrlLabel: '会員登録用コード',
+    authRegisterNote: 'メールに届く認証コードを入力すると登録が完了します。パスワードは不要です。',
+    authRegisterSubmit: '会員登録コードを送信',
+    authSending: '送信中…',
+    authLoginTitle: 'ログイン',
+    authLoginDesc: '登録済みのメールアドレスだけでログインできます。パスワードは必要ありません。',
+    authLoginLead: '登録済みのメールアドレスへログインURLをお送りします。',
+    authLoginUrlLabel: 'ログインURL',
+    authLoginNote: 'メールに届く認証コードを入力してください。届かない場合は迷惑メールも確認してください。',
+    authPasswordLabel: 'パスワード',
+    authLoginSubmit: 'ログインURLを送信',
+    authLoggingIn: 'ログイン中…',
+    authExistingPrompt: 'すでにアカウントをお持ちですか？',
+    authLoginHere: 'ログインはこちら',
+    authNewPrompt: 'はじめてRANDISHを使う方',
+    authRegisterHere: '会員登録はこちら',
     guestStart: 'ゲストではじめる',
     guestNote: '登録なしでRANDISHを試せます',
     or: 'または',
-    googleRegister: 'Googleで続ける',
-    appleRegister: 'Appleで続ける',
-    lineRegister: 'LINEで登録',
-    googleLogin: 'Googleで続ける',
-    appleLogin: 'Appleで続ける',
-    lineLogin: 'LINEでログイン',
-    appleComingSoon: '準備中',
   },
   en: {
     accountSettings: 'Account Settings',
@@ -1198,17 +1227,29 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     nicknameLabel: 'Nickname',
     required: 'Required',
     optional: 'Optional',
-    authSocialLead: 'Continue with Google or Apple, or use RANDISH as a guest.',
+    authSocialLead: 'Enter your email address and we will send you a sign-in link.',
+    authRegisterTitle: 'Create Account',
+    authRegisterDesc: 'Register with your email address and enter the verification code from the email.',
+    authRegisterLead: 'Enter your email address and we will send you a registration code.',
+    authRegisterUrlLabel: 'Registration code',
+    authRegisterNote: 'Enter the verification code from the email to complete registration. No password is required.',
+    authRegisterSubmit: 'Send Registration Code',
+    authSending: 'Sending…',
+    authLoginTitle: 'Log In',
+    authLoginDesc: 'Log in with only your registered email address. No password is required.',
+    authLoginLead: 'We will send a sign-in link to your registered email address.',
+    authLoginUrlLabel: 'Sign-in link',
+    authLoginNote: 'Enter the verification code from the email. Check your spam folder if it does not arrive.',
+    authPasswordLabel: 'Password',
+    authLoginSubmit: 'Send Sign-in Link',
+    authLoggingIn: 'Logging in…',
+    authExistingPrompt: 'Already have an account?',
+    authLoginHere: 'Log in here',
+    authNewPrompt: 'New to RANDISH?',
+    authRegisterHere: 'Create an account',
     guestStart: 'Continue as Guest',
     guestNote: 'Try RANDISH without registering',
     or: 'or',
-    googleRegister: 'Continue with Google',
-    appleRegister: 'Continue with Apple',
-    lineRegister: 'Sign up with LINE',
-    googleLogin: 'Continue with Google',
-    appleLogin: 'Continue with Apple',
-    lineLogin: 'Log in with LINE',
-    appleComingSoon: 'Soon',
   },
   zh: {
     accountSettings: '账户设置',
@@ -1368,17 +1409,29 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     nicknameLabel: '昵称',
     required: '必填',
     optional: '可选',
-    authSocialLead: '使用 Google 或 Apple 登录，或以游客身份使用 RANDISH。',
+    authSocialLead: '输入邮箱地址，我们会向您发送登录链接。',
+    authRegisterTitle: '会员注册',
+    authRegisterDesc: '只需邮箱地址即可注册。请输入邮件中的验证码。',
+    authRegisterLead: '输入邮箱地址，我们会向您发送注册验证码。',
+    authRegisterUrlLabel: '注册验证码',
+    authRegisterNote: '输入邮件中的验证码即可完成注册，无需密码。',
+    authRegisterSubmit: '发送注册验证码',
+    authSending: '发送中…',
+    authLoginTitle: '登录',
+    authLoginDesc: '只需已注册的邮箱地址即可登录，无需密码。',
+    authLoginLead: '我们会向已注册的邮箱地址发送登录链接。',
+    authLoginUrlLabel: '登录链接',
+    authLoginNote: '请输入邮件中的验证码。如未收到，请检查垃圾邮件。',
+    authPasswordLabel: '密码',
+    authLoginSubmit: '发送登录链接',
+    authLoggingIn: '登录中…',
+    authExistingPrompt: '已有账号？',
+    authLoginHere: '在此登录',
+    authNewPrompt: '首次使用RANDISH？',
+    authRegisterHere: '在此注册',
     guestStart: '以游客开始',
     guestNote: '无需注册即可试用RANDISH',
     or: '或者',
-    googleRegister: '使用 Google 继续',
-    appleRegister: '使用 Apple 继续',
-    lineRegister: '使用 LINE 注册',
-    googleLogin: '使用 Google 继续',
-    appleLogin: '使用 Apple 继续',
-    lineLogin: '使用 LINE 登录',
-    appleComingSoon: '准备中',
   },
   ko: {
     accountSettings: '계정 설정',
@@ -1538,17 +1591,29 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     nicknameLabel: '닉네임',
     required: '필수',
     optional: '선택',
-    authSocialLead: 'Google 또는 Apple로 로그인하거나, 게스트로 사용할 수 있습니다.',
+    authSocialLead: '이메일 주소를 입력하면 로그인 링크를 보내드립니다.',
+    authRegisterTitle: '회원가입',
+    authRegisterDesc: '이메일 주소만으로 가입할 수 있습니다. 메일의 인증 코드를 입력하세요.',
+    authRegisterLead: '이메일 주소를 입력하면 회원가입 코드를 보내드립니다.',
+    authRegisterUrlLabel: '회원가입 코드',
+    authRegisterNote: '메일의 인증 코드를 입력하면 가입이 완료됩니다. 비밀번호는 필요하지 않습니다.',
+    authRegisterSubmit: '회원가입 코드 보내기',
+    authSending: '전송 중…',
+    authLoginTitle: '로그인',
+    authLoginDesc: '가입한 이메일 주소만으로 로그인할 수 있습니다. 비밀번호는 필요하지 않습니다.',
+    authLoginLead: '가입한 이메일 주소로 로그인 링크를 보내드립니다.',
+    authLoginUrlLabel: '로그인 링크',
+    authLoginNote: '메일로 받은 인증 코드를 입력하세요. 오지 않으면 스팸함도 확인해 주세요.',
+    authPasswordLabel: '비밀번호',
+    authLoginSubmit: '로그인 링크 보내기',
+    authLoggingIn: '로그인 중…',
+    authExistingPrompt: '이미 계정이 있으신가요?',
+    authLoginHere: '로그인하기',
+    authNewPrompt: 'RANDISH가 처음이신가요?',
+    authRegisterHere: '회원가입하기',
     guestStart: '게스트로 시작',
     guestNote: '가입 없이 RANDISH를 체험할 수 있습니다',
     or: '또는',
-    googleRegister: 'Google로 계속',
-    appleRegister: 'Apple로 계속',
-    lineRegister: 'LINE으로 가입',
-    googleLogin: 'Google로 계속',
-    appleLogin: 'Apple로 계속',
-    lineLogin: 'LINE으로 로그인',
-    appleComingSoon: '준비 중',
   },
 };
 
@@ -1730,33 +1795,34 @@ const MEAL_TICKET_DEFINITIONS: MealTicketDefinition[] = [
 ];
 
 const PRO_FEATURE_SUMMARY = [
-  'AIナビが次の一食を提案',
-  '月末AIレターで振り返り',
-  '深夜カード/深夜ジャンル',
-  'ひとり/デート/友達の提案',
-  '距離・予算目安を比較',
-  '過去月の抽選履歴を保存',
-  '外食費/月別グラフ',
-  'ジャンル/価格帯/保存店分析',
-  'アルバム/年末まとめ',
+  '食券・1日の抽選回数の増加',
+  '詳細ジャンル・マイナージャンルの解放',
+  'シチュエーションモード',
+  'AIによる店舗の選出理由',
+  '営業時間・評価・写真など店舗情報の拡張',
+  '距離・予算・営業時間などの詳細条件',
+  'お気に入り・除外店舗・食事履歴',
+  'ユーザー専用の食AI',
+  '月1回の食生活AIレポート',
 ];
 
 const PRO_ANALYSIS_FEATURES: {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   detail: string;
+  fullText: string;
   color: string;
   backgroundColor: string;
 }[] = [
-  { icon: 'compass-outline', title: 'AIナビ', detail: '次の一食', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'mail-unread-outline', title: 'AIレター', detail: '月末に届く', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'moon-outline', title: '深夜カード', detail: '深夜ジャンル', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'people-outline', title: 'シーン提案', detail: 'ひとり/デート', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'navigate-outline', title: '距離/料金', detail: '目安を比較', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'time-outline', title: '過去月履歴', detail: '履歴保存', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'bar-chart-outline', title: '外食費グラフ', detail: '月別支出', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'heart-outline', title: '保存店分析', detail: '好みを把握', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'images-outline', title: 'アルバム', detail: '写真/年末', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'ticket-outline', title: '食券・抽選回数', detail: '1日の回数を増加', fullText: '食券・1日の抽選回数の増加', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'restaurant-outline', title: '詳細ジャンル', detail: 'マイナージャンルも解放', fullText: '詳細ジャンル・マイナージャンルの解放', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'people-outline', title: 'シチュエーション', detail: 'モードを解放', fullText: 'シチュエーションモード', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'sparkles-outline', title: 'AIによる選出理由', detail: '店舗を選んだ理由を表示', fullText: 'AIによる店舗の選出理由', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'storefront-outline', title: '店舗情報の拡張', detail: '営業時間・評価・写真', fullText: '営業時間・評価・写真など店舗情報の拡張', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'options-outline', title: '詳細条件', detail: '距離・予算・営業時間', fullText: '距離・予算・営業時間などの詳細条件', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'heart-outline', title: '店舗・履歴管理', detail: 'お気に入り・除外・食事履歴', fullText: 'お気に入り・除外店舗・食事履歴', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'chatbubble-ellipses-outline', title: 'ユーザー専用の食AI', detail: 'あなた専用の食提案', fullText: 'ユーザー専用の食AI', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  { icon: 'document-text-outline', title: '食生活AIレポート', detail: '月1回の振り返り', fullText: '月1回の食生活AIレポート', color: '#7161f2', backgroundColor: '#f8f6ff' },
 ];
 
 const PRO_SITUATION_FEATURE_LINES = [
@@ -3057,7 +3123,10 @@ const toAuthErrorMessage = (error: unknown, fallback: string) => {
     return 'このアカウントはすでに登録されています。同じ方法でログインしてください。';
   }
   if (/Email or password is incorrect|Invalid login credentials/i.test(message)) {
-    return 'ログイン情報を確認してください。';
+    return 'メールアドレスが未登録、またはパスワードが違います。';
+  }
+  if (/Email not confirmed/i.test(message)) {
+    return 'メールアドレスの確認が完了していません。登録時に届いたメールを確認してください。';
   }
   if (/email format is invalid|email address.*invalid|invalid email/i.test(message)) {
     return 'アカウント情報を確認してください。';
@@ -3066,31 +3135,37 @@ const toAuthErrorMessage = (error: unknown, fallback: string) => {
     return 'アカウント作成に失敗しました。認証設定を確認してください。';
   }
   if (/Resend email verification is not configured/i.test(message)) {
-    return 'メール認証は現在使っていません。Googleかゲストで続けてください。';
+    return 'メール認証の設定が未反映です。しばらくしてからもう一度お試しください。';
   }
   if (/Resend email send failed/i.test(message) && /own email address|testing emails|verify a domain|domain/i.test(message)) {
-    return 'メール認証は送信設定で止まりました。Googleかゲストで続けてください。';
+    return 'メール送信設定を確認できませんでした。しばらくしてからもう一度お試しください。';
   }
   if (/Resend email send failed/i.test(message) && /API key|authentication|unauthorized|forbidden/i.test(message)) {
-    return 'メール認証の設定が未反映です。Googleかゲストで続けてください。';
+    return 'メール認証の設定が未反映です。しばらくしてからもう一度お試しください。';
   }
   if (/Resend email send failed/i.test(message) && /from|sender/i.test(message)) {
-    return 'メール認証の送信元設定が未反映です。Googleかゲストで続けてください。';
+    return 'メール認証の送信元設定が未反映です。しばらくしてからもう一度お試しください。';
   }
   if (/Resend email send failed/i.test(message)) {
-    return 'メール認証は現在使えません。Googleかゲストで続けてください。';
+    return 'メール認証を現在利用できません。しばらくしてからもう一度お試しください。';
   }
   if (/verification token is invalid or expired/i.test(message)) {
     return '認証URLが無効か期限切れです。もう一度ログインしてください。';
   }
+  if (/token.*invalid|token.*expired|otp.*invalid|otp.*expired|digit code/i.test(message)) {
+    return '認証コードが正しくないか、期限が切れています。新しいコードを送信してください。';
+  }
   if (/password must be at least 8 characters/i.test(message)) {
-    return '古いサーバーが動いています。Spring Bootを止めてから再起動してください。';
+    return 'パスワードは8文字以上で入力してください。';
   }
   if (/Supabase Auth is not configured/i.test(message)) {
     return '認証サーバーの設定が未反映です。Spring BootとSupabaseのOAuth設定を確認してください。';
   }
   if (/Please use the social login used for this account/i.test(message)) {
-    return 'このアカウントはGoogle / Appleログインで作られています。同じ方法でログインしてください。';
+    return 'このアカウントではメールリンク認証をご利用ください。';
+  }
+  if (/Signups? not allowed for otp|User not found|not registered/i.test(message)) {
+    return 'このメールアドレスは未登録です。画面下の「会員登録はこちら」から登録してください。';
   }
   return message;
 };
@@ -4743,7 +4818,7 @@ export default function App() {
   const [stage, setStage] = useState<AppStage>('splash');
   const [userId, setUserId] = useState(APP_USER_ID);
   const [activeTab, setActiveTab] = useState<TabKey>('home');
-  const runtimeApiBaseUrl = useMemo(getRuntimeApiBaseUrl, []);
+  const runtimeApiBaseUrl = useMemo(() => getRuntimeApiBaseUrl() ?? '', []);
   const [apiBaseUrl, setApiBaseUrl] = useState(runtimeApiBaseUrl);
   const [area, setArea] = useState('現在地');
   const [genre, setGenre] = useState('ラーメン');
@@ -4767,7 +4842,6 @@ export default function App() {
   const [profileName, setProfileName] = useState('RANDISH Guest');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('ja');
-  const [freshOAuthSessionPreferred, setFreshOAuthSessionPreferred] = useState(false);
   const [locationStatus, setLocationStatus] = useState('現在地を確認できます');
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('条件を選んで、今日の一店を決めましょう。');
@@ -4821,7 +4895,6 @@ export default function App() {
 
   const enterMain = useCallback((nextUserId = APP_USER_ID, nextProfileName?: string) => {
     setUserId(nextUserId);
-    setFreshOAuthSessionPreferred(false);
     if (nextUserId === APP_USER_ID) {
       setProfileName('RANDISH Guest');
       setProfileImageUri(null);
@@ -5924,11 +5997,24 @@ export default function App() {
         : '候補ピンの中から一店を選んでいます。');
       triggerRouletteHaptic(false);
 
-      const finishSelection = () => {
+      const finishSelection = async () => {
         if (mapSpinRunIdRef.current !== runId) {
           return;
         }
-        const normalized = candidatePlaceToRestaurant(selected, areaRef.current, genre);
+        let normalized = candidatePlaceToRestaurant(selected, areaRef.current, genre);
+        if (subscription.isPro) {
+          try {
+            normalized = normalizeRestaurant(
+              await randishApi.enrichPremiumBusinessStatus(apiBaseUrlCandidates, normalized),
+            );
+            syncWorkingApiBaseUrl();
+          } catch (error) {
+            console.warn('[RANDISH PREMIUM] 営業時間の補完に失敗しました。店舗結果はそのまま表示します。', error);
+          }
+        }
+        if (mapSpinRunIdRef.current !== runId) {
+          return;
+        }
         candidateCacheRef.current = {
           ...cacheEntry,
           usedIds: nextUsedIds,
@@ -6012,6 +6098,8 @@ export default function App() {
     resultRevealValue,
     revealSelectedRestaurant,
     scrollToRandomResult,
+    subscription.isPro,
+    syncWorkingApiBaseUrl,
     triggerRouletteHaptic,
   ]);
 
@@ -6601,7 +6689,6 @@ export default function App() {
     Keyboard.dismiss();
     randishApi.setAuthToken(null);
     void clearStoredAuthSession();
-    setFreshOAuthSessionPreferred(true);
     void Linking.getInitialURL()
       .then((url) => {
         if (url && isOAuthCallbackUrl(url)) {
@@ -6632,7 +6719,6 @@ export default function App() {
   const handleLogout = useCallback(() => {
     randishApi.setAuthToken(null);
     void clearStoredAuthSession();
-    setFreshOAuthSessionPreferred(true);
     void Linking.getInitialURL()
       .then((url) => {
         if (url && isOAuthCallbackUrl(url)) {
@@ -6682,7 +6768,6 @@ export default function App() {
         apiBaseUrlCandidates={apiBaseUrlCandidates}
         uiText={UI_TEXT[appLanguage]}
         locationStatus={locationStatus}
-        freshSessionPreferred={freshOAuthSessionPreferred}
         onApiConnected={syncWorkingApiBaseUrl}
         onAuthenticated={enterAuthenticatedSession}
         onStart={enterGuestSession}
@@ -6717,6 +6802,7 @@ export default function App() {
         <AppHeader
           area={conditionRandom.area ? '？' : area}
           locationStatus={conditionRandom.area ? '？ 周辺から探します' : locationStatus}
+          isPro={subscription.isPro}
           onLocationPress={requestCurrentLocation}
         />
       )}
@@ -6746,6 +6832,7 @@ export default function App() {
             profileImageUri={profileImageUri}
             appLanguage={appLanguage}
             isRegisteredUser={isRegisteredUser}
+            isPro={subscription.isPro}
             isLoading={isLoading}
             mealTicketState={mealTicketState}
             onProfileNameChange={setProfileName}
@@ -6799,6 +6886,7 @@ export default function App() {
         )}
         {activeTab === 'random' && (
           <RandomTab
+            isPro={subscription.isPro}
             uiText={UI_TEXT[appLanguage]}
             area={area}
             genre={genre}
@@ -6899,17 +6987,22 @@ export default function App() {
 function AppHeader({
   area,
   locationStatus,
+  isPro,
   onLocationPress,
 }: {
   area: string;
   locationStatus: string;
+  isPro: boolean;
   onLocationPress: () => void;
 }) {
   return (
     <View style={styles.header}>
       <Image source={RANDISH_LOGO} style={styles.headerLogo} resizeMode="contain" />
       <View style={styles.headerText}>
-        <Text style={styles.headerName}>RANDISH</Text>
+        <View style={styles.headerNameRow}>
+          <Text style={styles.headerName}>RANDISH</Text>
+          {isPro && <PremiumHeaderBadge />}
+        </View>
         <Text style={styles.headerCopy}>{locationStatus}</Text>
       </View>
       <Pressable style={styles.locationPill} onPress={onLocationPress}>
@@ -6973,7 +7066,7 @@ function LoggedOutScreen({
         <Image source={RANDISH_LOGO} style={styles.loggedOutLogo} resizeMode="contain" />
         <Text style={styles.loggedOutTitle}>ログアウトしました</Text>
         <Text style={styles.loggedOutLead}>
-          この端末に残っていたログイン情報を消しました。別のGoogle / Appleアカウントで登録できます。
+          この端末に残っていたログイン情報を消しました。別のメールアドレスで登録・ログインできます。
         </Text>
         <View style={styles.loggedOutNotice}>
           <Ionicons name="shield-checkmark-outline" size={18} color={ORANGE} />
@@ -6998,7 +7091,6 @@ function LoginScreen({
   apiBaseUrlCandidates,
   uiText,
   locationStatus,
-  freshSessionPreferred,
   onApiConnected,
   onAuthenticated,
   onStart,
@@ -7006,14 +7098,28 @@ function LoginScreen({
   apiBaseUrlCandidates: string[];
   uiText: Record<string, string>;
   locationStatus: string;
-  freshSessionPreferred: boolean;
   onApiConnected: () => void;
   onAuthenticated: (auth: AuthResponse, accessToken: string, refreshToken?: string | null) => Promise<void>;
   onStart: (userId?: string, displayName?: string) => void;
 }) {
+  const [email, setEmail] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpRequested, setOtpRequested] = useState(false);
   const [authNotice, setAuthNotice] = useState('');
+  const [authSucceeded, setAuthSucceeded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
   const handledOAuthUrlRef = useRef<string | null>(null);
+  const isLoginMode = authMode === 'login';
+  const authUrlLabel = isLoginMode ? uiText.authLoginUrlLabel : uiText.authRegisterUrlLabel;
+
+  const switchAuthMode = (nextMode: 'register' | 'login') => {
+    setAuthMode(nextMode);
+    setOtpCode('');
+    setOtpRequested(false);
+    setAuthSucceeded(false);
+    setAuthNotice('');
+  };
 
   const completeOAuthSession = useCallback(async (url: string | null) => {
     if (!url || !isOAuthCallbackUrl(url) || handledOAuthUrlRef.current === url || consumedOAuthCallbackUrls.has(url)) {
@@ -7023,17 +7129,20 @@ function LoginScreen({
     consumedOAuthCallbackUrls.add(url);
     const params = parseOAuthCallbackParams(url);
     if (params.error || params.error_description) {
-      setAuthNotice(`外部ログインを完了できませんでした。${params.error_description || params.error}`);
+      setAuthSucceeded(false);
+      setAuthNotice(`ログインを完了できませんでした。${params.error_description || params.error}`);
       return;
     }
     const accessToken = params.access_token || params.accessToken;
     if (!accessToken) {
-      setAuthNotice('外部ログインから認証トークンを受け取れませんでした。SupabaseのRedirect URL設定を確認してください。');
+      setAuthSucceeded(false);
+      setAuthNotice('ログイン情報を受け取れませんでした。Supabase の Redirect URL 設定を確認してください。');
       return;
     }
     const refreshToken = params.refresh_token || params.refreshToken || null;
 
     setIsSubmitting(true);
+    setAuthSucceeded(false);
     setAuthNotice('');
     try {
       if (params.provider === 'local') {
@@ -7050,8 +7159,8 @@ function LoginScreen({
       onApiConnected();
       await onAuthenticated(auth, sessionToken, auth.refreshToken ?? refreshToken);
     } catch (error) {
-      const reason = toAuthErrorMessage(error, '外部ログインに失敗しました。');
-      setAuthNotice(`外部ログインを完了できませんでした。${reason}`);
+      const reason = toAuthErrorMessage(error, 'ログインに失敗しました。');
+      setAuthNotice(`ログインを完了できませんでした。${reason}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -7067,41 +7176,76 @@ function LoginScreen({
     return () => subscription.remove();
   }, [completeOAuthSession]);
 
-  const handleSocialPress = async (provider: OAuthProvider) => {
+  const handleMagicLinkPress = async () => {
     if (isSubmitting) {
       return;
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setAuthSucceeded(false);
+      setAuthNotice('有効なメールアドレスを入力してください。');
+      return;
+    }
+
     setIsSubmitting(true);
+    setAuthSucceeded(false);
     setAuthNotice('');
     try {
-      const oauthRedirectUri = getOAuthRedirectUri();
-      const authUrl = await randishApi.getOAuthAuthorizeUrl(
-        apiBaseUrlCandidates,
-        provider,
-        oauthRedirectUri,
-        isOAuthBridgeEnabled(),
-      );
-      onApiConnected();
-      const result = await WebBrowser.openAuthSessionAsync(authUrl.authorizationUrl, oauthRedirectUri, {
-        dismissButtonStyle: 'cancel',
-        preferEphemeralSession: freshSessionPreferred,
+      const callbackUrl = getOAuthRedirectUri();
+      await randishApi.requestMagicLink(apiBaseUrlCandidates, {
+        email: normalizedEmail,
+        createUser: !isLoginMode,
+        ...(isOAuthBridgeEnabled() ? { appRedirectTo: callbackUrl } : { redirectTo: callbackUrl }),
       });
-
-      if (result.type === 'success') {
-        await completeOAuthSession(result.url);
-        return;
-      }
-
-      if (result.type === 'cancel' || result.type === 'dismiss') {
-        setAuthNotice(`${OAUTH_PROVIDER_NAMES[provider]}ログインをキャンセルしました。`);
-        return;
-      }
-
-      setAuthNotice(`${OAUTH_PROVIDER_NAMES[provider]}の認証画面を開きました。完了後にRANDISHへ戻ります。`);
+      onApiConnected();
+      setAuthSucceeded(true);
+      setOtpCode('');
+      setOtpRequested(true);
+      setAuthNotice(`${normalizedEmail} に${authUrlLabel}を送信しました。メール内のコードを入力してください。`);
     } catch (error) {
-      const reason = toAuthErrorMessage(error, '外部ログインを開始できませんでした。');
-      setAuthNotice(`${OAUTH_PROVIDER_NAMES[provider]}ログインを開始できませんでした。${reason}`);
+      const reason = toAuthErrorMessage(error, `${authUrlLabel}を送信できませんでした。`);
+      setAuthNotice(`${authUrlLabel}を送信できませんでした。${reason}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEmailOtpVerify = async () => {
+    if (isSubmitting) {
+      return;
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedToken = otpCode.replace(/\D/g, '');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setAuthSucceeded(false);
+      setAuthNotice('有効なメールアドレスを入力してください。');
+      return;
+    }
+    if (!/^\d{6,10}$/.test(normalizedToken)) {
+      setAuthSucceeded(false);
+      setAuthNotice('メールに届いた認証コードを入力してください。');
+      return;
+    }
+    setIsSubmitting(true);
+    setAuthSucceeded(false);
+    setAuthNotice('');
+    try {
+      const auth = await randishApi.verifyEmailOtp(apiBaseUrlCandidates, {
+        email: normalizedEmail,
+        token: normalizedToken,
+      });
+      const accessToken = auth.accessToken?.trim();
+      if (!accessToken) {
+        throw new Error('ログイン情報を受け取れませんでした。');
+      }
+      randishApi.setAuthToken(accessToken);
+      onApiConnected();
+      await onAuthenticated(auth, accessToken, auth.refreshToken ?? null);
+    } catch (error) {
+      randishApi.setAuthToken(null);
+      const reason = toAuthErrorMessage(error, '認証コードが正しくないか、期限が切れています。');
+      setAuthNotice(`ログインできませんでした。${reason}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -7124,25 +7268,90 @@ function LoginScreen({
           <Image source={RANDISH_LOGO} style={styles.registerHeaderLogo} resizeMode="contain" />
         </View>
 
-        <Text style={styles.registerTitle}>{uiText.registerTitle}</Text>
-        <Text style={styles.registerDesc}>{uiText.registerDesc}</Text>
+        <Text style={styles.registerTitle}>
+          {isLoginMode ? uiText.authLoginTitle : uiText.authRegisterTitle}
+        </Text>
+        <Text style={styles.registerDesc}>
+          {isLoginMode ? uiText.authLoginDesc : uiText.authRegisterDesc}
+        </Text>
 
-        {!!authNotice && <Text style={styles.registerNotice}>{authNotice}</Text>}
+        {!!authNotice && (
+          <Text style={[styles.registerNotice, authSucceeded && styles.registerNoticeSuccess]}>{authNotice}</Text>
+        )}
 
-        <View style={styles.registerSocialPanel}>
-          <Text style={styles.registerSocialLead}>{uiText.authSocialLead}</Text>
-          <RegisterSocialButton
-            text={uiText.googleRegister}
-            icon="google"
-            accent="#1f1f1f"
-            onPress={() => handleSocialPress('google')}
+        <View style={styles.registerMagicLinkPanel}>
+          <Text style={styles.registerSocialLead}>
+            {isLoginMode ? uiText.authLoginLead : uiText.authRegisterLead}
+          </Text>
+          <Text style={styles.registerMagicLinkLabel}>メールアドレス</Text>
+          <View style={styles.registerMagicLinkInputWrap}>
+            <Ionicons name="mail-outline" size={19} color="#8a817a" />
+            <TextInput
+              value={email}
+              onChangeText={(value) => {
+                setEmail(value);
+                if (otpRequested) {
+                  setOtpCode('');
+                  setOtpRequested(false);
+                }
+              }}
+              style={styles.registerMagicLinkInput}
+              placeholder="you@example.com"
+              placeholderTextColor="#aaa097"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              returnKeyType="send"
+              onSubmitEditing={otpRequested ? undefined : handleMagicLinkPress}
+              editable={!isSubmitting}
+              maxLength={254}
+            />
+          </View>
+          {otpRequested && (
+            <>
+              <Text style={[styles.registerMagicLinkLabel, styles.registerPasswordLabel]}>認証コード</Text>
+              <View style={styles.registerMagicLinkInputWrap}>
+                <Ionicons name="shield-checkmark-outline" size={19} color="#8a817a" />
+                <TextInput
+                  value={otpCode}
+                  onChangeText={(value) => setOtpCode(value.replace(/\D/g, '').slice(0, 10))}
+                  style={styles.registerMagicLinkInput}
+                  placeholder="12345678"
+                  placeholderTextColor="#aaa097"
+                  keyboardType="number-pad"
+                  textContentType="oneTimeCode"
+                  autoComplete="one-time-code"
+                  returnKeyType="go"
+                  onSubmitEditing={handleEmailOtpVerify}
+                  editable={!isSubmitting}
+                  maxLength={10}
+                />
+              </View>
+            </>
+          )}
+          <Pressable
+            style={[styles.registerMagicLinkButton, isSubmitting && styles.registerButtonDisabled]}
+            onPress={otpRequested ? handleEmailOtpVerify : handleMagicLinkPress}
             disabled={isSubmitting}
-          />
-          <RegisterAppleButton
-            text={uiText.appleRegister}
-            onPress={() => handleSocialPress('apple')}
-            disabled={isSubmitting}
-          />
+          >
+            {isSubmitting
+              ? <ActivityIndicator color="#ffffff" />
+              : <Ionicons name={otpRequested ? 'log-in-outline' : 'paper-plane-outline'} size={18} color="#ffffff" />}
+            <Text style={styles.registerMagicLinkButtonText}>
+              {isSubmitting
+                ? (otpRequested ? '確認中…' : uiText.authSending)
+                : (otpRequested ? (isLoginMode ? 'コードを確認してログイン' : 'コードを確認して会員登録') : isLoginMode ? uiText.authLoginSubmit : uiText.authRegisterSubmit)}
+            </Text>
+          </Pressable>
+          {otpRequested && (
+            <Pressable style={styles.registerForgotPasswordButton} onPress={handleMagicLinkPress} disabled={isSubmitting}>
+              <Text style={styles.registerForgotPasswordText}>コードを再送する</Text>
+            </Pressable>
+          )}
+          <Text style={styles.registerMagicLinkNote}>
+            {isLoginMode ? uiText.authLoginNote : uiText.authRegisterNote}
+          </Text>
         </View>
 
         <Pressable style={styles.registerGuestButton} onPress={() => onStart()}>
@@ -7150,108 +7359,35 @@ function LoginScreen({
           <Text style={styles.registerGuestButtonText}>{uiText.guestStart}</Text>
         </Pressable>
         <Text style={styles.registerGuestNote}>{uiText.guestNote}</Text>
+
+        <View style={styles.registerAccountSwitch}>
+          <Text style={styles.registerAccountSwitchText}>
+            {isLoginMode ? uiText.authNewPrompt : uiText.authExistingPrompt}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={isLoginMode ? uiText.authRegisterHere : uiText.authLoginHere}
+            style={[styles.registerAccountSwitchButton, isSubmitting && styles.registerButtonDisabled]}
+            onPress={() => switchAuthMode(isLoginMode ? 'register' : 'login')}
+            disabled={isSubmitting}
+          >
+            <Ionicons name={isLoginMode ? 'person-add-outline' : 'log-in-outline'} size={18} color="#ef552e" />
+            <Text style={styles.registerAccountSwitchButtonText}>
+              {isLoginMode ? uiText.authRegisterHere : uiText.authLoginHere}
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function RegisterAppleButton({
-  text,
-  onPress,
-  disabled = false,
-}: {
-  text: string;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  const [canUseNativeButton, setCanUseNativeButton] = useState(Platform.OS === 'ios');
-
-  useEffect(() => {
-    let mounted = true;
-
-    if (Platform.OS !== 'ios') {
-      setCanUseNativeButton(false);
-      return () => {
-        mounted = false;
-      };
-    }
-
-    AppleAuthentication.isAvailableAsync()
-      .then((available) => {
-        if (mounted) {
-          setCanUseNativeButton(available);
-        }
-      })
-      .catch(() => {
-        if (mounted) {
-          setCanUseNativeButton(false);
-        }
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  if (canUseNativeButton) {
-    return (
-      <View pointerEvents={disabled ? 'none' : 'auto'} style={[styles.registerAppleButtonShell, disabled && styles.registerSocialButtonDisabled]}>
-        <AppleAuthentication.AppleAuthenticationButton
-          buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
-          cornerRadius={22}
-          style={styles.registerAppleButtonNative}
-          onPress={onPress}
-        />
-      </View>
-    );
-  }
-
-  return <RegisterSocialButton text={text} icon="apple" accent="#15120f" onPress={onPress} disabled={disabled} />;
-}
-
-function RegisterSocialButton({
-  text,
-  icon,
-  accent,
-  onPress,
-  disabled = false,
-  badgeText,
-}: {
-  text: string;
-  icon: keyof typeof FontAwesome.glyphMap;
-  accent: string;
-  onPress: () => void;
-  disabled?: boolean;
-  badgeText?: string;
-}) {
-  const isGoogle = icon === 'google';
-  if (isGoogle) {
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={text}
-        style={[styles.registerGoogleImageButton, disabled && styles.registerSocialButtonDisabled]}
-        onPress={onPress}
-        disabled={disabled}
-      >
-        <Image source={GOOGLE_CONTINUE_BUTTON} style={styles.registerGoogleButtonImage} resizeMode="contain" />
-      </Pressable>
-    );
-  }
-
+function PremiumHeaderBadge() {
   return (
-    <Pressable
-      style={[styles.registerSocialButton, disabled && styles.registerSocialButtonDisabled]}
-      onPress={onPress}
-      disabled={disabled}
-    >
-      <View style={[styles.registerSocialIcon, { borderColor: accent }]}>
-        <FontAwesome name={icon} size={18} color={accent} />
-      </View>
-      <Text style={styles.registerSocialText}>{text}</Text>
-      {!!badgeText && <Text style={styles.registerSocialBadge}>{badgeText}</Text>}
-    </Pressable>
+    <View style={styles.premiumHeaderBadge}>
+      <Ionicons name="sparkles" size={11} color="#ffffff" />
+      <Text style={styles.premiumHeaderBadgeText}>RANDISH Premium</Text>
+    </View>
   );
 }
 
@@ -7366,6 +7502,7 @@ function HomeTab({
   profileImageUri,
   appLanguage,
   isRegisteredUser,
+  isPro,
   isLoading,
   mealTicketState,
   onProfileNameChange,
@@ -7404,6 +7541,7 @@ function HomeTab({
   profileImageUri: string | null;
   appLanguage: AppLanguage;
   isRegisteredUser: boolean;
+  isPro: boolean;
   isLoading: boolean;
   mealTicketState: MealTicketState;
   onProfileNameChange: (value: string) => void;
@@ -7442,6 +7580,7 @@ function HomeTab({
         profileImageUri={profileImageUri}
         appLanguage={appLanguage}
         isRegisteredUser={isRegisteredUser}
+        isPro={isPro}
         mealTicketState={mealTicketState}
         onProfileNameChange={onProfileNameChange}
         onProfileImageChange={onProfileImageChange}
@@ -7563,6 +7702,7 @@ function HomeLocationPanel({
   appLanguage,
   apiBaseUrlCandidates,
   isRegisteredUser,
+  isPro,
   mealTicketState,
   onProfileNameChange,
   onProfileImageChange,
@@ -7592,6 +7732,7 @@ function HomeLocationPanel({
   appLanguage: AppLanguage;
   apiBaseUrlCandidates: string | readonly string[];
   isRegisteredUser: boolean;
+  isPro: boolean;
   mealTicketState: MealTicketState;
   onProfileNameChange: (value: string) => void;
   onProfileImageChange: (value: string | null) => void;
@@ -7615,6 +7756,14 @@ function HomeLocationPanel({
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
   const [notificationSheetOpen, setNotificationSheetOpen] = useState(false);
   const [logoutSheetOpen, setLogoutSheetOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactName, setContactName] = useState(isRegisteredUser ? profileName : '');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactSubject, setContactSubject] = useState('');
+  const [contactContent, setContactContent] = useState('');
+  const [contactMessage, setContactMessage] = useState<string | null>(null);
+  const [contactSucceeded, setContactSucceeded] = useState(false);
+  const [contactSending, setContactSending] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState(profileName);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
@@ -7807,6 +7956,68 @@ function HomeLocationPanel({
     setAdminError(null);
   };
 
+  const openContactForm = () => {
+    Keyboard.dismiss();
+    setProfileEditorOpen(false);
+    setLanguageMenuOpen(false);
+    setAccountMenuOpen(false);
+    setContactMessage(null);
+    setContactSucceeded(false);
+    if (!contactName.trim() && isRegisteredUser) {
+      setContactName(profileName);
+    }
+    setContactOpen(true);
+  };
+
+  const closeContactForm = () => {
+    if (contactSending) {
+      return;
+    }
+    Keyboard.dismiss();
+    setContactOpen(false);
+  };
+
+  const submitContact = async () => {
+    if (contactSending) {
+      return;
+    }
+    const name = contactName.trim();
+    const email = contactEmail.trim().toLowerCase();
+    const subject = contactSubject.trim();
+    const content = contactContent.trim();
+    if (!name || !email || !subject || !content) {
+      setContactSucceeded(false);
+      setContactMessage('名前、メールアドレス、件名、内容をすべて入力してください。');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setContactSucceeded(false);
+      setContactMessage('有効なメールアドレスを入力してください。');
+      return;
+    }
+
+    setContactSending(true);
+    setContactSucceeded(false);
+    setContactMessage(null);
+    try {
+      await randishApi.sendContact(apiBaseUrlCandidates, { name, email, subject, content });
+      setContactSucceeded(true);
+      setContactMessage('お問い合わせを送信しました。ご連絡ありがとうございます。');
+      setContactSubject('');
+      setContactContent('');
+    } catch (error) {
+      const reason = error instanceof RandishApiError && error.status === 400
+        ? '入力内容またはメール送信設定を確認してください。'
+        : isApiConnectivityError(error)
+          ? 'サーバーに接続できませんでした。通信環境を確認してもう一度お試しください。'
+          : '時間をおいてもう一度お試しください。';
+      setContactSucceeded(false);
+      setContactMessage(`お問い合わせを送信できませんでした。${reason}`);
+    } finally {
+      setContactSending(false);
+    }
+  };
+
   const loadAdminUsage = async () => {
     const password = adminPassword.trim();
     if (!password) {
@@ -7860,6 +8071,113 @@ function HomeLocationPanel({
 
   return (
     <View style={styles.homeLocationPanel}>
+      <Modal
+        visible={contactOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeContactForm}
+        statusBarTranslucent
+      >
+        <KeyboardAvoidingView
+          style={styles.contactKeyboardView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.contactModalOverlay}>
+            <ScrollView
+              contentContainerStyle={styles.contactScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.contactSheet}>
+                <View style={styles.contactHeader}>
+                  <View style={styles.contactHeaderIcon}>
+                    <Ionicons name="mail-outline" size={23} color={ORANGE} />
+                  </View>
+                  <View style={styles.contactHeaderText}>
+                    <Text style={styles.contactKicker}>CONTACT</Text>
+                    <Text style={styles.contactTitle}>お問い合わせ</Text>
+                    <Text style={styles.contactLead}>RANDISHへのご質問・ご意見をお送りください。</Text>
+                  </View>
+                </View>
+
+                <Text style={styles.contactLabel}>名前</Text>
+                <TextInput
+                  value={contactName}
+                  onChangeText={setContactName}
+                  style={styles.contactInput}
+                  placeholder="山田 太郎"
+                  placeholderTextColor="#aaa097"
+                  editable={!contactSending}
+                  maxLength={100}
+                  textContentType="name"
+                />
+                <Text style={styles.contactLabel}>メールアドレス</Text>
+                <TextInput
+                  value={contactEmail}
+                  onChangeText={setContactEmail}
+                  style={styles.contactInput}
+                  placeholder="you@example.com"
+                  placeholderTextColor="#aaa097"
+                  editable={!contactSending}
+                  maxLength={254}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="emailAddress"
+                />
+                <Text style={styles.contactLabel}>件名</Text>
+                <TextInput
+                  value={contactSubject}
+                  onChangeText={setContactSubject}
+                  style={styles.contactInput}
+                  placeholder="お問い合わせの件名"
+                  placeholderTextColor="#aaa097"
+                  editable={!contactSending}
+                  maxLength={200}
+                />
+                <Text style={styles.contactLabel}>内容</Text>
+                <TextInput
+                  value={contactContent}
+                  onChangeText={setContactContent}
+                  style={[styles.contactInput, styles.contactContentInput]}
+                  placeholder="お問い合わせ内容をご入力ください"
+                  placeholderTextColor="#aaa097"
+                  editable={!contactSending}
+                  maxLength={5000}
+                  multiline
+                  textAlignVertical="top"
+                />
+                <Text style={styles.contactCount}>{contactContent.length}/5000</Text>
+
+                {contactMessage ? (
+                  <View style={[styles.contactMessage, contactSucceeded && styles.contactMessageSuccess]}>
+                    <Ionicons
+                      name={contactSucceeded ? 'checkmark-circle-outline' : 'alert-circle-outline'}
+                      size={17}
+                      color={contactSucceeded ? '#247247' : '#b93422'}
+                    />
+                    <Text style={[styles.contactMessageText, contactSucceeded && styles.contactMessageTextSuccess]}>{contactMessage}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.contactActions}>
+                  <Pressable style={styles.contactCancelButton} onPress={closeContactForm} disabled={contactSending}>
+                    <Text style={styles.contactCancelText}>閉じる</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.contactSubmitButton, contactSending && styles.registerButtonDisabled]}
+                    onPress={submitContact}
+                    disabled={contactSending}
+                  >
+                    {contactSending ? <ActivityIndicator color="#ffffff" /> : <Ionicons name="paper-plane-outline" size={16} color="#ffffff" />}
+                    <Text style={styles.contactSubmitText}>{contactSending ? '送信中…' : '送信する'}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
       <Modal
         visible={logoutSheetOpen}
         transparent
@@ -8032,8 +8350,11 @@ function HomeLocationPanel({
         </View>
       </Modal>
       <View style={styles.homeTopBar}>
-        <View style={styles.homeLogoButton}>
-          <Image source={RANDISH_LOGO} style={styles.homeLogoImage} resizeMode="contain" />
+        <View style={styles.homeTopBrandRow}>
+          <View style={styles.homeLogoButton}>
+            <Image source={RANDISH_LOGO} style={styles.homeLogoImage} resizeMode="contain" />
+          </View>
+          {isPro && <PremiumHeaderBadge />}
         </View>
         <View style={styles.homeAccountWrap}>
           <Pressable style={[styles.homeAccountButton, accountMenuOpen && styles.homeAccountButtonActive]} onPress={() => setAccountMenuOpen((current) => !current)}>
@@ -8170,6 +8491,16 @@ function HomeLocationPanel({
                   <Ionicons name="chevron-forward" size={16} color="#d9a195" />
                 </Pressable>
               )}
+              <Pressable style={[styles.homeAccountMenuItem, styles.homeAccountContactItem]} onPress={openContactForm}>
+                <View style={styles.homeAccountMenuIcon}>
+                  <Ionicons name="mail-outline" size={18} color={ORANGE} />
+                </View>
+                <View style={styles.homeAccountMenuText}>
+                  <Text style={styles.homeAccountMenuLabel}>お問い合わせ</Text>
+                  <Text style={styles.homeAccountMenuValue}>ご質問・ご意見はこちら</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#afa69b" />
+              </Pressable>
               <View style={styles.homeAccountMenuFooter}>
                 <Pressable
                   style={styles.homeAccountCloseButton}
@@ -9110,6 +9441,7 @@ function SearchTab({
 }
 
 function RandomTab({
+  isPro,
   uiText,
   area,
   genre,
@@ -9146,6 +9478,7 @@ function RandomTab({
   onRelaxConditions,
   isSelectedRestaurantSaved,
 }: {
+  isPro: boolean;
   uiText: Record<string, string>;
   area: string;
   genre: string;
@@ -9409,6 +9742,7 @@ function RandomTab({
         >
           <Text style={styles.resultKicker}>{uiText.resultKicker}</Text>
           <ResultCard
+            isPro={isPro}
             restaurant={visibleSelectedRestaurant}
             userLocation={userLocation}
             preferredArea={displayAreaBase}
@@ -10376,6 +10710,7 @@ function SaveTab({
               </Pressable>
               <SectionHeader title="店舗情報" action="APIから取得" />
               <ResultCard
+                isPro={isPro}
                 restaurant={savedDetail.restaurant}
                 userLocation={userLocation}
                 preferredArea={savedDetail.favorite.savedArea}
@@ -10562,8 +10897,8 @@ function ProTeaserCard({ isPro, onPress }: { isPro: boolean; onPress: () => void
       <Text style={styles.proTeaserTitle}>{isPro ? '過去の傾向を、残して見る。' : '今月だけで終わらせない。'}</Text>
       <Text style={styles.proTeaserLead}>
         {isPro
-          ? 'Premium機能が有効です。AIナビと分析で食の記録を深く見返せます。'
-          : 'AIナビ、月末AIレター、分析保存まで。月480円で使えるPremium機能です。'}
+          ? 'Premium機能が有効です。追加の食券と分析で食の記録を深く見返せます。'
+          : '追加の食券、詳細条件、食生活AIレポートまで。月額400円で使えるPremium機能です。'}
       </Text>
       <View style={styles.proTeaserFeatureList}>
         {PRO_FEATURE_SUMMARY.map((feature) => (
@@ -11044,7 +11379,6 @@ function AiReportEnvelopePreview({
             ]}
           />
         )}
-        <View style={styles.aiReportEnvelopeBack} />
         <Animated.View
           pointerEvents="none"
           style={[
@@ -11070,6 +11404,9 @@ function AiReportEnvelopePreview({
               <Text style={styles.aiReportLetterAiText}>AI</Text>
             </View>
             <Text style={styles.aiReportLetterMonth} numberOfLines={1}>{displayMonthLabel}</Text>
+            <View style={styles.aiReportLetterDocumentMark}>
+              <Ionicons name="document-text-outline" size={11} color="#7161f2" />
+            </View>
           </View>
           <Text style={styles.aiReportLetterTitle} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.86}>
             AI FOOD REPORT
@@ -11114,37 +11451,15 @@ function AiReportEnvelopePreview({
               <View style={styles.aiReportLetterBarMid} />
               <View style={styles.aiReportLetterBarShort} />
             </View>
+            <View style={styles.aiReportLetterMetricStack}>
+              <View style={[styles.aiReportLetterMetricIcon, styles.aiReportLetterMetricIconPurple]}>
+                <Ionicons name="bar-chart" size={10} color="#7161f2" />
+              </View>
+              <View style={[styles.aiReportLetterMetricIcon, styles.aiReportLetterMetricIconGreen]}>
+                <Ionicons name="trending-up" size={10} color="#3f927c" />
+              </View>
+            </View>
           </View>
-        </Animated.View>
-        <View style={styles.aiReportEnvelopeBody}>
-          <View style={styles.aiReportEnvelopeFoldLeft} />
-          <View style={styles.aiReportEnvelopeFoldRight} />
-          <View style={styles.aiReportEnvelopePostmark}>
-            <View style={styles.aiReportEnvelopePostmarkLine} />
-            <View style={styles.aiReportEnvelopePostmarkLineShort} />
-          </View>
-        </View>
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.aiReportEnvelopeFlap,
-            {
-              opacity: flapOpacity,
-              transform: [{ translateY: flapTranslateY }, { scaleY: flapScaleY }],
-            },
-          ]}
-        />
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.aiReportEnvelopeSeal,
-            {
-              opacity: sealOpacity,
-              transform: [{ scale: sealScale }],
-            },
-          ]}
-        >
-          <Ionicons name="sparkles" size={12} color="#ffffff" />
         </Animated.View>
       </Animated.View>
     </View>
@@ -11494,7 +11809,7 @@ function ProPaywall({
                 </View>
                 <View>
                   <Text style={styles.proPaywallKicker}>RANDISH Premium</Text>
-                  <Text style={styles.proPaywallBrandSub}>AIナビを含む9つのPremium機能</Text>
+                  <Text style={styles.proPaywallBrandSub}>食券・抽選回数を含む9つのPremium機能</Text>
                 </View>
               </View>
               <Pressable style={styles.proPaywallClose} onPress={onClose}>
@@ -11510,17 +11825,17 @@ function ProPaywall({
                 </View>
                 <View style={styles.proPaywallHeroPill}>
                   <Ionicons name="wallet-outline" size={13} color="#7161f2" />
-                  <Text style={styles.proPaywallHeroPillText}>月480円</Text>
+                  <Text style={styles.proPaywallHeroPillText}>月額400円</Text>
                 </View>
               </View>
               <Text style={styles.proPaywallTitle}>次の一食まで導くPremium。</Text>
               <Text style={styles.proPaywallLead}>
-                {message ?? 'AIナビ、月末AIレター、外食費・ジャンル・保存店の傾向をまとめて見返せます。'}
+                {message ?? '追加の食券、詳細条件、食生活AIレポートなど9つの機能を利用できます。'}
               </Text>
               <View style={styles.proPaywallMiniStatRow}>
                 <View style={styles.proPaywallMiniStat}>
                   <Ionicons name="compass-outline" size={15} color="#9f4654" />
-                  <Text style={styles.proPaywallMiniStatText}>AIナビ</Text>
+                  <Text style={styles.proPaywallMiniStatText}>追加食券</Text>
                 </View>
                 <View style={styles.proPaywallMiniStat}>
                   <Ionicons name="mail-unread-outline" size={15} color="#7161f2" />
@@ -11565,7 +11880,7 @@ function ProPaywall({
               }}
             >
               <Ionicons name="sparkles" size={17} color="#ffffff" />
-              <Text style={styles.proPaywallPrimaryText}>月480円でPremiumを始める</Text>
+              <Text style={styles.proPaywallPrimaryText}>月額400円でPremiumを始める</Text>
             </Pressable>
             <View style={styles.proPaywallSecondaryRow}>
               <Pressable
@@ -11772,6 +12087,7 @@ function AnalysisDigestCard({
 }) {
   const sampleLabel = analytics.budgetSampleCount ? `${analytics.budgetSampleCount}件から推定` : '推定データなし';
   const [premiumOpen, setPremiumOpen] = useState(false);
+  const [selectedPremiumFeature, setSelectedPremiumFeature] = useState<(typeof PRO_ANALYSIS_FEATURES)[number] | null>(null);
   const metrics = [
     {
       label: '抽選',
@@ -11907,13 +12223,13 @@ function AnalysisDigestCard({
             </View>
             <View style={styles.analysisDigestProTitleTextBox}>
               <Text style={styles.analysisDigestProTitle}>{isPro ? 'Premium有効' : 'Premium Plan'}</Text>
-              <Text style={styles.analysisDigestProSubtitle} numberOfLines={1}>AIナビを含む9つの機能</Text>
+              <Text style={styles.analysisDigestProSubtitle} numberOfLines={1}>食券・抽選回数を含む9つの機能</Text>
             </View>
           </View>
           <View style={styles.analysisDigestProHeaderActions}>
             {!isPro && (
               <View style={styles.analysisDigestProPill}>
-                <Text style={styles.analysisDigestProPillText}>月480円</Text>
+                <Text style={styles.analysisDigestProPillText}>月額400円</Text>
               </View>
             )}
             <View style={styles.analysisDigestProToggle}>
@@ -11925,11 +12241,16 @@ function AnalysisDigestCard({
           <>
             <View style={styles.analysisDigestProList}>
               {PRO_ANALYSIS_FEATURES.map((feature) => (
-                <View
+                <Pressable
                   key={feature.title}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${feature.fullText}の詳細を見る`}
+                  accessibilityState={{ expanded: selectedPremiumFeature?.title === feature.title }}
+                  onPress={() => setSelectedPremiumFeature((current) => current?.title === feature.title ? null : feature)}
                   style={[
                     styles.analysisDigestProFeature,
                     { backgroundColor: feature.backgroundColor, borderColor: feature.color },
+                    selectedPremiumFeature?.title === feature.title && styles.analysisDigestProFeatureSelected,
                   ]}
                 >
                   <View style={styles.analysisDigestProFeatureIcon}>
@@ -11948,9 +12269,27 @@ function AnalysisDigestCard({
                   </View>
                   <Text style={styles.analysisDigestProFeatureTitle} numberOfLines={1}>{feature.title}</Text>
                   <Text style={styles.analysisDigestProFeatureDetail} numberOfLines={1}>{feature.detail}</Text>
-                </View>
+                </Pressable>
               ))}
             </View>
+            <Text style={styles.analysisDigestProTapHint}>項目をタップすると詳しい内容を確認できます</Text>
+            {selectedPremiumFeature && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="機能の詳細を閉じる"
+                style={styles.analysisDigestProFeatureExpanded}
+                onPress={() => setSelectedPremiumFeature(null)}
+              >
+                <View style={[styles.analysisDigestProFeatureExpandedIcon, { backgroundColor: selectedPremiumFeature.color }]}>
+                  <Ionicons name={selectedPremiumFeature.icon} size={18} color="#ffffff" />
+                </View>
+                <View style={styles.analysisDigestProFeatureExpandedCopy}>
+                  <Text style={styles.analysisDigestProFeatureExpandedTitle}>{selectedPremiumFeature.fullText}</Text>
+                  <Text style={styles.analysisDigestProFeatureExpandedDetail}>{selectedPremiumFeature.detail}</Text>
+                </View>
+                <Ionicons name="chevron-up" size={17} color="#7161f2" />
+              </Pressable>
+            )}
             {!isPro && (
               <Pressable style={styles.analysisDigestProCta} onPress={onProPress}>
                 <Text style={styles.analysisDigestProCtaText}>Premiumをみる</Text>
@@ -12151,6 +12490,17 @@ function AnalyticsTab({
 
   return (
     <View style={styles.analysisScreen}>
+      {isPro && (
+        <View style={styles.analysisPremiumHeader}>
+          <View>
+            <Text style={styles.analysisPremiumHeaderKicker}>MEMBERSHIP ACTIVE</Text>
+            <Text style={styles.analysisPremiumHeaderTitle}>RANDISH Premium</Text>
+          </View>
+          <View style={styles.analysisPremiumHeaderIcon}>
+            <Ionicons name="sparkles" size={19} color="#ffffff" />
+          </View>
+        </View>
+      )}
       <AnalysisDigestCard
         analytics={currentAnalytics}
         totalLabel={monthlyTotalLabel}
@@ -12332,6 +12682,7 @@ function AnalyticsMetric({ icon, label, value }: { icon: string; label: string; 
 }
 
 function ResultCard({
+  isPro = false,
   restaurant,
   userLocation,
   preferredArea,
@@ -12341,6 +12692,7 @@ function ResultCard({
   isFavorite = false,
   allowExternalPhoto = false,
 }: {
+  isPro?: boolean;
   restaurant: Restaurant;
   userLocation: UserLocation | null;
   preferredArea?: string | null;
@@ -12360,7 +12712,7 @@ function ResultCard({
   const miniMapDistanceLabel = primaryStation ? `${primaryStation.stationName} ${stationDistanceLabel}` : stationDistanceLabel;
   const priceLabel = formatPrice(restaurant, uiText);
   const actualGenreLabel = restaurant.genre?.trim() || 'ジャンル未分類';
-  const openStatus = getOpenStatus(restaurant);
+  const openStatus = isPro ? getOpenStatus(restaurant) : null;
 
   return (
     <View style={styles.resultCard}>
@@ -12402,12 +12754,14 @@ function ResultCard({
         </View>
         <View style={styles.ratingRow}>
           <Text style={[styles.ratingText, getRatingValue(restaurant) == null && styles.ratingTextPending]}>{getRatingLabel(restaurant)}</Text>
-          <View style={styles.openStatusRow}>
-            <Text style={[styles.openNowText, openStatus.active === true && styles.openNowActiveText, openStatus.active === false && styles.openNowInactiveText, openStatus.active == null && styles.openNowUnknownText]}>
-              {openStatus.label}
-            </Text>
-            <Text style={styles.openStatusDetail}>{openStatus.detail}</Text>
-          </View>
+          {openStatus && (
+            <View style={styles.openStatusRow}>
+              <Text style={[styles.openNowText, openStatus.active === true && styles.openNowActiveText, openStatus.active === false && styles.openNowInactiveText, openStatus.active == null && styles.openNowUnknownText]}>
+                {openStatus.label}
+              </Text>
+              <Text style={styles.openStatusDetail}>{openStatus.detail}</Text>
+            </View>
+          )}
           <Text style={styles.addressText} numberOfLines={1}>{restaurant.area} / {restaurant.address}</Text>
         </View>
         <MiniGoogleMap restaurant={restaurant} distanceLabel={miniMapDistanceLabel} onPress={onMapPress} />
