@@ -1,0 +1,7 @@
+{
+  "name": "randish",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Randish - Expo (iOS/Android/Web) app with Vercel serverless API.",
+  "type": "commonjs"
+}
