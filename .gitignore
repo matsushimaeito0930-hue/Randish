@@ -17,6 +17,8 @@ data/
 **/data/
 !mobile/data/
 !mobile/data/japanMunicipalities.ts
+!mobile/src/data/
+!mobile/src/data/*.ts
 mobile/_asset-audit/
 *.db
 *.mv.db
