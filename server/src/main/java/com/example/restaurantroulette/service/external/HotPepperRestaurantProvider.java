@@ -33,7 +33,12 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
   private static final int RANDOM_PAGE_COUNT_PER_PLAN = 5;
   private static final Pattern PRICE_PATTERN = Pattern.compile("(\\d[\\d,]*)");
   private static final Map<String, List<SearchPlan>> GENRE_SEARCH_PLANS = Map.ofEntries(
-      Map.entry("ラーメン", List.of(new SearchPlan(List.of("G013"), List.of()))),
+      Map.entry("ラーメン", List.of(
+          new SearchPlan(List.of("G013"), List.of()),
+          new SearchPlan(List.of(), List.of("ラーメン")),
+          new SearchPlan(List.of(), List.of("らーめん")),
+          new SearchPlan(List.of(), List.of("つけ麺")),
+          new SearchPlan(List.of(), List.of("中華そば")))),
       Map.entry("焼肉", List.of(new SearchPlan(List.of("G008"), List.of("焼肉")))),
       Map.entry("居酒屋", List.of(new SearchPlan(List.of("G001"), List.of()))),
       Map.entry("韓国料理", List.of(new SearchPlan(List.of("G017"), List.of("韓国料理")), new SearchPlan(List.of(), List.of("韓国料理")))),

@@ -9,12 +9,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,7 +26,7 @@ import org.springframework.web.client.RestClientResponseException;
 public class SupabaseAuthService {
   private static final Logger logger = LoggerFactory.getLogger(SupabaseAuthService.class);
   private static final String DEFAULT_OAUTH_REDIRECT_URI = "randish://auth/callback";
-  private static final Set<String> SUPPORTED_OAUTH_PROVIDERS = Set.of("google", "apple");
+  private static final Duration MAGIC_LINK_TTL = Duration.ofHours(1);
   private static final List<String> SUPABASE_ERROR_FIELDS = List.of("msg", "message", "error_description", "error");
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final List<Path> ENV_FILES = List.of(
@@ -70,15 +71,85 @@ public class SupabaseAuthService {
     return supabaseUrl != null && !supabaseUrl.isBlank() && anonKey != null && !anonKey.isBlank();
   }
 
-  public String createOAuthAuthorizeUrl(String provider, String redirectTo) {
-    String normalizedProvider = normalizeOAuthProvider(provider);
+  public Instant requestMagicLink(String email, String redirectTo, boolean createUser) {
     requireConfigured();
     String resolvedRedirectTo = redirectTo == null || redirectTo.isBlank()
         ? defaultOAuthRedirectUri
         : redirectTo.trim();
-    String encodedProvider = URLEncoder.encode(normalizedProvider, StandardCharsets.UTF_8);
     String encodedRedirectTo = URLEncoder.encode(resolvedRedirectTo, StandardCharsets.UTF_8);
-    return supabaseUrl + "/auth/v1/authorize?provider=" + encodedProvider + "&redirect_to=" + encodedRedirectTo;
+    try {
+      client().post()
+          .uri("/auth/v1/otp?redirect_to=" + encodedRedirectTo)
+          .header("apikey", anonKey)
+          .header("Authorization", "Bearer " + anonKey)
+          .body(Map.of(
+              "email", email,
+              "create_user", createUser))
+          .retrieve()
+          .toBodilessEntity();
+      return Instant.now().plus(MAGIC_LINK_TTL);
+    } catch (RestClientResponseException exception) {
+      throw new BadRequestException(supabaseErrorMessage(exception, "Supabase magic link request failed."));
+    }
+  }
+
+  public SupabaseAuthResult verifyEmailOtp(String email, String token) {
+    requireConfigured();
+    try {
+      SupabaseAuthApiResponse response = client().post()
+          .uri("/auth/v1/verify")
+          .header("apikey", anonKey)
+          .header("Authorization", "Bearer " + anonKey)
+          .body(Map.of(
+              "email", email,
+              "token", token,
+              "type", "email"))
+          .retrieve()
+          .body(SupabaseAuthApiResponse.class);
+      return toResult(response);
+    } catch (RestClientResponseException exception) {
+      throw new UnauthorizedException(supabaseErrorMessage(exception, "Email verification code is invalid or expired."));
+    }
+  }
+
+  public Instant requestPasswordReset(String email, String redirectTo) {
+    requireConfigured();
+    String resolvedRedirectTo = redirectTo == null || redirectTo.isBlank()
+        ? defaultOAuthRedirectUri
+        : redirectTo.trim();
+    String encodedRedirectTo = URLEncoder.encode(resolvedRedirectTo, StandardCharsets.UTF_8);
+    try {
+      client().post()
+          .uri("/auth/v1/recover?redirect_to=" + encodedRedirectTo)
+          .header("apikey", anonKey)
+          .header("Authorization", "Bearer " + anonKey)
+          .body(Map.of("email", email))
+          .retrieve()
+          .toBodilessEntity();
+      return Instant.now().plus(MAGIC_LINK_TTL);
+    } catch (RestClientResponseException exception) {
+      throw new BadRequestException(supabaseErrorMessage(exception, "Supabase password reset request failed."));
+    }
+  }
+
+  public SupabaseAuthUser updatePassword(String accessToken, String password) {
+    requireConfigured();
+    String token = stripBearerToken(accessToken);
+    try {
+      SupabaseAuthUser user = client().put()
+          .uri("/auth/v1/user")
+          .header("apikey", anonKey)
+          .header("Authorization", "Bearer " + token)
+          .body(Map.of("password", password))
+          .retrieve()
+          .body(SupabaseAuthUser.class);
+      if (user == null || user.id() == null || user.id().isBlank()) {
+        throw new UnauthorizedException("Supabase recovery token is invalid.");
+      }
+      return user;
+    } catch (RestClientResponseException exception) {
+      throw new UnauthorizedException("Password reset link is invalid or expired.");
+    }
   }
 
   public SupabaseAuthResult signUp(String email, String password, String displayName) {
@@ -186,17 +257,6 @@ public class SupabaseAuthService {
       throw new UnauthorizedException("Authorization bearer token is required.");
     }
     return value.replaceFirst("(?i)^Bearer\\s+", "").trim();
-  }
-
-  private String normalizeOAuthProvider(String provider) {
-    if (provider == null || provider.isBlank()) {
-      throw new BadRequestException("OAuth provider is required.");
-    }
-    String normalized = provider.trim().toLowerCase();
-    if (!SUPPORTED_OAUTH_PROVIDERS.contains(normalized)) {
-      throw new BadRequestException("Unsupported OAuth provider.");
-    }
-    return normalized;
   }
 
   private String supabaseErrorMessage(RestClientResponseException exception, String fallbackMessage) {

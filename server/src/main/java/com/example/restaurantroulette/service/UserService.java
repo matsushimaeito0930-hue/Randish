@@ -57,7 +57,7 @@ public class UserService {
 
   public UserResponse authenticate(String email, String password) {
     String normalizedEmail = normalizeEmail(email);
-    validatePassword(password);
+    requirePassword(password);
     AppUserRepository.AppUserCredentials credentials = userRepository.findCredentialsByEmail(normalizedEmail)
         .orElseThrow(() -> new UnauthorizedException("Email or password is incorrect."));
     if (!"EMAIL".equalsIgnoreCase(credentials.user().authProvider())) {
@@ -89,6 +89,15 @@ public class UserService {
 
   public boolean emailExists(String email) {
     return userRepository.findByEmail(normalizeEmail(email)).isPresent();
+  }
+
+  public void updatePassword(String userId, String password) {
+    if (userId == null || userId.isBlank()) {
+      throw new BadRequestException("userId is required.");
+    }
+    validatePassword(password);
+    PasswordHashService.PasswordSecret secret = passwordHashService.hash(password);
+    userRepository.updatePassword(userId.trim(), secret.hash(), secret.salt());
   }
 
   public UserResponse syncSupabaseUser(SupabaseAuthService.SupabaseAuthUser authUser, String fallbackDisplayName) {
@@ -139,6 +148,12 @@ public class UserService {
   private void validatePassword(String password) {
     if (password == null || password.length() < 8) {
       throw new BadRequestException("password must be at least 8 characters.");
+    }
+  }
+
+  private void requirePassword(String password) {
+    if (password == null || password.isBlank()) {
+      throw new BadRequestException("password is required.");
     }
   }
 

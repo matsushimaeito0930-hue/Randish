@@ -72,6 +72,19 @@ public class RestaurantQueryService {
       Double longitude,
       Integer range,
       int maxCandidates) {
+    return searchRandomEntities(area, genre, budgetMin, budgetMax, latitude, longitude, range, maxCandidates, false);
+  }
+
+  public List<Restaurant> searchRandomEntities(
+      String area,
+      String genre,
+      Integer budgetMin,
+      Integer budgetMax,
+      Double latitude,
+      Double longitude,
+      Integer range,
+      int maxCandidates,
+      boolean allowFallbackProviders) {
     validationService.validateSearchRequest(area, genre, budgetMin, budgetMax, latitude, longitude, range);
     Map<String, Restaurant> externalOnlyRestaurants = new LinkedHashMap<>();
     boolean hasAvailableProvider = false;
@@ -104,7 +117,7 @@ public class RestaurantQueryService {
     }
 
     int fallbackLimit = fallbackCandidateLimit(desiredCandidateCount, externalOnlyRestaurants.size());
-    if (fallbackLimit > 0) {
+    if (allowFallbackProviders && fallbackLimit > 0) {
       hasAvailableProvider = queryRandomProviders(
           fallbackProviders(),
           area,
@@ -154,6 +167,18 @@ public class RestaurantQueryService {
       Double latitude,
       Double longitude,
       Integer range) {
+    return searchEntities(area, genre, budgetMin, budgetMax, latitude, longitude, range, false);
+  }
+
+  public List<Restaurant> searchEntities(
+      String area,
+      String genre,
+      Integer budgetMin,
+      Integer budgetMax,
+      Double latitude,
+      Double longitude,
+      Integer range,
+      boolean allowFallbackProviders) {
     validationService.validateSearchRequest(area, genre, budgetMin, budgetMax, latitude, longitude, range);
     Map<String, Restaurant> externalOnlyRestaurants = new LinkedHashMap<>();
     boolean hasAvailableProvider = false;
@@ -183,7 +208,7 @@ public class RestaurantQueryService {
     }
 
     int fallbackLimit = fallbackCandidateLimit(HYBRID_TARGET_RESULT_COUNT, externalOnlyRestaurants.size());
-    if (fallbackLimit > 0) {
+    if (allowFallbackProviders && fallbackLimit > 0) {
       hasAvailableProvider = queryRandomProviders(
           fallbackProviders(),
           area,

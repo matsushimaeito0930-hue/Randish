@@ -61,6 +61,12 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "places.priceLevel",
       "places.googleMapsUri",
       "places.currentOpeningHours.openNow");
+  private static final String BUSINESS_STATUS_FIELD_MASK = String.join(",",
+      "places.id",
+      "places.googleMapsUri",
+      "places.currentOpeningHours.openNow",
+      "places.currentOpeningHours.nextOpenTime",
+      "places.currentOpeningHours.nextCloseTime");
   private static final String DETAIL_FIELD_MASK = String.join(",",
       "id",
       "displayName",
@@ -134,11 +140,11 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       Map.entry("お酒・バー", new BudgetRange(2000, 5500)),
       Map.entry("各国料理", new BudgetRange(1000, 4500)));
   private static final Map<String, List<String>> GENRE_KEYWORDS = Map.ofEntries(
-      Map.entry("ラーメン", List.of("ラーメン店", "らーめん", "つけ麺")),
-      Map.entry("焼肉", List.of("焼肉店", "ホルモン", "ジンギスカン")),
+      Map.entry("ラーメン", List.of("ラーメン店", "ラーメン", "らーめん", "つけ麺", "麺", "ramen", "noodle")),
+      Map.entry("焼肉", List.of("焼肉店", "焼肉", "ホルモン", "ジンギスカン")),
       Map.entry("居酒屋", List.of("居酒屋", "酒場", "炉端")),
       Map.entry("韓国料理", List.of("韓国料理", "サムギョプサル", "韓国レストラン")),
-      Map.entry("カレー", List.of("カレー店", "スパイスカレー", "インドカレー")),
+      Map.entry("カレー", List.of("カレー店", "カレー", "スパイスカレー", "インドカレー")),
       Map.entry("うどん", List.of("うどん店", "讃岐うどん")),
       Map.entry("そば", List.of("そば店", "蕎麦")),
       Map.entry("粉もの", List.of("お好み焼き店", "たこ焼き店", "もんじゃ")),
@@ -167,6 +173,59 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       Map.entry("ファストフード", List.of("マクドナルド", "モスバーガー", "ケンタッキー", "KFC", "ロッテリア", "バーガーキング", "フレッシュネスバーガー", "サブウェイ", "ハンバーガー")),
       Map.entry("お酒・バー", List.of("バー", "ダイニングバー", "ワインバー")),
       Map.entry("各国料理", List.of("エスニック料理", "タイ料理", "ベトナム料理", "メキシコ料理", "スペイン料理")));
+  private static final List<String> FOOD_PLACE_TYPES = List.of(
+      "restaurant",
+      "food",
+      "cafe",
+      "bar",
+      "bakery",
+      "meal_takeaway",
+      "meal_delivery");
+  private static final Map<String, List<String>> GENRE_PLACE_TYPES = Map.ofEntries(
+      Map.entry("ラーメン", List.of("ramen_restaurant")),
+      Map.entry("焼肉", List.of("barbecue_restaurant")),
+      Map.entry("居酒屋", List.of("japanese_izakaya_restaurant", "bar", "pub")),
+      Map.entry("韓国料理", List.of("korean_restaurant")),
+      Map.entry("カレー", List.of("indian_restaurant", "restaurant")),
+      Map.entry("うどん", List.of("udon_noodle_restaurant")),
+      Map.entry("そば", List.of("soba_noodle_shop", "japanese_restaurant")),
+      Map.entry("粉もの", List.of("japanese_restaurant")),
+      Map.entry("たこ焼き", List.of("japanese_restaurant")),
+      Map.entry("お好み焼き", List.of("japanese_restaurant")),
+      Map.entry("焼き鳥", List.of("yakitori_restaurant", "japanese_restaurant")),
+      Map.entry("ピザ", List.of("pizza_restaurant")),
+      Map.entry("ハンバーガー", List.of("hamburger_restaurant", "fast_food_restaurant")),
+      Map.entry("定食", List.of("japanese_restaurant")),
+      Map.entry("串カツ", List.of("japanese_restaurant")),
+      Map.entry("餃子", List.of("chinese_restaurant")),
+      Map.entry("和食", List.of("japanese_restaurant")),
+      Map.entry("洋食", List.of("restaurant")),
+      Map.entry("イタリアン", List.of("italian_restaurant")),
+      Map.entry("中華", List.of("chinese_restaurant")),
+      Map.entry("寿司", List.of("sushi_restaurant")),
+      Map.entry("海鮮", List.of("seafood_restaurant", "japanese_restaurant")),
+      Map.entry("肉料理", List.of("steak_house", "barbecue_restaurant", "hamburger_restaurant")),
+      Map.entry("サラダ・野菜", List.of("vegan_restaurant", "vegetarian_restaurant")),
+      Map.entry("スープ", List.of("restaurant")),
+      Map.entry("スイーツ", List.of("dessert_shop", "confectionery", "ice_cream_shop", "bakery", "cafe")),
+      Map.entry("カフェ", List.of("cafe", "coffee_shop")),
+      Map.entry("パン", List.of("bakery")),
+      Map.entry("郷土料理", List.of("japanese_restaurant", "restaurant")),
+      Map.entry("ファストフード", List.of("fast_food_restaurant", "hamburger_restaurant", "meal_takeaway")),
+      Map.entry("お酒・バー", List.of("bar", "pub", "wine_bar")),
+      Map.entry("各国料理", List.of("thai_restaurant", "vietnamese_restaurant", "mexican_restaurant", "spanish_restaurant")));
+  private static final List<String> TYPE_ONLY_MATCH_GENRES = List.of(
+      "和食",
+      "カフェ",
+      "パン",
+      "スイーツ",
+      "寿司",
+      "中華",
+      "韓国料理",
+      "イタリアン",
+      "ピザ",
+      "お酒・バー",
+      "ファストフード");
 
   private final RestClient restClient;
   private final String apiKey;
@@ -348,6 +407,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
     }
 
     return response.places().stream()
+        .filter(place -> matchesGooglePlaceGenre(place, request.category()))
         .map(place -> toCandidatePlace(place, request))
         .filter(Optional::isPresent)
         .map(Optional::get)
@@ -579,7 +639,62 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
     if (normalizedCategory.isBlank() || ALL_GENRES.equals(normalizedCategory)) {
       return "飲食店 レストラン";
     }
-    return normalizedCategory + " 飲食店";
+    return fallbackKeywords(normalizedCategory).stream().findFirst().orElse(normalizedCategory);
+  }
+
+  public RestaurantResponse enrichBusinessStatus(RestaurantResponse restaurant) {
+    if (!isAvailable()) {
+      return restaurant;
+    }
+
+    try {
+      if (!reserveGoogleRequests(1, "premium business status enrichment")) {
+        return restaurant;
+      }
+      GooglePlacesTextSearchResponse response = restClient.post()
+          .uri("/places:searchText")
+          .header("X-Goog-Api-Key", apiKey)
+          .header("X-Goog-FieldMask", BUSINESS_STATUS_FIELD_MASK)
+          .body(Map.of(
+              "textQuery", "%s %s".formatted(restaurant.name(), restaurant.address()),
+              "languageCode", "ja",
+              "regionCode", "JP",
+              "maxResultCount", 1))
+          .retrieve()
+          .body(GooglePlacesTextSearchResponse.class);
+      GooglePlace place = response == null || response.places() == null || response.places().isEmpty()
+          ? null
+          : response.places().getFirst();
+      if (place == null) {
+        return restaurant;
+      }
+      GoogleOpeningHours hours = place.currentOpeningHours();
+      return new RestaurantResponse(
+          restaurant.id(),
+          restaurant.externalProvider(),
+          restaurant.externalId(),
+          restaurant.name(),
+          restaurant.area(),
+          restaurant.genre(),
+          restaurant.budgetMin(),
+          restaurant.budgetMax(),
+          restaurant.rating(),
+          restaurant.minutes(),
+          restaurant.address(),
+          restaurant.photoUrl(),
+          restaurant.note(),
+          restaurant.latitude(),
+          restaurant.longitude(),
+          restaurant.googleRating(),
+          place.googleMapsUri() == null ? restaurant.googleMapsUri() : place.googleMapsUri(),
+          hours == null ? null : hours.openNow(),
+          hours == null ? null : hours.nextOpenTime(),
+          hours == null ? null : hours.nextCloseTime(),
+          place.id());
+    } catch (RuntimeException exception) {
+      logger.warn("Google Places business status enrichment failed for restaurant: {}", restaurant.name(), exception);
+      return restaurant;
+    }
   }
 
   private List<String> candidateCategories(String requestedCategory, List<String> placeTypes) {
@@ -689,7 +804,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
     String address = place.formattedAddress() == null || place.formattedAddress().isBlank()
         ? normalizeAreaForDisplay(requestedArea)
         : place.formattedAddress();
-    if (!matchesFallbackRestaurant(name, address, requestedGenre, place.types())) {
+    if (!matchesGooglePlaceGenre(name, address, requestedGenre, place.types())) {
       return Optional.empty();
     }
 
@@ -743,37 +858,75 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
         && (budgetMax == null || averageBudget <= budgetMax);
   }
 
-  private boolean matchesFallbackRestaurant(String name, String address, String genre, List<String> types) {
+  private boolean matchesGooglePlaceGenre(GooglePlace place, String genre) {
+    if (place == null) {
+      return false;
+    }
+    String name = place.displayName() == null ? null : place.displayName().text();
+    return matchesGooglePlaceGenre(name, place.formattedAddress(), genre, place.types());
+  }
+
+  boolean matchesGooglePlaceGenre(String name, String address, String genre, List<String> types) {
     if (!matchesFoodPlace(types)) {
       return false;
     }
-    if (!requiresStrictNameMatch(genre)) {
+    String normalizedGenre = normalizeGenre(genre);
+    if (normalizedGenre.isBlank() || ALL_GENRES.equals(normalizedGenre) || "その他".equals(normalizedGenre)) {
       return true;
     }
 
-    String source = "%s %s".formatted(name, address).toLowerCase(Locale.ROOT);
-    return List.of("マクドナルド", "マクド", "マック", "モスバーガー", "ケンタッキー", "kfc", "ロッテリア", "バーガーキング",
-        "フレッシュネス", "サブウェイ", "ドムドム", "ハンバーガー", "バーガー", "burger")
-        .stream()
-        .anyMatch(keyword -> source.contains(keyword.toLowerCase(Locale.ROOT)));
+    String source = normalizeMatchText("%s %s %s".formatted(
+        name == null ? "" : name,
+        address == null ? "" : address,
+        types == null ? "" : String.join(" ", types)));
+    boolean keywordMatch = fallbackKeywords(normalizedGenre).stream()
+        .map(this::normalizeMatchText)
+        .filter(keyword -> !keyword.isBlank())
+        .anyMatch(source::contains);
+    if (keywordMatch) {
+      return true;
+    }
+
+    List<String> normalizedTypes = normalizeTypes(types);
+    List<String> allowedTypes = GENRE_PLACE_TYPES.getOrDefault(normalizedGenre, List.of());
+    boolean typeMatch = allowedTypes.stream()
+        .map(type -> type.toLowerCase(Locale.ROOT))
+        .anyMatch(normalizedTypes::contains);
+    if (!typeMatch) {
+      return false;
+    }
+
+    boolean exactTypeMatch = allowedTypes.stream()
+        .map(type -> type.toLowerCase(Locale.ROOT))
+        .filter(type -> !List.of("restaurant", "food", "japanese_restaurant").contains(type))
+        .anyMatch(normalizedTypes::contains);
+    return exactTypeMatch || TYPE_ONLY_MATCH_GENRES.contains(normalizedGenre);
   }
 
   private boolean matchesFoodPlace(List<String> types) {
     if (types == null || types.isEmpty()) {
       return true;
     }
-    return types.stream().anyMatch(type -> List.of(
-        "restaurant",
-        "food",
-        "cafe",
-        "bar",
-        "bakery",
-        "meal_takeaway",
-        "meal_delivery").contains(type));
+    return normalizeTypes(types).stream().anyMatch(FOOD_PLACE_TYPES::contains);
   }
 
-  private boolean requiresStrictNameMatch(String genre) {
-    return "ファストフード".equals(genre) || "ハンバーガー".equals(genre);
+  private List<String> normalizeTypes(List<String> types) {
+    if (types == null) {
+      return List.of();
+    }
+    return types.stream()
+        .filter(type -> type != null && !type.isBlank())
+        .map(type -> type.trim().toLowerCase(Locale.ROOT))
+        .distinct()
+        .toList();
+  }
+
+  private String normalizeMatchText(String value) {
+    if (value == null) {
+      return "";
+    }
+    return value.toLowerCase(Locale.ROOT)
+        .replaceAll("[\\s　・･ーｰ\\-_'’`.,、。/／()（）\\[\\]【】]", "");
   }
 
   private BudgetRange defaultBudgetForGenre(String genre) {

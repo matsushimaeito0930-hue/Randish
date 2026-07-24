@@ -2,9 +2,12 @@ package com.example.restaurantroulette.controller;
 
 import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
 import com.example.restaurantroulette.dto.ApiDtos.EmailVerificationResponse;
-import com.example.restaurantroulette.dto.ApiDtos.OAuthAuthorizeResponse;
+import com.example.restaurantroulette.dto.ApiDtos.EmailOtpVerifyRequest;
+import com.example.restaurantroulette.dto.ApiDtos.MagicLinkRequest;
 import com.example.restaurantroulette.dto.ApiDtos.OAuthRefreshRequest;
 import com.example.restaurantroulette.dto.ApiDtos.OAuthSessionRequest;
+import com.example.restaurantroulette.dto.ApiDtos.PasswordResetConfirmRequest;
+import com.example.restaurantroulette.dto.ApiDtos.PasswordResetRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
 import com.example.restaurantroulette.exception.BadRequestException;
@@ -18,7 +21,6 @@ import java.util.Locale;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -62,20 +64,43 @@ public class AuthController {
     return authService.login(request);
   }
 
+  @PostMapping("/magic-link")
+  public EmailVerificationResponse requestMagicLink(
+      @RequestBody MagicLinkRequest requestBody,
+      HttpServletRequest request) {
+    if (requestBody == null) {
+      throw new BadRequestException("request body is required.");
+    }
+    String redirectTo = resolveOAuthRedirect(request, requestBody.redirectTo(), requestBody.appRedirectTo());
+    boolean createUser = requestBody.createUser() == null || requestBody.createUser();
+    return authService.requestMagicLink(requestBody.email(), redirectTo, createUser);
+  }
+
+  @PostMapping("/otp/verify")
+  public AuthResponse verifyEmailOtp(@RequestBody EmailOtpVerifyRequest requestBody) {
+    return authService.verifyEmailOtp(requestBody);
+  }
+
+  @PostMapping("/password/reset/request")
+  public EmailVerificationResponse requestPasswordReset(
+      @RequestBody PasswordResetRequest requestBody,
+      HttpServletRequest request) {
+    if (requestBody == null) {
+      throw new BadRequestException("request body is required.");
+    }
+    String redirectTo = resolveOAuthRedirect(request, requestBody.redirectTo(), requestBody.appRedirectTo());
+    return authService.requestPasswordReset(requestBody.email(), redirectTo);
+  }
+
+  @PostMapping("/password/reset/confirm")
+  public AuthResponse confirmPasswordReset(@RequestBody PasswordResetConfirmRequest requestBody) {
+    return authService.confirmPasswordReset(requestBody);
+  }
+
   @PostMapping("/logout")
   public ResponseEntity<Void> logout(@RequestHeader(value = "Authorization", required = false) String authorizationHeader) {
     authService.logout(authorizationHeader);
     return ResponseEntity.noContent().build();
-  }
-
-  @GetMapping("/oauth/{provider}/authorize")
-  public OAuthAuthorizeResponse oauthAuthorize(
-      @PathVariable String provider,
-      @RequestParam(required = false) String redirectTo,
-      @RequestParam(required = false) String appRedirectTo,
-      HttpServletRequest request) {
-    String resolvedRedirectTo = resolveOAuthRedirect(request, redirectTo, appRedirectTo);
-    return authService.createOAuthAuthorizeUrl(provider, resolvedRedirectTo);
   }
 
   @GetMapping(value = "/oauth/callback", produces = MediaType.TEXT_HTML_VALUE)

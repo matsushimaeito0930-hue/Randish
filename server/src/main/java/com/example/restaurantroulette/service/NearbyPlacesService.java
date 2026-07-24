@@ -32,6 +32,7 @@ public class NearbyPlacesService {
   private static final int DEFAULT_CACHE_TTL_SECONDS = 600;
   private static final int DEFAULT_CACHE_DISTANCE_METERS = 300;
   private static final int DEFAULT_MAX_RESULTS = 20;
+  private static final int GOOGLE_FALLBACK_MIN_RESTAURANT_CANDIDATES = 10;
 
   private final GooglePlacesEnrichmentService googlePlacesEnrichmentService;
   private final RestaurantQueryService restaurantQueryService;
@@ -98,8 +99,12 @@ public class NearbyPlacesService {
   }
 
   public NearbyPlacesResponse search(NearbyPlacesRequest request) {
-    NearbyPlacesRequest normalized = normalizeRequest(request);
-    NearbyCacheKey cacheKey = NearbyCacheKey.from(normalized);
+    return search(request, false);
+  }
+
+  public NearbyPlacesResponse search(NearbyPlacesRequest request, boolean premium) {
+    NearbyPlacesRequest normalized = normalizeRequest(request, premium);
+    NearbyCacheKey cacheKey = NearbyCacheKey.from(normalized, premium);
     cleanupExpired(cacheKey);
 
     Optional<NearbyCacheEntry> cached = findCacheEntry(cacheKey, normalized);
@@ -123,7 +128,9 @@ public class NearbyPlacesService {
     }
 
     List<CandidatePlaceResponse> googlePlaces = List.of();
-    if (googlePlacesEnrichmentService.isAvailable() && restaurantPlaces.size() < maxResults) {
+    if (premium
+        && restaurantPlaces.size() < GOOGLE_FALLBACK_MIN_RESTAURANT_CANDIDATES
+        && googlePlacesEnrichmentService.isAvailable()) {
       logger.info("[RANDISH_PLACES] google fallback nearby search key={} radius={} category={} openNow={} currentCount={}",
           cacheKey,
           normalized.radius(),
@@ -131,7 +138,7 @@ public class NearbyPlacesService {
           normalized.openNow(),
           restaurantPlaces.size());
       googlePlaces = searchGooglePlaces(normalized, maxResults - restaurantPlaces.size());
-    } else if (!googlePlacesEnrichmentService.isAvailable() && restaurantPlaces.isEmpty()) {
+    } else if (premium && !googlePlacesEnrichmentService.isAvailable() && restaurantPlaces.isEmpty()) {
       logger.info("[RANDISH_PLACES] no restaurant provider candidates while Google Places is unavailable");
     }
 
@@ -163,7 +170,7 @@ public class NearbyPlacesService {
         places.isEmpty() ? "no nearby candidates" : "fresh nearby candidates");
   }
 
-  private NearbyPlacesRequest normalizeRequest(NearbyPlacesRequest request) {
+  private NearbyPlacesRequest normalizeRequest(NearbyPlacesRequest request, boolean premium) {
     if (request == null) {
       throw new BadRequestException("request body is required.");
     }
@@ -180,7 +187,7 @@ public class NearbyPlacesService {
         radius,
         cleanText(request.category()),
         cleanText(request.priceRange()),
-        request.openNow());
+        premium ? request.openNow() : null);
   }
 
   private Optional<NearbyCacheEntry> findCacheEntry(NearbyCacheKey key, NearbyPlacesRequest request) {
@@ -545,13 +552,15 @@ public class NearbyPlacesService {
       int radius,
       String category,
       String priceRange,
-      boolean openNow) {
-    private static NearbyCacheKey from(NearbyPlacesRequest request) {
+      boolean openNow,
+      boolean premium) {
+    private static NearbyCacheKey from(NearbyPlacesRequest request, boolean premium) {
       return new NearbyCacheKey(
           request.radius(),
           normalizeKeyPart(request.category()),
           normalizeKeyPart(request.priceRange()),
-          Boolean.TRUE.equals(request.openNow()));
+          Boolean.TRUE.equals(request.openNow()),
+          premium);
     }
 
     private static String normalizeKeyPart(String value) {

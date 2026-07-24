@@ -23,8 +23,6 @@
           "cameraPermission": "食事の写真を撮ってアルバムに残すためにカメラを使用します。"
         }
       ],
-      "expo-apple-authentication",
-      "expo-web-browser",
       [
         "expo-location",
         {
@@ -35,7 +33,6 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "食事の写真を撮ってアルバムに残すためにカメラを使用します。",
         "NSLocationWhenInUseUsageDescription": "近くのお店を探してルーレットで選ぶために現在地を使用します。",
@@ -57,7 +54,8 @@
       }
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/randish-logo-square1.png"
     }
   }
 }

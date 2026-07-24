@@ -123,6 +123,20 @@ public class AppUserRepository {
         .optional();
   }
 
+  public void updatePassword(String userId, String passwordHash, String passwordSalt) {
+    jdbcClient.sql("""
+        UPDATE app_users
+        SET password_hash = :passwordHash,
+            password_salt = :passwordSalt,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = :userId
+        """)
+        .param("userId", userId)
+        .param("passwordHash", passwordHash)
+        .param("passwordSalt", passwordSalt)
+        .update();
+  }
+
   private AppUser mapUser(ResultSet resultSet, int rowNumber) throws SQLException {
     return new AppUser(
         resultSet.getString("id"),

@@ -304,6 +304,25 @@ class RandishLogicTest {
   }
 
   @Test
+  void localAuthCanLoginWithAnExistingShortPassword() {
+    String existingPassword = "abc123";
+    PasswordHashService.PasswordSecret secret = passwordHashService.hash(existingPassword);
+    UserResponse registered = userService.registerVerifiedEmail(
+        "legacy-short-password@example.com",
+        "Legacy User",
+        secret.hash(),
+        secret.salt());
+    AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
+
+    AuthResponse loggedIn = authService.login(new com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest(
+        "legacy-short-password@example.com",
+        existingPassword));
+
+    assertThat(loggedIn.user().id()).isEqualTo(registered.id());
+    assertThat(loggedIn.accessToken()).isNotBlank();
+  }
+
+  @Test
   void localAuthLogoutRevokesSession() {
     userService.register(new UserCreateRequest("local-logout@example.com", "password123", "Local User"));
     AuthService authService = new AuthService(userService, new SupabaseAuthService(RestClient.builder()), new LocalSessionService());
@@ -382,31 +401,6 @@ class RandishLogicTest {
   }
 
   @Test
-  void supabaseOAuthAuthorizeUrlUsesSupportedProviderAndRedirect() {
-    System.setProperty("SUPABASE_URL", "https://randish-test.supabase.co");
-    System.setProperty("SUPABASE_ANON_KEY", "anon-test-key");
-    try {
-      var auth = new SupabaseAuthService(RestClient.builder());
-      String url = auth.createOAuthAuthorizeUrl("Google", "randish://auth/callback");
-
-      assertThat(url).startsWith("https://randish-test.supabase.co/auth/v1/authorize?");
-      assertThat(url).contains("provider=google");
-      assertThat(url).contains("redirect_to=randish%3A%2F%2Fauth%2Fcallback");
-    } finally {
-      System.clearProperty("SUPABASE_URL");
-      System.clearProperty("SUPABASE_ANON_KEY");
-    }
-  }
-
-  @Test
-  void supabaseOAuthAuthorizeUrlRejectsUnsupportedProvider() {
-    var auth = new SupabaseAuthService(RestClient.builder());
-
-    assertThatThrownBy(() -> auth.createOAuthAuthorizeUrl("line", "randish://auth/callback"))
-        .isInstanceOf(BadRequestException.class);
-  }
-
-  @Test
   void supabaseUserSyncMergesExistingEmailAccount() {
     UserResponse localUser = userService.register(new UserCreateRequest("google-merge@example.com", "password123", "Local User"));
     var supabaseUser = new SupabaseAuthService.SupabaseAuthUser(
@@ -477,7 +471,7 @@ class RandishLogicTest {
         mapper,
         validationService);
 
-    var restaurants = hybridQueryService.searchRandomEntities("東成区", "ラーメン", 0, 2000, null, null, null, 100);
+    var restaurants = hybridQueryService.searchRandomEntities("東成区", "ラーメン", 0, 2000, null, null, null, 100, true);
 
     assertThat(restaurants).hasSize(100);
     assertThat(restaurants.stream().filter(restaurant -> restaurant.externalProvider().equals("HOTPEPPER")).count()).isEqualTo(70);
@@ -594,7 +588,7 @@ class RandishLogicTest {
         mapper,
         validationService);
 
-    var restaurants = service.searchRandomEntities("出雲市", "ラーメン", 0, 2000, 35.360748, 132.756697, 4, 3);
+    var restaurants = service.searchRandomEntities("出雲市", "ラーメン", 0, 2000, 35.360748, 132.756697, 4, 3, true);
 
     assertThat(callOrder).containsExactly("HOTPEPPER", "GEOAPIFY", "GOOGLE_PLACES");
     assertThat(restaurants).extracting("externalProvider").containsExactly("HOTPEPPER", "GEOAPIFY", "GOOGLE_PLACES");
@@ -643,6 +637,10 @@ class RandishLogicTest {
     HotPepperRestaurantProvider provider = new HotPepperRestaurantProvider(RestClient.builder(), new ObjectMapper());
     Method buildSearchPlans = HotPepperRestaurantProvider.class.getDeclaredMethod("buildSearchPlans", String.class);
     buildSearchPlans.setAccessible(true);
+
+    List<?> ramenPlans = (List<?>) buildSearchPlans.invoke(provider, "ラーメン");
+    assertThat(ramenPlans).hasSizeGreaterThanOrEqualTo(4);
+    assertThat(ramenPlans.toString()).contains("G013", "ラーメン", "つけ麺", "中華そば");
 
     List<?> powderPlans = (List<?>) buildSearchPlans.invoke(provider, "粉もの");
     assertThat(powderPlans).hasSizeGreaterThanOrEqualTo(3);
@@ -790,8 +788,8 @@ class RandishLogicTest {
     var service = new NearbyPlacesService(provider, validationService, 600, 300, false, false, 20);
     var request = new NearbyPlacesRequest(35.681236, 139.767125, 1500, "ラーメン", null, false);
 
-    var first = service.search(request);
-    var second = service.search(new NearbyPlacesRequest(35.681336, 139.767225, 1500, "ラーメン", null, false));
+    var first = service.search(request, true);
+    var second = service.search(new NearbyPlacesRequest(35.681336, 139.767225, 1500, "ラーメン", null, false), true);
 
     assertThat(first.cacheHit()).isFalse();
     assertThat(second.cacheHit()).isTrue();
@@ -804,10 +802,26 @@ class RandishLogicTest {
     var provider = new CountingNearbyPlacesProvider();
     var service = new NearbyPlacesService(provider, validationService, 600, 300, false, false, 20);
 
-    service.search(new NearbyPlacesRequest(35.681236, 139.767125, 1500, "ラーメン", null, false));
-    service.search(new NearbyPlacesRequest(35.681236, 139.767125, 1500, "カフェ", null, false));
+    service.search(new NearbyPlacesRequest(35.681236, 139.767125, 1500, "ラーメン", null, false), true);
+    service.search(new NearbyPlacesRequest(35.681236, 139.767125, 1500, "カフェ", null, false), true);
 
     assertThat(provider.nearbyCallCount).isEqualTo(2);
+  }
+
+  @Test
+  void nearbyPlacesDoesNotCallGoogleForFreeUsersAndSeparatesPremiumCache() {
+    var googleProvider = new CountingNearbyPlacesProvider();
+    var service = new NearbyPlacesService(googleProvider, validationService, 600, 300, false, false, 20);
+    var request = new NearbyPlacesRequest(35.681236, 139.767125, 1500, "ラーメン", null, true);
+
+    var freeResponse = service.search(request, false);
+    var premiumResponse = service.search(request, true);
+
+    assertThat(freeResponse.places()).isEmpty();
+    assertThat(freeResponse.cacheHit()).isFalse();
+    assertThat(googleProvider.nearbyCallCount).isEqualTo(1);
+    assertThat(premiumResponse.cacheHit()).isFalse();
+    assertThat(premiumResponse.places()).extracting("id").containsExactly("nearby-test-1");
   }
 
   @Test
@@ -852,7 +866,7 @@ class RandishLogicTest {
   }
 
   @Test
-  void nearbyPlacesUsesRestaurantProvidersBeforeGoogleFallbackWhenGoogleIsAvailable() {
+  void nearbyPlacesUsesGoogleFallbackWhenRestaurantProvidersReturnFewCandidates() {
     var googleProvider = new CountingNearbyPlacesProvider();
     var restaurantProvider = new NearbyRestaurantProvider();
     var restaurantService = new RestaurantQueryService(
@@ -870,12 +884,65 @@ class RandishLogicTest {
         false,
         20);
 
-    var response = service.search(new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false));
+    var response = service.search(new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false), true);
 
     assertThat(response.source()).isEqualTo("HYBRID_PLACES");
     assertThat(restaurantProvider.searchCallCount).isEqualTo(1);
     assertThat(googleProvider.nearbyCallCount).isEqualTo(1);
+    assertThat(googleProvider.lastMaxCandidates).isEqualTo(19);
     assertThat(response.places()).extracting("id").containsExactly("geoapify-geo-test-1", "nearby-test-1");
+  }
+
+  @Test
+  void nearbyPlacesSkipsGoogleFallbackWhenRestaurantProvidersReturnEnoughCandidates() {
+    var googleProvider = new CountingNearbyPlacesProvider();
+    var restaurantProvider = new BulkNearbyRestaurantProvider(10);
+    var restaurantService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(restaurantProvider),
+        mapper,
+        validationService);
+    var service = new NearbyPlacesService(
+        googleProvider,
+        restaurantService,
+        validationService,
+        600,
+        300,
+        false,
+        false,
+        20);
+
+    var response = service.search(new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false));
+
+    assertThat(response.source()).isEqualTo("RANDISH_RESTAURANTS");
+    assertThat(restaurantProvider.searchCallCount).isEqualTo(1);
+    assertThat(googleProvider.nearbyCallCount).isZero();
+    assertThat(response.places()).hasSize(10);
+  }
+
+  @Test
+  void nearbyPlacesUsesGoogleFallbackOnlyWhenRestaurantProvidersReturnNoCandidates() {
+    var googleProvider = new CountingNearbyPlacesProvider();
+    var restaurantService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(),
+        mapper,
+        validationService);
+    var service = new NearbyPlacesService(
+        googleProvider,
+        restaurantService,
+        validationService,
+        600,
+        300,
+        false,
+        false,
+        20);
+
+    var response = service.search(new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false), true);
+
+    assertThat(response.source()).isEqualTo("GOOGLE_PLACES");
+    assertThat(googleProvider.nearbyCallCount).isEqualTo(1);
+    assertThat(response.places()).extracting("id").containsExactly("nearby-test-1");
   }
 
   @Test
@@ -939,6 +1006,7 @@ class RandishLogicTest {
 
   private static class CountingNearbyPlacesProvider extends GooglePlacesEnrichmentService {
     private int nearbyCallCount;
+    private int lastMaxCandidates;
 
     private CountingNearbyPlacesProvider() {
       super(RestClient.builder());
@@ -952,6 +1020,7 @@ class RandishLogicTest {
     @Override
     public List<CandidatePlaceResponse> searchNearbyCandidates(NearbyPlacesRequest request, int maxCandidates) {
       nearbyCallCount++;
+      lastMaxCandidates = maxCandidates;
       return List.of(new CandidatePlaceResponse(
           "nearby-test-1",
           "Nearby Test",
@@ -1010,6 +1079,45 @@ class RandishLogicTest {
           "test",
           latitude == null ? 34.699826 : latitude + 0.0002,
           longitude == null ? 135.49311 : longitude + 0.0002));
+    }
+  }
+
+  private static class BulkNearbyRestaurantProvider implements ExternalRestaurantProvider {
+    private final int count;
+    private int searchCallCount;
+
+    private BulkNearbyRestaurantProvider(int count) {
+      this.count = count;
+    }
+
+    @Override
+    public boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    public List<Restaurant> search(String area, String genre, Integer budgetMin, Integer budgetMax, Double latitude, Double longitude, Integer range) {
+      searchCallCount++;
+      List<Restaurant> restaurants = new ArrayList<>();
+      for (int index = 0; index < count; index++) {
+        restaurants.add(new Restaurant(
+            "geo-test-" + index,
+            "GEOAPIFY",
+            "geo-test-" + index,
+            "HAL Ramen " + index,
+            area,
+            genre == null ? "ramen" : genre,
+            900,
+            1500,
+            4.1,
+            4,
+            "Osaka Kita " + index,
+            null,
+            "test",
+            latitude == null ? 34.699826 : latitude + (0.00002 * index),
+            longitude == null ? 135.49311 : longitude + (0.00002 * index)));
+      }
+      return restaurants;
     }
   }
 

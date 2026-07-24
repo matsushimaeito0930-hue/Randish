@@ -155,9 +155,9 @@ SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_PUBLIC_KEY
 RANDISH_OAUTH_REDIRECT_URI=randish://auth/callback
 ```
 
-When these are present, registration and login go through Supabase Auth first, then the authenticated user is synced into `app_users`.
+When these are present, registration and login use Supabase email magic links, then the authenticated user is synced into `app_users`.
 
-For Google / Apple sign-in, enable each provider in Supabase Authentication settings and add this redirect URL:
+Add this redirect URL to the Supabase Authentication redirect allow list:
 
 ```text
 randish://auth/callback
@@ -172,9 +172,29 @@ Expo Web: http://localhost:YOUR_WEB_PORT/auth/callback
 
 Add the exact local callback shown by your running app to Supabase Auth redirect URLs. You can force one with `EXPO_PUBLIC_RANDISH_OAUTH_REDIRECT_URI` when the host or port must stay fixed.
 
-The mobile app opens Supabase OAuth, receives the callback token, and asks the Spring Boot API to verify that token before syncing the user. Supabase requires the `redirectTo` URL to match its Auth redirect allow list.
+The email link returns through `/auth/callback`. The app receives the Supabase session token and asks the Spring Boot API to verify it before syncing the user. Supabase requires the `redirectTo` URL to match its Auth redirect allow list.
 
-If a target runtime cannot return directly to the app callback, enable the Spring Boot OAuth bridge:
+Configure Supabase Auth custom SMTP to send through Resend:
+
+```text
+Host: smtp.resend.com
+Port: 465
+Username: resend
+Password: your Resend API key
+Sender email: login@auth.randish.jp
+Sender name: RANDISH
+```
+
+Verify `auth.randish.jp` in Resend before enabling production delivery. The Resend API key and SMTP password are server-side secrets and must never use an `EXPO_PUBLIC_` prefix.
+
+The contact form posts to the Spring Boot API and sends to `info@randish.jp` with the Resend API. Configure it in `.env.local`:
+
+```env
+RESEND_API_KEY=re_xxx
+RESEND_CONTACT_FROM_EMAIL=RANDISH Contact <info@randish.jp>
+```
+
+If a target runtime cannot return directly to the app callback, enable the Spring Boot callback bridge:
 
 ```env
 EXPO_PUBLIC_RANDISH_OAUTH_USE_BRIDGE=true

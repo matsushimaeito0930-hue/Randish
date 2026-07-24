@@ -1,15 +1,18 @@
 package com.example.restaurantroulette.service;
 
 import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
-import com.example.restaurantroulette.dto.ApiDtos.OAuthAuthorizeResponse;
+import com.example.restaurantroulette.dto.ApiDtos.EmailVerificationResponse;
+import com.example.restaurantroulette.dto.ApiDtos.EmailOtpVerifyRequest;
 import com.example.restaurantroulette.dto.ApiDtos.OAuthRefreshRequest;
 import com.example.restaurantroulette.dto.ApiDtos.OAuthSessionRequest;
+import com.example.restaurantroulette.dto.ApiDtos.PasswordResetConfirmRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.exception.UnauthorizedException;
 import java.util.Locale;
+import java.time.Instant;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
@@ -49,7 +52,7 @@ public class AuthService {
 
   public AuthResponse login(UserLoginRequest request) {
     String email = normalizeEmail(request.email());
-    validatePassword(request.password());
+    requirePassword(request.password());
 
     try {
       UserResponse user = userService.authenticate(email, request.password());
@@ -68,9 +71,42 @@ public class AuthService {
     }
   }
 
-  public OAuthAuthorizeResponse createOAuthAuthorizeUrl(String provider, String redirectTo) {
-    String authorizationUrl = supabaseAuthService.createOAuthAuthorizeUrl(provider, redirectTo);
-    return new OAuthAuthorizeResponse(provider.trim().toLowerCase(Locale.ROOT), authorizationUrl, redirectTo);
+  public EmailVerificationResponse requestMagicLink(String email, String redirectTo, boolean createUser) {
+    String normalizedEmail = normalizeEmail(email);
+    Instant expiresAt = supabaseAuthService.requestMagicLink(normalizedEmail, redirectTo, createUser);
+    return new EmailVerificationResponse(normalizedEmail, expiresAt);
+  }
+
+  public AuthResponse verifyEmailOtp(EmailOtpVerifyRequest request) {
+    if (request == null) {
+      throw new BadRequestException("request body is required.");
+    }
+    String email = normalizeEmail(request.email());
+    String token = request.token() == null ? "" : request.token().trim();
+    if (!token.matches("\\d{6,10}")) {
+      throw new BadRequestException("token must be a 6 to 10-digit code.");
+    }
+    SupabaseAuthService.SupabaseAuthResult authResult = supabaseAuthService.verifyEmailOtp(email, token);
+    UserResponse user = userService.syncSupabaseUser(authResult.user(), null);
+    return new AuthResponse(user, authResult.accessToken(), authResult.refreshToken());
+  }
+
+  public EmailVerificationResponse requestPasswordReset(String email, String redirectTo) {
+    String normalizedEmail = normalizeEmail(email);
+    Instant expiresAt = supabaseAuthService.requestPasswordReset(normalizedEmail, redirectTo);
+    return new EmailVerificationResponse(normalizedEmail, expiresAt);
+  }
+
+  public AuthResponse confirmPasswordReset(PasswordResetConfirmRequest request) {
+    if (request == null || request.accessToken() == null || request.accessToken().isBlank()) {
+      throw new BadRequestException("accessToken is required.");
+    }
+    validatePassword(request.password());
+    String accessToken = request.accessToken().trim();
+    SupabaseAuthService.SupabaseAuthUser authUser = supabaseAuthService.updatePassword(accessToken, request.password());
+    UserResponse user = userService.syncSupabaseUser(authUser, null);
+    userService.updatePassword(user.id(), request.password());
+    return new AuthResponse(user, accessToken);
   }
 
   public AuthResponse loginWithOAuthSession(OAuthSessionRequest request) {
@@ -134,6 +170,12 @@ public class AuthService {
   private void validatePassword(String password) {
     if (password == null || password.length() < 8) {
       throw new BadRequestException("password must be at least 8 characters.");
+    }
+  }
+
+  private void requirePassword(String password) {
+    if (password == null || password.isBlank()) {
+      throw new BadRequestException("password is required.");
     }
   }
 }

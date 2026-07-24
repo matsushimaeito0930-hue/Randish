@@ -123,12 +123,39 @@ export type EmailVerificationResponse = {
   expiresAt: string;
 };
 
-export type OAuthProvider = 'google' | 'apple';
+export type MagicLinkParams = {
+  email: string;
+  createUser?: boolean;
+  redirectTo?: string;
+  appRedirectTo?: string;
+};
 
-export type OAuthAuthorizeResponse = {
-  provider: OAuthProvider;
-  authorizationUrl: string;
-  redirectTo: string;
+export type EmailOtpVerifyParams = {
+  email: string;
+  token: string;
+};
+
+export type PasswordResetRequestParams = {
+  email: string;
+  redirectTo?: string;
+  appRedirectTo?: string;
+};
+
+export type PasswordResetConfirmParams = {
+  accessToken: string;
+  password: string;
+};
+
+export type ContactParams = {
+  name: string;
+  email: string;
+  subject: string;
+  content: string;
+};
+
+export type ContactResponse = {
+  success: boolean;
+  message: string;
 };
 
 export type OAuthSessionParams = {
@@ -425,16 +452,43 @@ export const randishApi = {
       skipAuth: true,
     }),
 
+  requestMagicLink: (baseUrl: ApiBaseUrlInput, params: MagicLinkParams) =>
+    request<EmailVerificationResponse>(baseUrl, 'api/auth/magic-link', undefined, {
+      method: 'POST',
+      body: params,
+      skipAuth: true,
+    }),
+
+  verifyEmailOtp: (baseUrl: ApiBaseUrlInput, params: EmailOtpVerifyParams) =>
+    request<AuthResponse>(baseUrl, 'api/auth/otp/verify', undefined, {
+      method: 'POST',
+      body: params,
+      skipAuth: true,
+    }),
+
+  requestPasswordReset: (baseUrl: ApiBaseUrlInput, params: PasswordResetRequestParams) =>
+    request<EmailVerificationResponse>(baseUrl, 'api/auth/password/reset/request', undefined, {
+      method: 'POST',
+      body: params,
+      skipAuth: true,
+    }),
+
+  confirmPasswordReset: (baseUrl: ApiBaseUrlInput, params: PasswordResetConfirmParams) =>
+    request<AuthResponse>(baseUrl, 'api/auth/password/reset/confirm', undefined, {
+      method: 'POST',
+      body: params,
+      skipAuth: true,
+    }),
+
+  sendContact: (baseUrl: ApiBaseUrlInput, params: ContactParams) =>
+    request<ContactResponse>(baseUrl, 'api/contact', undefined, {
+      method: 'POST',
+      body: params,
+      skipAuth: true,
+    }),
+
   logout: (baseUrl: ApiBaseUrlInput) =>
     request<void>(baseUrl, 'api/auth/logout', undefined, { method: 'POST', skipAuth: true }),
-
-  getOAuthAuthorizeUrl: (baseUrl: ApiBaseUrlInput, provider: OAuthProvider, redirectTo: string, useBridge = false) =>
-    request<OAuthAuthorizeResponse>(
-      baseUrl,
-      `api/auth/oauth/${provider}/authorize`,
-      useBridge ? { appRedirectTo: redirectTo } : { redirectTo },
-      { skipAuth: true },
-    ),
 
   loginWithOAuthSession: (baseUrl: ApiBaseUrlInput, params: OAuthSessionParams) =>
     request<AuthResponse>(baseUrl, 'api/auth/oauth/session', undefined, {
@@ -471,6 +525,12 @@ export const randishApi = {
     request<NearbyPlacesResponse>(baseUrl, 'api/places/nearby', undefined, {
       method: 'POST',
       body: params,
+    }),
+
+  enrichPremiumBusinessStatus: (baseUrl: ApiBaseUrlInput, restaurant: Restaurant) =>
+    request<Restaurant>(baseUrl, 'api/google-places/business-status', undefined, {
+      method: 'POST',
+      body: restaurant,
     }),
 
   getRandomHistories: (baseUrl: ApiBaseUrlInput, userId: string) =>

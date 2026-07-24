@@ -139,9 +139,44 @@ public final class ApiDtos {
       String refreshToken) {
   }
 
+  public record MagicLinkRequest(
+      String email,
+      String redirectTo,
+      String appRedirectTo,
+      Boolean createUser) {
+  }
+
+  public record EmailOtpVerifyRequest(
+      String email,
+      String token) {
+  }
+
+  public record PasswordResetRequest(
+      String email,
+      String redirectTo,
+      String appRedirectTo) {
+  }
+
+  public record PasswordResetConfirmRequest(
+      String accessToken,
+      String password) {
+  }
+
   public record EmailVerificationResponse(
       String email,
       Instant expiresAt) {
+  }
+
+  public record ContactRequest(
+      String name,
+      String email,
+      String subject,
+      String content) {
+  }
+
+  public record ContactResponse(
+      boolean success,
+      String message) {
   }
 
   public record UserResponse(
