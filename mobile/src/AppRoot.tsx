@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -7621,6 +7621,7 @@ function HomeCurrentMapBackground({ userLocation }: { userLocation: UserLocation
   const MapModule = useMemo(getNativeMapModule, []);
   const MapView = MapModule?.default;
   const canRenderNativeMap = Boolean(MapModule && MapView && Platform.OS !== 'web' && userLocation);
+  const canRenderWebGoogleMap = Boolean(userLocation && Platform.OS === 'web');
   const region = userLocation
     ? {
       latitude: userLocation.latitude,
@@ -7629,6 +7630,13 @@ function HomeCurrentMapBackground({ userLocation }: { userLocation: UserLocation
       longitudeDelta: 0.0046,
     }
     : null;
+  const webGoogleMapUrl = useMemo(() => {
+    if (!userLocation) {
+      return null;
+    }
+    const query = encodeURIComponent(`${userLocation.latitude},${userLocation.longitude}`);
+    return `https://maps.google.com/maps?q=${query}&z=16&t=m&output=embed`;
+  }, [userLocation]);
 
   return (
     <View style={styles.homeCurrentMapLayer}>
@@ -7651,6 +7659,31 @@ function HomeCurrentMapBackground({ userLocation }: { userLocation: UserLocation
             userLocationUpdateInterval={1000}
             loadingEnabled
           />
+          <View pointerEvents="none" style={styles.homeCurrentMapTint} />
+        </>
+      ) : canRenderWebGoogleMap && webGoogleMapUrl && userLocation ? (
+        <>
+          {createElement('iframe', {
+            key: `home-current-web-${userLocation.latitude.toFixed(5)}-${userLocation.longitude.toFixed(5)}`,
+            title: '現在地 Google Map',
+            src: webGoogleMapUrl,
+            loading: 'lazy',
+            referrerPolicy: 'no-referrer-when-downgrade',
+            allowFullScreen: true,
+            style: {
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              minWidth: '100%',
+              minHeight: '100%',
+              display: 'block',
+              border: 0,
+              borderRadius: 22,
+              backgroundColor: '#e5e3df',
+              pointerEvents: 'auto',
+            },
+          })}
           <View pointerEvents="none" style={styles.homeCurrentMapTint} />
         </>
       ) : (
@@ -9972,6 +10005,11 @@ function RouletteMapView({
   const MapView = MapModule?.default;
   const Marker = MapModule?.Marker;
   const rendersNativeMap = Boolean(canRenderNativeMap && MapView && Marker);
+  const rendersWebGoogleMap = Platform.OS === 'web';
+  const webGoogleMapUrl = useMemo(() => {
+    const query = encodeURIComponent(`${mapCenter.latitude},${mapCenter.longitude}`);
+    return `https://www.google.com/maps?q=${query}&z=16&output=embed`;
+  }, [mapCenter.latitude, mapCenter.longitude]);
 
   return (
     <View
@@ -10054,6 +10092,21 @@ function RouletteMapView({
             );
           })}
         </MapView>
+      ) : rendersWebGoogleMap ? (
+        createElement('iframe', {
+          title: '抽選 Google Map',
+          src: webGoogleMapUrl,
+          loading: 'lazy',
+          referrerPolicy: 'no-referrer-when-downgrade',
+          style: {
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            border: 0,
+            pointerEvents: 'none',
+          },
+        })
       ) : (
         <View style={styles.mapRouletteFallback}>
           <View style={[styles.rouletteMapCanvasPark, styles.rouletteMapCanvasParkOne]} />
