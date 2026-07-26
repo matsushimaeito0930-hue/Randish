@@ -746,6 +746,10 @@ const DISTANCE_OPTIONS = ['500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '
 const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
 const FREE_MEAL_TICKET_COUNT = 3;
 
+// Premium を一時的に隠し、全機能をフリー体験にするフラグ。
+// Premium を復活させたいときは false に戻すだけでOK。
+const HIDE_PREMIUM = true;
+
 function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]): SubscriptionState {
   const [serverStatus, setServerStatus] = useState<ApiPremiumStatus | null>(null);
   const [nativeIsPro, setNativeIsPro] = useState(false);
@@ -866,7 +870,7 @@ function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]
     })();
   }, [refresh, userId]);
 
-  const isPro = Boolean(serverStatus?.isPro || (TRUST_NATIVE_REVENUECAT_STATUS && nativeIsPro));
+  const isPro = HIDE_PREMIUM ? true : Boolean(serverStatus?.isPro || (TRUST_NATIVE_REVENUECAT_STATUS && nativeIsPro));
 
   return {
     isPro,
@@ -11767,8 +11771,8 @@ function YearlyWrappedCard({
               {isPro ? (
                 <>
                   <View style={styles.yearWrappedProHeader}>
-                    <Text style={styles.yearWrappedSectionTitle}>Premiumの詳しい分析</Text>
-                    <ProBadge label="Premium" dark />
+                    <Text style={styles.yearWrappedSectionTitle}>{HIDE_PREMIUM ? '詳しい分析' : 'Premiumの詳しい分析'}</Text>
+                    {!HIDE_PREMIUM && <ProBadge label="Premium" dark />}
                   </View>
                   {proHighlights.map((item, index) => (
                     <View key={`${item}-${index}`} style={styles.yearWrappedHighlightRow}>
@@ -12268,6 +12272,7 @@ function AnalysisDigestCard({
         </View>
       )}
 
+      {!HIDE_PREMIUM && (
       <View style={styles.analysisDigestProPanel}>
         <Pressable style={styles.analysisDigestProHeader} onPress={() => setPremiumOpen((current) => !current)}>
           <View style={styles.analysisDigestProTitleRow}>
@@ -12352,6 +12357,7 @@ function AnalysisDigestCard({
           </>
         )}
       </View>
+      )}
     </View>
   );
 }
@@ -12483,6 +12489,9 @@ function AnalyticsTab({
   const averageBudgetLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.averageBudget)}` : '0円';
 
   const openPaywall = useCallback((title = 'RANDISH Premium', message = '過去の抽選・外食費・ジャンル傾向を残して見返せます。') => {
+    if (HIDE_PREMIUM) {
+      return;
+    }
     setPaywallContext({ title, message });
   }, []);
 
@@ -12530,7 +12539,7 @@ function AnalyticsTab({
       setAiReportOpen(true);
       return;
     }
-    if (!aiReportMonthEndUnlocked) {
+    if (!HIDE_PREMIUM && !aiReportMonthEndUnlocked) {
       return;
     }
     if (!aiReportUsed && aiReportStatus === 'idle') {
@@ -12543,7 +12552,7 @@ function AnalyticsTab({
 
   return (
     <View style={styles.analysisScreen}>
-      {isPro && (
+      {!HIDE_PREMIUM && isPro && (
         <View style={styles.analysisPremiumHeader}>
           <View>
             <Text style={styles.analysisPremiumHeaderKicker}>MEMBERSHIP ACTIVE</Text>
@@ -12571,7 +12580,7 @@ function AnalyticsTab({
         hasReport={Boolean(aiReport)}
         reportMonthLabel={aiReportPeriod?.monthLabel}
         isPro={isPro}
-        isMonthEndUnlocked={aiReportMonthEndUnlocked}
+        isMonthEndUnlocked={HIDE_PREMIUM ? true : aiReportMonthEndUnlocked}
         deliveryLabel={aiReportDeliveryLabel}
         countdownLabel={aiReportCountdownLabel}
         onOpen={openAiReport}
@@ -12607,7 +12616,7 @@ function AnalyticsTab({
       <View style={styles.analysisHistoryCard}>
         <View style={styles.analysisHistoryHeader}>
           <Text style={styles.analysisHistoryTitle}>今月の履歴</Text>
-          {isPro ? <ProBadge label="Premium保存中" /> : (
+          {isPro ? (!HIDE_PREMIUM && <ProBadge label="Premium保存中" />) : (
             <Pressable style={styles.analysisProMark} onPress={() => openPaywall('過去月の履歴保存はPremium機能です。', 'Freeでは今月分だけ。Premiumなら過去月の抽選履歴を見返せます。')}>
               <Ionicons name="lock-closed-outline" size={15} color={INK} />
               <Text style={styles.analysisProMarkText}>先月はPremium</Text>
