@@ -348,7 +348,7 @@ const LOCATION_INTRO_STORAGE_KEY = 'randish.locationIntro.completed.v1';
 const LOCATION_CACHE_STORAGE_KEY = 'randish.location.cached.v1';
 const PLACES_CACHE_TTL_SECONDS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_TTL_SECONDS ?? 600);
 const PLACES_CACHE_DISTANCE_METERS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_DISTANCE_METERS ?? 300);
-const FEATURE_MEAL_TICKETS_ENABLED = true;
+const FEATURE_MEAL_TICKETS_ENABLED = false;
 const DEV_DISABLE_MEAL_TICKET_LIMIT = true;
 const DEV_LAN_API_BASE_URLS: string[] = [];
 const LOCAL_API_BASE_URLS = Platform.select({
@@ -871,7 +871,7 @@ function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]
     })();
   }, [refresh, userId]);
 
-  const isPro = HIDE_PREMIUM ? true : Boolean(serverStatus?.isPro || (TRUST_NATIVE_REVENUECAT_STATUS && nativeIsPro));
+  const isPro = Boolean(serverStatus?.isPro || (TRUST_NATIVE_REVENUECAT_STATUS && nativeIsPro));
 
   return {
     isPro,
@@ -11112,7 +11112,7 @@ function AiMonthlyReportEntryCard({
       backgroundColor: '#f7f6fb',
     },
   ];
-  const canPlayOpenAnimation = isPro && envelopeDelivered && !hasReport && !isLoading;
+  const canPlayOpenAnimation = (isPro || HIDE_PREMIUM) && envelopeDelivered && !hasReport && !isLoading;
   const actionLabel = openingEnvelope
     ? openingEnvelopeStep === 'seal'
       ? '封を切っています'
@@ -11773,7 +11773,7 @@ function YearlyWrappedCard({
                 </View>
               ))}
 
-              {isPro ? (
+              {(isPro || HIDE_PREMIUM) ? (
                 <>
                   <View style={styles.yearWrappedProHeader}>
                     <Text style={styles.yearWrappedSectionTitle}>{HIDE_PREMIUM ? '詳しい分析' : 'Premiumの詳しい分析'}</Text>
@@ -12533,7 +12533,7 @@ function AnalyticsTab({
   }, [aiReportMonthEndUnlocked, aiReportStatus, apiBaseUrlCandidates, reportAnalytics, reportMonth, reportYear, savedAnalytics, userId]);
 
   const openAiReport = useCallback(() => {
-    if (!isPro) {
+    if (!HIDE_PREMIUM && !isPro) {
       openPaywall(
         '月次AIレポートはPremium機能です。',
         'ルーレット履歴から外食傾向、節約のヒント、次の選び方までまとめます。',
@@ -12621,7 +12621,7 @@ function AnalyticsTab({
       <View style={styles.analysisHistoryCard}>
         <View style={styles.analysisHistoryHeader}>
           <Text style={styles.analysisHistoryTitle}>今月の履歴</Text>
-          {isPro ? (!HIDE_PREMIUM && <ProBadge label="Premium保存中" />) : (
+          {HIDE_PREMIUM ? null : isPro ? <ProBadge label="Premium保存中" /> : (
             <Pressable style={styles.analysisProMark} onPress={() => openPaywall('過去月の履歴保存はPremium機能です。', 'Freeでは今月分だけ。Premiumなら過去月の抽選履歴を見返せます。')}>
               <Ionicons name="lock-closed-outline" size={15} color={INK} />
               <Text style={styles.analysisProMarkText}>先月はPremium</Text>
