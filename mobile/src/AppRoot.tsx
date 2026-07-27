@@ -12406,7 +12406,7 @@ function AnalyticsTab({
   const [aiReportGraphAnalytics, setAiReportGraphAnalytics] = useState<AiReportGraphAnalytics | null>(null);
   const [yearlyWrappedOpen, setYearlyWrappedOpen] = useState(false);
   const now = useMemo(() => new Date(), []);
-  const aiReportMonthEndUnlocked = isMonthEndReportDay(now);
+  const aiReportMonthEndUnlocked = HIDE_PREMIUM ? true : isMonthEndReportDay(now);
   const aiReportDeliveryLabel = formatMonthEndDeliveryLabel(now);
   const aiReportCountdownLabel = getMonthEndCountdownLabel(now);
 
