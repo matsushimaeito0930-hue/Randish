@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
 import type { ApiUsageResponse, AuthResponse, CandidatePlace, Favorite as ApiFavorite, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory } from './services/randishApi';
+import { sendManagementDrawEvent } from './services/managementEvents';
 import {
   getNativeBillingSetupMessage,
   presentPremiumPaywall,
@@ -5084,6 +5085,8 @@ export default function App() {
       localEntry,
       ...current,
     ].slice(0, 100));
+    void sendManagementDrawEvent({ eventId: localEntry.id, userId })
+      .catch((error) => console.warn('[RANDISH MANAGEMENT] draw event failed', error));
 
     if (userId === APP_USER_ID || !canSyncDrawHistoryProvider(provider)) {
       return;
@@ -13234,4 +13237,3 @@ function FooterAlbumIcon({ active }: { active: boolean }) {
     </View>
   );
 }
-
