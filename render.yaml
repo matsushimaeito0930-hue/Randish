@@ -1,0 +1,62 @@
+# Render Blueprint for the RANDISH Spring Boot API (web/iOS/Android 共通バックエンド)
+# Render → New → Blueprint → このリポジトリを選択すると読み込まれます。
+# secret 値（sync: false）は Render のダッシュボードで各自入力してください。
+services:
+  - type: web
+    name: randish-api
+    runtime: docker
+    rootDir: server
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      # --- データベース（Supabase Postgres の接続URI）---
+      - key: RANDISH_DATABASE_URI
+        sync: false        # postgresql://postgres.<ref>:<PASSWORD>@aws-...pooler.supabase.com:5432/postgres
+
+      # --- Supabase 認証 ---
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+
+      # --- 店舗検索 ---
+      - key: HOTPEPPER_API_KEY
+        sync: false
+      - key: GEOAPIFY_API_KEY
+        sync: false
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false
+      - key: RANDISH_GOOGLE_PLACES_ENABLED
+        value: "false"
+
+      # --- AIレポート（Gemini）---
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: "gemini-1.5-flash"
+
+      # --- メール送信（Resend）---
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: RESEND_CONTACT_FROM_EMAIL
+        sync: false
+      - key: RANDISH_EMAIL_VERIFICATION_BASE_URL
+        sync: false        # 例: https://randish.jp
+
+      # --- OAuth / 管理 / 課金 ---
+      - key: RANDISH_OAUTH_REDIRECT_URI
+        sync: false        # 例: https://randish.jp/auth/callback
+      - key: RANDISH_ADMIN_PASSWORD
+        sync: false
+      - key: REVENUECAT_WEBHOOK_AUTHORIZATION
+        sync: false
+
+      # --- CORS / レート制限（非機密）---
+      - key: RANDISH_CORS_ALLOWED_ORIGINS
+        value: "https://randish.jp,https://www.randish.jp"
+      - key: RANDISH_RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RANDISH_RATE_LIMIT_API_PER_MINUTE
+        value: "180"
