@@ -5370,12 +5370,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (stage !== 'main' || locationIntroState !== 'completed' || didAskLocation.current) {
+    if (stage !== 'main' || didAskLocation.current) {
       return;
     }
     didAskLocation.current = true;
-    requestCurrentLocation('background');
-  }, [locationIntroState, requestCurrentLocation, stage]);
+    // サイトアクセス時、位置情報が既に許可されていれば現在地を取り直し、
+    // 古いキャッシュより実際の現在地を優先する（未許可なら背景モードはプロンプトを出さない）。
+    void requestCurrentLocation('background');
+  }, [requestCurrentLocation, stage]);
 
   useEffect(() => {
     if (stage !== 'main') {
