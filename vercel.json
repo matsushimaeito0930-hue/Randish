@@ -5,10 +5,7 @@
   "buildCommand": "npm --prefix mobile run build:web",
   "outputDirectory": "mobile/dist",
   "rewrites": [
-    { "source": "/api/users/me", "destination": "/api/auth?action=me" },
-    { "source": "/api/premium/ai-report", "destination": "/api/ai-report" },
-    { "source": "/api/auth/:action*", "destination": "/api/auth?action=:action*" },
-    { "source": "/api/data/:action*", "destination": "/api/data?action=:action*" },
+    { "source": "/api/:path*", "destination": "https://randish-api.onrender.com/api/:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
