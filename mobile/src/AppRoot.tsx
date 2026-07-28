@@ -764,7 +764,7 @@ const pickNextDrawAnimation = (current: DrawAnimationKey) => {
   return candidates[Math.floor(Math.random() * candidates.length)] ?? current;
 };
 
-const DISTANCE_OPTIONS = ['500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
+const DISTANCE_OPTIONS = ['100m', '500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
 const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
 const FREE_MEAL_TICKET_COUNT = 3;
 
@@ -4262,6 +4262,7 @@ const getSearchOriginForArea = (area: string, currentLocation: UserLocation | nu
 
 const toHotPepperRange = (value: string) => {
   const normalized = value.trim();
+  if (normalized === '100m') return 1;
   if (normalized === '500m') return 2;
   if (normalized === '800m' || normalized === '1km') return 3;
   if (normalized === '1.5km' || normalized === '2km') return 4;
@@ -6629,8 +6630,8 @@ export default function App() {
     setConditionRandom((current) => ({ ...current, area: false }));
     setSelectedRestaurant(null);
     resetMapRouletteView();
-    setActiveTab('random');
-    setMessage('現在地周辺の候補を探せるようにしました。PRESS STARTで一店を決めます。');
+    setActiveTab('search');
+    setMessage('現在地を設定しました。ジャンル・予算・距離を選んでください。');
     scrollToContentTop();
   };
 
@@ -8678,7 +8679,7 @@ function HomeLocationPanel({
         <View pointerEvents="none" style={styles.homeCurrentPrimaryGlowLarge} />
         <View pointerEvents="none" style={styles.homeCurrentPrimaryGlowSmall} />
         <View style={styles.homeCurrentPrimaryIcon}>
-          <Ionicons name="navigate" size={26} color={ORANGE} />
+          <Ionicons name="navigate" size={22} color={ORANGE} />
         </View>
         <View style={styles.homeCurrentPrimaryCopy}>
           <View style={styles.homeCurrentPrimaryMetaRow}>
@@ -8696,7 +8697,7 @@ function HomeLocationPanel({
           </Text>
         </View>
         <View style={styles.homeCurrentPrimaryArrow}>
-          <Ionicons name="arrow-forward" size={20} color={ORANGE} />
+          <Ionicons name="arrow-forward" size={17} color={ORANGE} />
         </View>
       </Pressable>
 
@@ -9085,7 +9086,7 @@ function FilterPanel({
             />
             <Pressable style={[styles.locationRandomButton, randomState.area && styles.locationRandomButtonActive]} onPress={randomizeArea}>
               <Ionicons name="shuffle-outline" size={14} color={randomState.area ? '#ffffff' : ORANGE} />
-              <Text style={[styles.locationRandomButtonText, randomState.area && styles.locationRandomButtonTextActive]}>{uiText.random}</Text>
+              <Text numberOfLines={1} style={[styles.locationRandomButtonText, randomState.area && styles.locationRandomButtonTextActive]}>{uiText.random}</Text>
             </Pressable>
           </View>
           {randomState.area ? (
