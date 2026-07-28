@@ -369,9 +369,9 @@ const LOCAL_API_BASE_URLS = Platform.select({
 const TETHER_HOST_PATTERN = /^http:\/\/10\.230\.36\.\d+(?::8080)?$/;
 const LOCAL_NETWORK_HOST_PATTERN = /^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/;
 const LOCAL_NETWORK_HOST_IN_TEXT_PATTERN = /(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)/g;
-const RANDISH_LOGO = require('../assets/randish-logo-square1.png');
-const HOME_HEADER_MAP = require('../assets/home-map/homeHeader.png');
-const ALBUM_FOOD_ICON = require('../assets/album-food-icon.png');
+const RANDISH_LOGO = require('../assets/randish-logo-square1.webp');
+const HOME_HEADER_MAP = require('../assets/home-map/homeHeader.webp');
+const ALBUM_FOOD_ICON = require('../assets/album-food-icon.webp');
 const ALBUM_FOOTER_ICON = require('../assets/album-footer-traced.png');
 const HOTPEPPER_CREDIT_URL = 'https://webservice.recruit.co.jp/';
 const HOTPEPPER_CREDIT_IMAGE_URL = 'https://webservice.recruit.co.jp/banner/hotpepper-m.gif';
@@ -7140,6 +7140,7 @@ function LoginScreen({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
   const handledOAuthUrlRef = useRef<string | null>(null);
+  const magicLinkRequestInFlightRef = useRef(false);
   const isLoginMode = authMode === 'login';
   const authUrlLabel = isLoginMode ? uiText.authLoginUrlLabel : uiText.authRegisterUrlLabel;
 
@@ -7207,7 +7208,7 @@ function LoginScreen({
   }, [completeOAuthSession]);
 
   const handleMagicLinkPress = async () => {
-    if (isSubmitting) {
+    if (magicLinkRequestInFlightRef.current || isSubmitting) {
       return;
     }
 
@@ -7217,6 +7218,7 @@ function LoginScreen({
       setAuthNotice('有効なメールアドレスを入力してください。');
       return;
     }
+    magicLinkRequestInFlightRef.current = true;
 
     setIsSubmitting(true);
     setAuthSucceeded(false);
@@ -7238,6 +7240,7 @@ function LoginScreen({
       setAuthNotice(`${authUrlLabel}を送信できませんでした。${reason}`);
     } finally {
       setIsSubmitting(false);
+      magicLinkRequestInFlightRef.current = false;
     }
   };
 

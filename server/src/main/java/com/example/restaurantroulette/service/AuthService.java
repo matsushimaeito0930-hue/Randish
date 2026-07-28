@@ -11,8 +11,12 @@ import com.example.restaurantroulette.dto.ApiDtos.UserLoginRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.exception.BadRequestException;
 import com.example.restaurantroulette.exception.UnauthorizedException;
-import java.util.Locale;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.stream.IntStream;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
@@ -21,10 +25,17 @@ public class AuthService {
   private static final Pattern EMAIL_PATTERN = Pattern.compile(
       "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$",
       Pattern.CASE_INSENSITIVE);
+  private static final Duration MAGIC_LINK_DEDUPLICATION_WINDOW = Duration.ofSeconds(15);
+  private static final int MAGIC_LINK_CACHE_CLEANUP_THRESHOLD = 512;
+  private static final int MAGIC_LINK_LOCK_STRIPES = 64;
 
   private final UserService userService;
   private final SupabaseAuthService supabaseAuthService;
   private final LocalSessionService localSessionService;
+  private final Object[] magicLinkRequestLocks = IntStream.range(0, MAGIC_LINK_LOCK_STRIPES)
+      .mapToObj(ignored -> new Object())
+      .toArray(Object[]::new);
+  private final ConcurrentMap<String, MagicLinkDispatch> recentMagicLinkDispatches = new ConcurrentHashMap<>();
 
   public AuthService(
       UserService userService,
@@ -73,8 +84,24 @@ public class AuthService {
 
   public EmailVerificationResponse requestMagicLink(String email, String redirectTo, boolean createUser) {
     String normalizedEmail = normalizeEmail(email);
-    Instant expiresAt = supabaseAuthService.requestMagicLink(normalizedEmail, redirectTo, createUser);
-    return new EmailVerificationResponse(normalizedEmail, expiresAt);
+    String normalizedRedirectTo = redirectTo == null ? "" : redirectTo.trim();
+    String requestKey = normalizedEmail + "\u0000" + createUser + "\u0000" + normalizedRedirectTo;
+
+    Object requestLock = magicLinkRequestLocks[Math.floorMod(requestKey.hashCode(), magicLinkRequestLocks.length)];
+    synchronized (requestLock) {
+      Instant requestedAt = Instant.now();
+      MagicLinkDispatch recentDispatch = recentMagicLinkDispatches.get(requestKey);
+      if (recentDispatch != null
+          && requestedAt.isBefore(recentDispatch.requestedAt().plus(MAGIC_LINK_DEDUPLICATION_WINDOW))) {
+        return recentDispatch.response();
+      }
+
+      Instant expiresAt = supabaseAuthService.requestMagicLink(normalizedEmail, redirectTo, createUser);
+      EmailVerificationResponse response = new EmailVerificationResponse(normalizedEmail, expiresAt);
+      recentMagicLinkDispatches.put(requestKey, new MagicLinkDispatch(response, requestedAt));
+      cleanExpiredMagicLinkDispatches(requestedAt);
+      return response;
+    }
   }
 
   public AuthResponse verifyEmailOtp(EmailOtpVerifyRequest request) {
@@ -178,4 +205,14 @@ public class AuthService {
       throw new BadRequestException("password is required.");
     }
   }
+
+  private void cleanExpiredMagicLinkDispatches(Instant requestedAt) {
+    if (recentMagicLinkDispatches.size() < MAGIC_LINK_CACHE_CLEANUP_THRESHOLD) {
+      return;
+    }
+    Instant cutoff = requestedAt.minus(MAGIC_LINK_DEDUPLICATION_WINDOW);
+    recentMagicLinkDispatches.entrySet().removeIf(entry -> !entry.getValue().requestedAt().isAfter(cutoff));
+  }
+
+  private record MagicLinkDispatch(EmailVerificationResponse response, Instant requestedAt) {}
 }
