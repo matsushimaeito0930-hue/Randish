@@ -4995,7 +4995,7 @@ export default function App() {
       const hasForegroundPermission = permission?.status === 'granted' || permission?.granted === true;
       setLocationPermissionNeedsSettings(Boolean(permission && !hasForegroundPermission && permission.canAskAgain === false));
       setLocationIntroState(hasForegroundPermission || introValue === 'skipped' ? 'completed' : 'pending');
-      if (cachedLocationValue) {
+      if (cachedLocationValue && introValue !== 'skipped') {
         try {
           const parsed = JSON.parse(cachedLocationValue) as StoredUserLocation;
           if (
@@ -6275,6 +6275,8 @@ export default function App() {
 
   const continueWithoutLocation = useCallback(async () => {
     await completeLocationIntro('skipped');
+    userLocationRef.current = null;
+    setUserLocation(null);
     setActiveTab('home');
     setLocationStatus('位置情報を使用していません');
     setMessage('位置情報を使わずに開始しました。エリアを選んでお店を探せます。');
@@ -6617,6 +6619,7 @@ export default function App() {
       return;
     }
 
+    void writeLocalValue(LOCATION_INTRO_STORAGE_KEY, 'granted');
     areaRef.current = '現在地';
     setArea('現在地');
     setLocationStatus(`${nextLocation.label} 周辺から探します`);
