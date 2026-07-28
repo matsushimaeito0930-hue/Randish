@@ -12,6 +12,10 @@ services:
       # --- データベース（Supabase Postgres の接続URI）---
       - key: RANDISH_DATABASE_URI
         sync: false        # postgresql://postgres.<ref>:<PASSWORD>@aws-...pooler.supabase.com:5432/postgres
+      - key: RANDISH_DB_MAX_POOL_SIZE
+        value: "3"
+      - key: RANDISH_DB_MIN_IDLE
+        value: "1"
 
       # --- Supabase 認証 ---
       - key: SUPABASE_URL
