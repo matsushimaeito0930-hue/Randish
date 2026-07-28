@@ -7690,7 +7690,7 @@ function HomeCurrentMapBackground({ userLocation }: { userLocation: UserLocation
               border: 0,
               borderRadius: 22,
               backgroundColor: '#e5e3df',
-              pointerEvents: 'auto',
+              pointerEvents: 'none',
             },
           })}
           <View pointerEvents="none" style={styles.homeCurrentMapTint} />
