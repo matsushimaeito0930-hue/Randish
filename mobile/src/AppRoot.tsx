@@ -354,7 +354,7 @@ type DrawAnimationProfile = {
 
 const APP_USER_ID = 'guest';
 const API_PORT = '8080';
-const LOCATION_INTRO_STORAGE_KEY = 'randish.locationIntro.completed.v1';
+const LOCATION_INTRO_STORAGE_KEY = 'randish.locationIntro.choice.v2';
 const LOCATION_CACHE_STORAGE_KEY = 'randish.location.cached.v1';
 const PLACES_CACHE_TTL_SECONDS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_TTL_SECONDS ?? 600);
 const PLACES_CACHE_DISTANCE_METERS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_DISTANCE_METERS ?? 300);
@@ -4317,8 +4317,8 @@ const getOptionalLocationModule = () => {
   try {
     return require('expo-location') as {
       Accuracy: { Balanced: unknown };
-      getForegroundPermissionsAsync?: () => Promise<{ status: string; granted?: boolean }>;
-      requestForegroundPermissionsAsync: () => Promise<{ status: string }>;
+      getForegroundPermissionsAsync?: () => Promise<{ status: string; granted?: boolean; canAskAgain?: boolean }>;
+      requestForegroundPermissionsAsync: () => Promise<{ status: string; granted?: boolean; canAskAgain?: boolean }>;
       getCurrentPositionAsync: (options?: unknown) => Promise<{ coords: { latitude: number; longitude: number } }>;
       reverseGeocodeAsync: (coords: { latitude: number; longitude: number }) => Promise<
         Array<{
@@ -4866,6 +4866,7 @@ export default function App() {
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const [locationIntroState, setLocationIntroState] = useState<LocationIntroState>('loading');
   const [locationIntroWorking, setLocationIntroWorking] = useState(false);
+  const [locationPermissionNeedsSettings, setLocationPermissionNeedsSettings] = useState(false);
   const [profileName, setProfileName] = useState('RANDISH Guest');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('ja');
@@ -4975,14 +4976,21 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
     void (async () => {
-      const [introValue, cachedLocationValue] = await Promise.all([
+      const Location = getOptionalLocationModule();
+      const permissionPromise = Location?.getForegroundPermissionsAsync
+        ? Location.getForegroundPermissionsAsync().catch(() => null)
+        : Promise.resolve(null);
+      const [introValue, cachedLocationValue, permission] = await Promise.all([
         readLocalValue(LOCATION_INTRO_STORAGE_KEY),
         readLocalValue(LOCATION_CACHE_STORAGE_KEY),
+        permissionPromise,
       ]);
       if (!mounted) {
         return;
       }
-      setLocationIntroState(introValue === 'completed' ? 'completed' : 'pending');
+      const hasForegroundPermission = permission?.status === 'granted' || permission?.granted === true;
+      setLocationPermissionNeedsSettings(Boolean(permission && !hasForegroundPermission && permission.canAskAgain === false));
+      setLocationIntroState(hasForegroundPermission || introValue === 'skipped' ? 'completed' : 'pending');
       if (cachedLocationValue) {
         try {
           const parsed = JSON.parse(cachedLocationValue) as StoredUserLocation;
@@ -5346,11 +5354,17 @@ export default function App() {
         ? await Location.getForegroundPermissionsAsync()
         : await Location.requestForegroundPermissionsAsync();
       if (permission.status !== 'granted') {
+        setLocationPermissionNeedsSettings(permission.canAskAgain === false);
         if (mode === 'sync-search' || areaRef.current === '現在地') {
-          setLocationStatus('位置情報の許可がオフです');
+          setLocationStatus(
+            Platform.OS === 'web'
+              ? 'ブラウザのサイト設定で位置情報を許可してください'
+              : '位置情報は許可されていません',
+          );
         }
         return null;
       }
+      setLocationPermissionNeedsSettings(false);
 
       const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coords = {
@@ -6249,9 +6263,9 @@ export default function App() {
     await chooseMapRouletteRestaurant();
   }, [chooseEverythingRandom, chooseMapRouletteRestaurant, drawMode, isLoading, mealTicketState, scrollToContentTop]);
 
-  const completeLocationIntro = useCallback(async () => {
+  const completeLocationIntro = useCallback(async (choice: 'granted' | 'skipped') => {
     setLocationIntroState('completed');
-    await writeLocalValue(LOCATION_INTRO_STORAGE_KEY, 'completed');
+    await writeLocalValue(LOCATION_INTRO_STORAGE_KEY, choice);
   }, []);
 
   const useCurrentLocationFromIntro = useCallback(async () => {
@@ -6263,13 +6277,30 @@ export default function App() {
     setLocationIntroWorking(false);
     if (nextLocation) {
       didAskLocation.current = true;
-      await completeLocationIntro();
+      await completeLocationIntro('granted');
       setActiveTab('home');
       setMessage('現在地を使えるようになりました。近くのお店から選べます。');
       return;
     }
     setMessage('Randishは現在地からお店を選ぶため、位置情報の許可が必要です。');
   }, [completeLocationIntro, locationIntroWorking, requestCurrentLocation]);
+
+  const continueWithoutLocation = useCallback(async () => {
+    await completeLocationIntro('skipped');
+    setActiveTab('home');
+    setLocationStatus('位置情報を使用していません');
+    setMessage('位置情報を使わずに開始しました。エリアを選んでお店を探せます。');
+  }, [completeLocationIntro]);
+
+  const openLocationSettings = useCallback(() => {
+    if (Platform.OS === 'web') {
+      setLocationStatus('ブラウザのサイト設定から位置情報を許可してください');
+      return;
+    }
+    void Linking.openSettings().catch(() => {
+      setLocationStatus('端末の設定アプリを開けませんでした');
+    });
+  }, []);
 
   const saveRestaurantToAlbum = useCallback(async (restaurant: Restaurant) => {
     const localFavorite = toSavedRestaurantFromSelection({
@@ -6827,7 +6858,10 @@ export default function App() {
       <LocationIntroScreen
         loading={locationIntroState === 'loading' || locationIntroWorking}
         status={locationStatus}
+        showSettings={locationPermissionNeedsSettings}
         onUseCurrentLocation={useCurrentLocationFromIntro}
+        onContinueWithoutLocation={continueWithoutLocation}
+        onOpenSettings={openLocationSettings}
       />
     );
   }
@@ -7053,24 +7087,62 @@ function AppHeader({
 function LocationIntroScreen({
   loading,
   status,
+  showSettings,
   onUseCurrentLocation,
+  onContinueWithoutLocation,
+  onOpenSettings,
 }: {
   loading: boolean;
   status: string;
+  showSettings: boolean;
   onUseCurrentLocation: () => void;
+  onContinueWithoutLocation: () => void;
+  onOpenSettings: () => void;
 }) {
   return (
     <SafeAreaView style={styles.locationIntroScreen}>
       <StatusBar barStyle="dark-content" />
-      <View style={styles.locationIntroContainer}>
+      <ScrollView contentContainerStyle={styles.locationIntroContainer} showsVerticalScrollIndicator={false}>
         <Image source={RANDISH_LOGO} style={styles.locationIntroLogo} resizeMode="contain" />
         <Text style={styles.locationIntroKicker}>LOCATION ACCESS</Text>
-        <Text style={styles.locationIntroTitle}>現在地から、今日の一店を選びます</Text>
-        <Text style={styles.locationIntroLead}>Randishは今いる場所の近くにある飲食店を集めて、ルーレットで一店に決めるアプリです。</Text>
+        <Text style={styles.locationIntroTitle}>位置情報の使い方を選択します</Text>
+        <Text style={styles.locationIntroLead}>登録・ログイン後に端末の正式な許可画面が開きます。表示される選択肢はOSのバージョンによって異なります。</Text>
+        <View style={styles.locationIntroOptionList}>
+          <View style={styles.locationIntroOptionCard}>
+            <View style={styles.locationIntroOptionIcon}>
+              <Ionicons name="time-outline" size={20} color={ORANGE} />
+            </View>
+            <View style={styles.locationIntroOptionCopy}>
+              <Text style={styles.locationIntroOptionTitle}>今回のみ許可</Text>
+              <Text style={styles.locationIntroOptionText}>この利用中だけ現在地を使います。許可が失効した次回は、もう一度確認します。</Text>
+            </View>
+          </View>
+          <View style={[styles.locationIntroOptionCard, styles.locationIntroRecommendedOption]}>
+            <View style={styles.locationIntroOptionIcon}>
+              <Ionicons name="phone-portrait-outline" size={20} color={ORANGE} />
+            </View>
+            <View style={styles.locationIntroOptionCopy}>
+              <View style={styles.locationIntroOptionTitleRow}>
+                <Text style={styles.locationIntroOptionTitle}>アプリの使用中のみ許可</Text>
+                <Text style={styles.locationIntroRecommendedBadge}>おすすめ</Text>
+              </View>
+              <Text style={styles.locationIntroOptionText}>Randishを開いている間だけ現在地を使います。近くのお店探しに十分な権限です。</Text>
+            </View>
+          </View>
+          <View style={styles.locationIntroOptionCard}>
+            <View style={styles.locationIntroOptionIcon}>
+              <Ionicons name="infinite-outline" size={20} color="#8a8175" />
+            </View>
+            <View style={styles.locationIntroOptionCopy}>
+              <Text style={styles.locationIntroOptionTitle}>常に許可</Text>
+              <Text style={styles.locationIntroOptionText}>Randishはバックグラウンドで追跡しないため、この権限は要求しません。</Text>
+            </View>
+          </View>
+        </View>
         <View style={styles.locationIntroNotice}>
           <Ionicons name="shield-checkmark-outline" size={20} color={ORANGE} />
           <Text style={styles.locationIntroNoticeText}>
-            次に表示される端末の確認で、位置情報へのアクセスを許可してください。正確な現在地はサーバーへ保存せず、この端末内の短期キャッシュと検索条件にだけ使います。
+            正確な現在地はサーバーへ保存せず、この端末内の短期キャッシュと店舗検索にだけ使います。アプリがOSの選択結果を勝手に変更することはありません。
           </Text>
         </View>
         <Pressable
@@ -7079,10 +7151,19 @@ function LocationIntroScreen({
           disabled={loading}
         >
           {loading ? <ActivityIndicator color="#ffffff" /> : <Ionicons name="navigate" size={20} color="#ffffff" />}
-          <Text style={styles.locationIntroPrimaryText}>位置情報を許可して始める</Text>
+          <Text style={styles.locationIntroPrimaryText}>{Platform.OS === 'web' ? 'ブラウザの許可画面へ' : '端末の許可画面へ'}</Text>
+        </Pressable>
+        {showSettings && Platform.OS !== 'web' && (
+          <Pressable style={styles.locationIntroSettingsButton} onPress={onOpenSettings} disabled={loading}>
+            <Ionicons name="settings-outline" size={18} color={ORANGE} />
+            <Text style={styles.locationIntroSettingsText}>端末の位置情報設定を開く</Text>
+          </Pressable>
+        )}
+        <Pressable style={styles.locationIntroSkipButton} onPress={onContinueWithoutLocation} disabled={loading}>
+          <Text style={styles.locationIntroSkipText}>位置情報を使わずに続ける</Text>
         </Pressable>
         <Text style={styles.locationIntroStatus}>{status}</Text>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
