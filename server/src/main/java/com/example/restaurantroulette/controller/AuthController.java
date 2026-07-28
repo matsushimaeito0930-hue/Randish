@@ -241,7 +241,7 @@ public class AuthController {
         """.formatted(escapedRedirect);
   }
 
-  private boolean isAllowedOAuthAppRedirect(String value) {
+  boolean isAllowedOAuthAppRedirect(String value) {
     if (value == null || value.isBlank()) {
       return false;
     }
@@ -257,7 +257,14 @@ public class AuthController {
         return !host.isBlank() && path.endsWith("/--/auth/callback");
       }
       if ("http".equals(scheme) || "https".equals(scheme)) {
-        return path.endsWith("/auth/callback") && isLocalDevelopmentHost(host);
+        if (path.endsWith("/auth/callback") && isLocalDevelopmentHost(host)) {
+          return true;
+        }
+        return "https".equals(scheme)
+            && uri.getPort() == -1
+            && uri.getUserInfo() == null
+            && "/auth/callback".equals(path)
+            && ("randish.jp".equals(host) || "www.randish.jp".equals(host));
       }
       return false;
     } catch (IllegalArgumentException exception) {
