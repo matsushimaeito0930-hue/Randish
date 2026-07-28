@@ -1,0 +1,18 @@
+name: keep-render-warm
+
+# Render 無料プランは無操作 15 分でスリープし、次アクセスに ~63 秒かかる。
+# 数分おきに軽い GET を打って常時 warm を保つ（cold start によるログイン失敗を防ぐ）。
+on:
+  schedule:
+    - cron: "*/5 * * * *" # 5分おき（GitHub の都合で多少遅延することあり）
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render API
+        run: |
+          curl -fsS --max-time 90 \
+            "https://randish-api.onrender.com/api/premium/status?userId=keep-warm" \
+            > /dev/null || echo "ping failed (server may be waking up)"
