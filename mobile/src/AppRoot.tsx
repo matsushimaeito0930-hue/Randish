@@ -983,6 +983,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     currentLocationTap: 'タップで取得',
     currentLocationMap: '現在地マップ',
     currentLocationSearch: '現在地から探す',
+    currentLocationCtaLead: '近くのお店だけを集めて、迷う時間を今日の一店に変えます。',
     currentLocationNoApi: 'ミニマップで表示',
     travelKicker: 'FOOD TRIP',
     travelCta: '旅を始める',
@@ -1165,6 +1166,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     currentLocationTap: 'Tap to locate',
     currentLocationMap: 'Location Map',
     currentLocationSearch: 'Search Nearby',
+    currentLocationCtaLead: 'Gather nearby restaurants and turn indecision into today’s perfect pick.',
     currentLocationNoApi: 'Shown on mini map',
     travelKicker: 'FOOD TRIP',
     travelCta: 'Start Trip',
@@ -1347,6 +1349,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     currentLocationTap: '点击定位',
     currentLocationMap: '当前位置地图',
     currentLocationSearch: '从当前位置搜索',
+    currentLocationCtaLead: '只收集附近的餐厅，快速选出今天的一家。',
     currentLocationNoApi: '以迷你地图显示',
     travelKicker: 'FOOD TRIP',
     travelCta: '开始旅行',
@@ -1529,6 +1532,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     currentLocationTap: '탭해서 위치 확인',
     currentLocationMap: '현재 위치 지도',
     currentLocationSearch: '현재 위치로 찾기',
+    currentLocationCtaLead: '가까운 식당만 모아 오늘의 한 곳을 빠르게 골라드려요.',
     currentLocationNoApi: '미니 지도에 표시',
     travelKicker: 'FOOD TRIP',
     travelCta: '여행 시작',
@@ -5524,22 +5528,6 @@ export default function App() {
     scrollToContentTop();
   }, [distance, genre, resultRevealValue, scrollToContentTop, spinValue]);
 
-  const openAreaRandomConditions = useCallback(() => {
-    const randomPreset = pickRandomTravelAreaPreset();
-    const randomPrefecture = getPresetPrefecture(randomPreset);
-    const randomArea = randomPreset.label;
-    setArea(getAreaPresetSearchValue(randomPreset));
-    setDrawMode('condition');
-    setTravelRevealStep('hidden');
-    setTravelDisplayArea(null);
-    setConditionRandom((current) => ({ ...current, area: true }));
-    setSelectedRestaurant(null);
-    setLocationStatus(formatLocationStatus(randomPrefecture, randomArea));
-    setActiveTab('search');
-    setMessage('エリアをランダムにしました。条件画面では伏せて表示します。');
-    scrollToContentTop();
-  }, [scrollToContentTop]);
-
   const chooseRandomRestaurant = useCallback(async () => {
     const isTravelDraw = drawMode === 'travel';
     setActiveTab('random');
@@ -6920,7 +6908,6 @@ export default function App() {
             onRandomPress={prepareConditionDraw}
             onAllRandomPress={prepareEverythingDraw}
             onTravelPress={prepareTravelDraw}
-            onAreaRandomPress={openAreaRandomConditions}
             onLocationPress={requestCurrentLocation}
             onCurrentLocationSearch={prepareCurrentLocationSearch}
             onRequireRegistration={openRegistration}
@@ -7644,7 +7631,6 @@ function HomeTab({
   onRandomPress,
   onAllRandomPress,
   onTravelPress,
-  onAreaRandomPress,
   onLocationPress,
   onCurrentLocationSearch,
   onRequireRegistration,
@@ -7683,7 +7669,6 @@ function HomeTab({
   onRandomPress: () => void;
   onAllRandomPress: () => void;
   onTravelPress: () => void;
-  onAreaRandomPress: () => void;
   onLocationPress: () => void;
   onCurrentLocationSearch: () => void;
   onRequireRegistration: () => void;
@@ -7715,7 +7700,6 @@ function HomeTab({
         onLocationPress={onLocationPress}
         onAllRandomPress={onAllRandomPress}
         onTravelPress={onTravelPress}
-        onAreaRandomPress={onAreaRandomPress}
         onCurrentLocationSearch={onCurrentLocationSearch}
         onConditionRandomPress={onRandomPress}
         onSubmit={onLoadRestaurants}
@@ -7870,7 +7854,6 @@ function HomeLocationPanel({
   onLocationPress,
   onAllRandomPress,
   onTravelPress,
-  onAreaRandomPress,
   onCurrentLocationSearch,
   onConditionRandomPress,
   onSubmit,
@@ -7900,7 +7883,6 @@ function HomeLocationPanel({
   onLocationPress: () => void;
   onAllRandomPress: () => void;
   onTravelPress: () => void;
-  onAreaRandomPress: () => void;
   onCurrentLocationSearch: () => void;
   onConditionRandomPress: () => void;
   onSubmit: () => void;
@@ -8684,6 +8666,37 @@ function HomeLocationPanel({
       </View>
       {FEATURE_MEAL_TICKETS_ENABLED && <MealTicketPanel state={mealTicketState} uiText={t} />}
 
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t.currentLocationSearch}
+        style={({ pressed }) => [styles.homeCurrentPrimaryCta, pressed && styles.homeCurrentPrimaryCtaPressed]}
+        onPress={onCurrentLocationSearch}
+      >
+        <View pointerEvents="none" style={styles.homeCurrentPrimaryGlowLarge} />
+        <View pointerEvents="none" style={styles.homeCurrentPrimaryGlowSmall} />
+        <View style={styles.homeCurrentPrimaryIcon}>
+          <Ionicons name="navigate" size={26} color={ORANGE} />
+        </View>
+        <View style={styles.homeCurrentPrimaryCopy}>
+          <View style={styles.homeCurrentPrimaryMetaRow}>
+            <Text style={styles.homeCurrentPrimaryKicker}>NEAR YOU</Text>
+            <View style={styles.homeCurrentPrimaryBadge}>
+              <Ionicons name={userLocation ? 'checkmark-circle' : 'location-outline'} size={12} color="#ffffff" />
+              <Text style={styles.homeCurrentPrimaryBadgeText}>
+                {userLocation ? t.currentLocationActive : t.currentLocationTap}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.homeCurrentPrimaryTitle}>{t.currentLocationSearch}</Text>
+          <Text style={styles.homeCurrentPrimaryLead} numberOfLines={2}>
+            {userLocation ? locationStatus : t.currentLocationCtaLead}
+          </Text>
+        </View>
+        <View style={styles.homeCurrentPrimaryArrow}>
+          <Ionicons name="arrow-forward" size={20} color={ORANGE} />
+        </View>
+      </Pressable>
+
       <View style={styles.homeSearchBox}>
         <Ionicons name="search" size={28} color={INK} />
         <TextInput
@@ -8766,10 +8779,6 @@ function HomeLocationPanel({
 
           <View style={styles.homeSubsection}>
             <View style={styles.homeSubsectionHeader}>
-              <Pressable style={styles.homeRegionRandomButton} onPress={onAreaRandomPress}>
-                <Ionicons name="shuffle-outline" size={14} color={ORANGE} />
-                <Text style={styles.homeRegionRandomText}>{t.random}</Text>
-              </Pressable>
               <Ionicons name="map-outline" size={28} color={INK} />
               <Text style={styles.homeSubsectionTitle}>{t.chooseFromRegion}</Text>
             </View>
