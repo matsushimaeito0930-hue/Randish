@@ -39,6 +39,43 @@ class AuthServiceMagicLinkTest {
   }
 
   @Test
+  void redirectChangesDoNotBypassEmailOtpCooldown() {
+    SupabaseAuthService supabaseAuthService = mock(SupabaseAuthService.class);
+    Instant expiresAt = Instant.parse("2026-07-28T04:00:00Z");
+    when(supabaseAuthService.requestMagicLink(
+        "user@example.com", "https://randish.jp/auth/callback", false))
+        .thenReturn(expiresAt);
+    AuthService authService = authService(supabaseAuthService);
+
+    EmailVerificationResponse first = authService.requestMagicLink(
+        "user@example.com", "https://randish.jp/auth/callback", false);
+    EmailVerificationResponse second = authService.requestMagicLink(
+        "user@example.com", "randish://auth/callback", false);
+
+    assertThat(second).isEqualTo(first);
+    verify(supabaseAuthService, times(1)).requestMagicLink(
+        "user@example.com", "https://randish.jp/auth/callback", false);
+  }
+
+  @Test
+  void missingLoginAccountReturnsGenericSuccessWithoutLeakingRegistrationState() {
+    SupabaseAuthService supabaseAuthService = mock(SupabaseAuthService.class);
+    when(supabaseAuthService.requestMagicLink(
+        "missing@example.com", "https://randish.jp/auth/callback", false))
+        .thenThrow(new BadRequestException("Signups not allowed for otp"));
+    AuthService authService = authService(supabaseAuthService);
+
+    Instant minimumExpiry = Instant.now().plusSeconds(8 * 60L);
+    EmailVerificationResponse response = authService.requestMagicLink(
+        "missing@example.com", "https://randish.jp/auth/callback", false);
+
+    assertThat(response.email()).isEqualTo("missing@example.com");
+    assertThat(response.expiresAt()).isAfter(minimumExpiry);
+    verify(supabaseAuthService, times(1)).requestMagicLink(
+        "missing@example.com", "https://randish.jp/auth/callback", false);
+  }
+
+  @Test
   void concurrentMagicLinkRequestsSendOnlyOneEmail() throws Exception {
     SupabaseAuthService supabaseAuthService = mock(SupabaseAuthService.class);
     Instant expiresAt = Instant.parse("2026-07-28T04:00:00Z");

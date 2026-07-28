@@ -25,7 +25,8 @@ public class AuthService {
   private static final Pattern EMAIL_PATTERN = Pattern.compile(
       "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$",
       Pattern.CASE_INSENSITIVE);
-  private static final Duration MAGIC_LINK_DEDUPLICATION_WINDOW = Duration.ofSeconds(15);
+  private static final Duration MAGIC_LINK_DEDUPLICATION_WINDOW = Duration.ofSeconds(60);
+  private static final Duration EMAIL_OTP_RESPONSE_TTL = Duration.ofMinutes(10);
   private static final int MAGIC_LINK_CACHE_CLEANUP_THRESHOLD = 512;
   private static final int MAGIC_LINK_LOCK_STRIPES = 64;
 
@@ -84,8 +85,7 @@ public class AuthService {
 
   public EmailVerificationResponse requestMagicLink(String email, String redirectTo, boolean createUser) {
     String normalizedEmail = normalizeEmail(email);
-    String normalizedRedirectTo = redirectTo == null ? "" : redirectTo.trim();
-    String requestKey = normalizedEmail + "\u0000" + createUser + "\u0000" + normalizedRedirectTo;
+    String requestKey = normalizedEmail + "\u0000" + createUser;
 
     Object requestLock = magicLinkRequestLocks[Math.floorMod(requestKey.hashCode(), magicLinkRequestLocks.length)];
     synchronized (requestLock) {
@@ -96,7 +96,18 @@ public class AuthService {
         return recentDispatch.response();
       }
 
-      Instant expiresAt = supabaseAuthService.requestMagicLink(normalizedEmail, redirectTo, createUser);
+      Instant expiresAt;
+      try {
+        expiresAt = supabaseAuthService.requestMagicLink(normalizedEmail, redirectTo, createUser);
+      } catch (BadRequestException exception) {
+        if (createUser || !isMissingAccountOtpError(exception)) {
+          throw exception;
+        }
+        // Keep login responses indistinguishable for registered and unregistered addresses.
+        // No OTP is sent for a missing account, so knowledge of an email address alone
+        // cannot be used to discover whether that address has a RANDISH account.
+        expiresAt = requestedAt.plus(EMAIL_OTP_RESPONSE_TTL);
+      }
       EmailVerificationResponse response = new EmailVerificationResponse(normalizedEmail, expiresAt);
       recentMagicLinkDispatches.put(requestKey, new MagicLinkDispatch(response, requestedAt));
       cleanExpiredMagicLinkDispatches(requestedAt);
@@ -212,6 +223,18 @@ public class AuthService {
     }
     Instant cutoff = requestedAt.minus(MAGIC_LINK_DEDUPLICATION_WINDOW);
     recentMagicLinkDispatches.entrySet().removeIf(entry -> !entry.getValue().requestedAt().isAfter(cutoff));
+  }
+
+  private boolean isMissingAccountOtpError(BadRequestException exception) {
+    String message = exception.getMessage();
+    if (message == null || message.isBlank()) {
+      return false;
+    }
+    String normalized = message.toLowerCase(Locale.ROOT);
+    return normalized.contains("signups not allowed for otp")
+        || normalized.contains("user not found")
+        || normalized.contains("email not found")
+        || normalized.contains("not registered");
   }
 
   private record MagicLinkDispatch(EmailVerificationResponse response, Instant requestedAt) {}

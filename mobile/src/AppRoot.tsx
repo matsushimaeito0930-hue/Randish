@@ -1066,12 +1066,12 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     analyticsTitle: '分析',
     analyticsLead: '今月の食の傾向を、あとから見返せます。Premiumなら過去月も残せます。',
     registerTitle: 'ログイン・会員登録',
-    registerDesc: 'メールで届くログインURLから、パスワードなしでRANDISHを始められます。',
+    registerDesc: 'メールで届く認証コードを使って、パスワードなしでRANDISHを始められます。',
     passwordConfirmLabel: 'パスワード（確認）',
     nicknameLabel: 'ニックネーム',
     required: '必須',
     optional: '任意',
-    authSocialLead: 'メールアドレスを入力すると、ログインURLをお送りします。',
+    authSocialLead: 'メールアドレスを入力すると、認証コードをお送りします。',
     authRegisterTitle: '会員登録',
     authRegisterDesc: 'メールアドレスだけで会員登録できます。メールに届く認証コードを入力してください。',
     authRegisterLead: 'メールアドレスを入力すると、会員登録用コードをお送りします。',
@@ -1081,11 +1081,11 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     authSending: '送信中…',
     authLoginTitle: 'ログイン',
     authLoginDesc: '登録済みのメールアドレスだけでログインできます。パスワードは必要ありません。',
-    authLoginLead: '登録済みのメールアドレスへログインURLをお送りします。',
-    authLoginUrlLabel: 'ログインURL',
-    authLoginNote: 'メールに届く認証コードを入力してください。届かない場合は迷惑メールも確認してください。',
+    authLoginLead: '登録済みのメールアドレスへログイン用の認証コードをお送りします。',
+    authLoginUrlLabel: 'ログイン用認証コード',
+    authLoginNote: 'メールに届く認証コードを入力してください。コードは他人に教えないでください。',
     authPasswordLabel: 'パスワード',
-    authLoginSubmit: 'ログインURLを送信',
+    authLoginSubmit: 'ログインコードを送信',
     authLoggingIn: 'ログイン中…',
     authExistingPrompt: 'すでにアカウントをお持ちですか？',
     authLoginHere: 'ログインはこちら',
@@ -1253,7 +1253,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     nicknameLabel: 'Nickname',
     required: 'Required',
     optional: 'Optional',
-    authSocialLead: 'Enter your email address and we will send you a sign-in link.',
+    authSocialLead: 'Enter your email address and we will send you a verification code.',
     authRegisterTitle: 'Create Account',
     authRegisterDesc: 'Register with your email address and enter the verification code from the email.',
     authRegisterLead: 'Enter your email address and we will send you a registration code.',
@@ -1263,11 +1263,11 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     authSending: 'Sending…',
     authLoginTitle: 'Log In',
     authLoginDesc: 'Log in with only your registered email address. No password is required.',
-    authLoginLead: 'We will send a sign-in link to your registered email address.',
-    authLoginUrlLabel: 'Sign-in link',
-    authLoginNote: 'Enter the verification code from the email. Check your spam folder if it does not arrive.',
+    authLoginLead: 'We will send a sign-in code to your registered email address.',
+    authLoginUrlLabel: 'Sign-in code',
+    authLoginNote: 'Enter the verification code from the email. Never share this code with anyone.',
     authPasswordLabel: 'Password',
-    authLoginSubmit: 'Send Sign-in Link',
+    authLoginSubmit: 'Send Sign-in Code',
     authLoggingIn: 'Logging in…',
     authExistingPrompt: 'Already have an account?',
     authLoginHere: 'Log in here',
@@ -3188,10 +3188,10 @@ const toAuthErrorMessage = (error: unknown, fallback: string) => {
     return '認証サーバーの設定が未反映です。Spring BootとSupabaseのOAuth設定を確認してください。';
   }
   if (/Please use the social login used for this account/i.test(message)) {
-    return 'このアカウントではメールリンク認証をご利用ください。';
+    return 'このアカウントではメール認証をご利用ください。';
   }
   if (/Signups? not allowed for otp|User not found|not registered/i.test(message)) {
-    return 'このメールアドレスは未登録です。画面下の「会員登録はこちら」から登録してください。';
+    return '認証コードの送信結果を確認できませんでした。少し待ってからもう一度お試しください。';
   }
   return message;
 };
@@ -4842,6 +4842,7 @@ const buildDrawFailureDetails = ({
 
 export default function App() {
   const [stage, setStage] = useState<AppStage>('splash');
+  const [authEntryMode, setAuthEntryMode] = useState<'register' | 'login'>('login');
   const [userId, setUserId] = useState(APP_USER_ID);
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const runtimeApiBaseUrl = useMemo(() => getRuntimeApiBaseUrl() ?? '', []);
@@ -6727,6 +6728,7 @@ export default function App() {
       })
       .catch(() => undefined);
     setActiveTab('home');
+    setAuthEntryMode('register');
     setStage('login');
   }, []);
 
@@ -6798,6 +6800,8 @@ export default function App() {
         apiBaseUrlCandidates={apiBaseUrlCandidates}
         uiText={UI_TEXT[appLanguage]}
         locationStatus={locationStatus}
+        authMode={authEntryMode}
+        onAuthModeChange={setAuthEntryMode}
         onApiConnected={syncWorkingApiBaseUrl}
         onAuthenticated={enterAuthenticatedSession}
         onStart={enterGuestSession}
@@ -6809,7 +6813,10 @@ export default function App() {
     return (
       <LoggedOutScreen
         uiText={UI_TEXT[appLanguage]}
-        onLogin={() => setStage('login')}
+        onLogin={() => {
+          setAuthEntryMode('login');
+          setStage('login');
+        }}
         onGuest={() => enterMain()}
       />
     );
@@ -7121,6 +7128,8 @@ function LoginScreen({
   apiBaseUrlCandidates,
   uiText,
   locationStatus,
+  authMode,
+  onAuthModeChange,
   onApiConnected,
   onAuthenticated,
   onStart,
@@ -7128,6 +7137,8 @@ function LoginScreen({
   apiBaseUrlCandidates: string[];
   uiText: Record<string, string>;
   locationStatus: string;
+  authMode: 'register' | 'login';
+  onAuthModeChange: (mode: 'register' | 'login') => void;
   onApiConnected: () => void;
   onAuthenticated: (auth: AuthResponse, accessToken: string, refreshToken?: string | null) => Promise<void>;
   onStart: (userId?: string, displayName?: string) => void;
@@ -7138,14 +7149,13 @@ function LoginScreen({
   const [authNotice, setAuthNotice] = useState('');
   const [authSucceeded, setAuthSucceeded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
   const handledOAuthUrlRef = useRef<string | null>(null);
   const magicLinkRequestInFlightRef = useRef(false);
   const isLoginMode = authMode === 'login';
-  const authUrlLabel = isLoginMode ? uiText.authLoginUrlLabel : uiText.authRegisterUrlLabel;
+  const authCodeLabel = isLoginMode ? uiText.authLoginUrlLabel : uiText.authRegisterUrlLabel;
 
   const switchAuthMode = (nextMode: 'register' | 'login') => {
-    setAuthMode(nextMode);
+    onAuthModeChange(nextMode);
     setOtpCode('');
     setOtpRequested(false);
     setAuthSucceeded(false);
@@ -7156,6 +7166,7 @@ function LoginScreen({
     if (!url || !isOAuthCallbackUrl(url) || handledOAuthUrlRef.current === url || consumedOAuthCallbackUrls.has(url)) {
       return;
     }
+    onAuthModeChange('login');
     handledOAuthUrlRef.current = url;
     consumedOAuthCallbackUrls.add(url);
     const params = parseOAuthCallbackParams(url);
@@ -7195,7 +7206,7 @@ function LoginScreen({
     } finally {
       setIsSubmitting(false);
     }
-  }, [apiBaseUrlCandidates, onApiConnected, onAuthenticated]);
+  }, [apiBaseUrlCandidates, onApiConnected, onAuthenticated, onAuthModeChange]);
 
   useEffect(() => {
     const subscription = Linking.addEventListener('url', ({ url }) => {
@@ -7234,10 +7245,10 @@ function LoginScreen({
       setAuthSucceeded(true);
       setOtpCode('');
       setOtpRequested(true);
-      setAuthNotice(`${normalizedEmail} に${authUrlLabel}を送信しました。メール内のコードを入力してください。`);
+      setAuthNotice(`${normalizedEmail} に${authCodeLabel}を送信しました。メール内のコードを入力してください。`);
     } catch (error) {
-      const reason = toAuthErrorMessage(error, `${authUrlLabel}を送信できませんでした。`);
-      setAuthNotice(`${authUrlLabel}を送信できませんでした。${reason}`);
+      const reason = toAuthErrorMessage(error, `${authCodeLabel}を送信できませんでした。`);
+      setAuthNotice(`${authCodeLabel}を送信できませんでした。${reason}`);
     } finally {
       setIsSubmitting(false);
       magicLinkRequestInFlightRef.current = false;

@@ -26,7 +26,7 @@ import org.springframework.web.client.RestClientResponseException;
 public class SupabaseAuthService {
   private static final Logger logger = LoggerFactory.getLogger(SupabaseAuthService.class);
   private static final String DEFAULT_OAUTH_REDIRECT_URI = "randish://auth/callback";
-  private static final Duration MAGIC_LINK_TTL = Duration.ofHours(1);
+  private static final Duration EMAIL_AUTH_TOKEN_TTL = Duration.ofMinutes(10);
   private static final List<String> SUPABASE_ERROR_FIELDS = List.of("msg", "message", "error_description", "error");
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final List<Path> ENV_FILES = List.of(
@@ -87,7 +87,7 @@ public class SupabaseAuthService {
               "create_user", createUser))
           .retrieve()
           .toBodilessEntity();
-      return Instant.now().plus(MAGIC_LINK_TTL);
+      return Instant.now().plus(EMAIL_AUTH_TOKEN_TTL);
     } catch (RestClientResponseException exception) {
       throw new BadRequestException(supabaseErrorMessage(exception, "Supabase magic link request failed."));
     }
@@ -126,7 +126,7 @@ public class SupabaseAuthService {
           .body(Map.of("email", email))
           .retrieve()
           .toBodilessEntity();
-      return Instant.now().plus(MAGIC_LINK_TTL);
+      return Instant.now().plus(EMAIL_AUTH_TOKEN_TTL);
     } catch (RestClientResponseException exception) {
       throw new BadRequestException(supabaseErrorMessage(exception, "Supabase password reset request failed."));
     }
