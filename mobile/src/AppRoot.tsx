@@ -7041,6 +7041,21 @@ export default function App() {
           />
         )}
       </ScrollView>
+      {activeTab === 'home' && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={UI_TEXT[appLanguage].currentLocationSearch}
+          style={({ pressed }) => [styles.homeCurrentLocationFab, pressed && styles.homeCurrentLocationFabPressed]}
+          onPress={prepareCurrentLocationSearch}
+        >
+          <Ionicons name={userLocation ? 'locate' : 'navigate'} size={24} color="#ffffff" />
+          {userLocation && (
+            <View style={styles.homeCurrentLocationFabBadge}>
+              <Ionicons name="checkmark" size={10} color="#ffffff" />
+            </View>
+          )}
+        </Pressable>
+      )}
       <AppFooter activeTab={activeTab} onPress={handleFooterPress} uiText={UI_TEXT[appLanguage]} />
     </SafeAreaView>
   );
@@ -8669,37 +8684,6 @@ function HomeLocationPanel({
         <HomeMapIllustration />
       </View>
       {FEATURE_MEAL_TICKETS_ENABLED && <MealTicketPanel state={mealTicketState} uiText={t} />}
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={t.currentLocationSearch}
-        style={({ pressed }) => [styles.homeCurrentPrimaryCta, pressed && styles.homeCurrentPrimaryCtaPressed]}
-        onPress={onCurrentLocationSearch}
-      >
-        <View pointerEvents="none" style={styles.homeCurrentPrimaryGlowLarge} />
-        <View pointerEvents="none" style={styles.homeCurrentPrimaryGlowSmall} />
-        <View style={styles.homeCurrentPrimaryIcon}>
-          <Ionicons name="navigate" size={22} color={ORANGE} />
-        </View>
-        <View style={styles.homeCurrentPrimaryCopy}>
-          <View style={styles.homeCurrentPrimaryMetaRow}>
-            <Text style={styles.homeCurrentPrimaryKicker}>NEAR YOU</Text>
-            <View style={styles.homeCurrentPrimaryBadge}>
-              <Ionicons name={userLocation ? 'checkmark-circle' : 'location-outline'} size={12} color="#ffffff" />
-              <Text style={styles.homeCurrentPrimaryBadgeText}>
-                {userLocation ? t.currentLocationActive : t.currentLocationTap}
-              </Text>
-            </View>
-          </View>
-          <Text style={styles.homeCurrentPrimaryTitle}>{t.currentLocationSearch}</Text>
-          <Text style={styles.homeCurrentPrimaryLead} numberOfLines={2}>
-            {userLocation ? locationStatus : t.currentLocationCtaLead}
-          </Text>
-        </View>
-        <View style={styles.homeCurrentPrimaryArrow}>
-          <Ionicons name="arrow-forward" size={17} color={ORANGE} />
-        </View>
-      </Pressable>
 
       <View style={styles.homeSearchBox}>
         <Ionicons name="search" size={28} color={INK} />
