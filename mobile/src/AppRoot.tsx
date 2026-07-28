@@ -18,7 +18,9 @@ import {
   ScrollView,
   StatusBar,
   Text,
-  TextInput,
+  TextInput as NativeTextInput,
+  type TextInputProps,
+  type TextStyle,
   View,
 } from 'react-native';
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
@@ -43,6 +45,14 @@ import { styles } from './styles/appStyles';
 
 const consumedOAuthCallbackUrls = new Set<string>();
 const MIDNIGHT_PURPLE = '#6c63ff';
+const WEB_TEXT_INPUT_STYLE = Platform.OS === 'web'
+  ? ({ outlineColor: 'transparent', outlineStyle: 'none', outlineWidth: 0 } as unknown as TextStyle)
+  : undefined;
+
+const TextInput = ({ style, ...props }: TextInputProps) => (
+  <NativeTextInput {...props} style={[WEB_TEXT_INPUT_STYLE, style]} />
+);
+
 
 type AppStage = 'splash' | 'login' | 'loggedOut' | 'main';
 type TabKey = 'home' | 'search' | 'random' | 'save' | 'analytics';
@@ -666,6 +676,17 @@ const buildApiBaseUrlCandidates = (
 ) => {
   const primary = normalizeApiBaseUrl(primaryBaseUrl);
   const primaryIsFallback = isDevFallbackApiBaseUrl(primary);
+  const productionWebBaseUrl = getProductionWebApiBaseUrl();
+
+  if (productionWebBaseUrl) {
+    return uniqueApiBaseUrls([
+      productionWebBaseUrl,
+      ...(!primaryIsFallback ? [primary] : []),
+      runtimeBaseUrl,
+      ...getRuntimeApiBaseUrls(),
+    ]).filter((baseUrl) => !isDevFallbackApiBaseUrl(baseUrl));
+  }
+
   return uniqueApiBaseUrls([
     ...(!primaryIsFallback ? [primary] : []),
     runtimeBaseUrl,
@@ -3119,7 +3140,7 @@ const toAuthErrorMessage = (error: unknown, fallback: string) => {
   const rawMessage = error instanceof Error ? error.message : fallback;
   const message = rawMessage.replace(/\s*\(https?:\/\/[^)]+\)\s*$/i, '').trim();
   if (isApiConnectivityError(error) || /API timeout|API connection failed/i.test(message)) {
-    return 'APIに接続できませんでした。サーバーを再起動して、スマホとPCが同じWi-Fiにつながっているか確認してください。';
+    return '認証サーバーに接続できませんでした。通信環境を確認し、少し待ってからもう一度お試しください。';
   }
   if (!message) {
     return fallback;

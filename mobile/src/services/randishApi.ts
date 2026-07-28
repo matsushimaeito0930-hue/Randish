@@ -266,6 +266,8 @@ type RequestOptions = {
   body?: unknown;
   headers?: Record<string, string>;
   skipAuth?: boolean;
+  timeoutMs?: number;
+  totalTimeoutMs?: number;
 };
 
 type ApiBaseUrlInput = string | readonly string[];
@@ -273,6 +275,7 @@ type ApiErrorKind = 'connection' | 'timeout' | 'http';
 
 const REQUEST_TIMEOUT_MS = 5000;
 const REQUEST_TOTAL_TIMEOUT_MS = 9000;
+const MAGIC_LINK_REQUEST_TIMEOUT_MS = 75000;
 const MIN_REQUEST_TIMEOUT_MS = 1200;
 
 export class RandishApiError extends Error {
@@ -388,9 +391,11 @@ const request = async <T>(
   const candidates = toBaseUrlCandidates(baseUrl);
   let lastError: unknown;
   const startedAt = Date.now();
+  const requestTimeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const totalTimeoutMs = options.totalTimeoutMs ?? REQUEST_TOTAL_TIMEOUT_MS;
 
   for (const candidate of candidates) {
-    const remainingMs = REQUEST_TOTAL_TIMEOUT_MS - (Date.now() - startedAt);
+    const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
     if (remainingMs <= 0) {
       break;
     }
@@ -399,13 +404,13 @@ const request = async <T>(
       const result = await requestUrl<T>(
         buildUrl(candidate, path, params),
         options,
-        Math.min(REQUEST_TIMEOUT_MS, remainingMs),
+        Math.min(requestTimeoutMs, remainingMs),
       );
       lastSuccessfulBaseUrl = candidate;
       return result;
     } catch (error) {
       lastError = error;
-      if (candidates.length > 1 && isApiConnectivityError(error) && Date.now() - startedAt < REQUEST_TOTAL_TIMEOUT_MS) {
+      if (candidates.length > 1 && isApiConnectivityError(error) && Date.now() - startedAt < totalTimeoutMs) {
         continue;
       }
       throw error;
@@ -457,6 +462,8 @@ export const randishApi = {
       method: 'POST',
       body: params,
       skipAuth: true,
+      timeoutMs: MAGIC_LINK_REQUEST_TIMEOUT_MS,
+      totalTimeoutMs: MAGIC_LINK_REQUEST_TIMEOUT_MS,
     }),
 
   verifyEmailOtp: (baseUrl: ApiBaseUrlInput, params: EmailOtpVerifyParams) =>
