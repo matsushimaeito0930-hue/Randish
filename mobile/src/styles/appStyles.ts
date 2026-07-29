@@ -6937,6 +6937,9 @@ export const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#eef4ea',
   },
+  miniMapNativeMap: {
+    ...StyleSheet.absoluteFillObject,
+  },
   miniMapRoad: {
     position: 'absolute',
     height: 13,

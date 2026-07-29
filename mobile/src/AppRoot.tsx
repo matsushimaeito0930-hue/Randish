@@ -2955,7 +2955,7 @@ const candidatePlaceToRestaurant = (place: CandidatePlace, area: string, genre: 
     rating: place.rating ?? 0,
     minutes: place.distanceMeters ? Math.max(1, Math.round((place.distanceMeters / 1000) * 12.5)) : 0,
     address: place.address ?? '地図で住所を確認してください',
-    photoUrl: place.photoUrl ?? null,
+    photoUrl: toAbsoluteApiAssetUrl(place.photoUrl),
     note: '近くのお店情報から選ばれました。',
     priceRange: formatCandidatePriceRange(place.priceLevel),
     latitude: place.latitude,
@@ -4878,8 +4878,6 @@ export default function App() {
   const [historyDetailError, setHistoryDetailError] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const [locationIntroState, setLocationIntroState] = useState<LocationIntroState>('loading');
-  const [locationIntroWorking, setLocationIntroWorking] = useState(false);
-  const [locationPermissionNeedsSettings, setLocationPermissionNeedsSettings] = useState(false);
   const [profileName, setProfileName] = useState('RANDISH Guest');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('ja');
@@ -5002,7 +5000,6 @@ export default function App() {
         return;
       }
       const hasForegroundPermission = permission?.status === 'granted' || permission?.granted === true;
-      setLocationPermissionNeedsSettings(Boolean(permission && !hasForegroundPermission && permission.canAskAgain === false));
       setLocationIntroState(hasForegroundPermission || introValue === 'skipped' ? 'completed' : 'pending');
       if (cachedLocationValue && introValue !== 'skipped') {
         try {
@@ -5471,7 +5468,6 @@ export default function App() {
         ? await Location.getForegroundPermissionsAsync()
         : await Location.requestForegroundPermissionsAsync();
       if (permission.status !== 'granted') {
-        setLocationPermissionNeedsSettings(permission.canAskAgain === false);
         if (mode === 'sync-search' || areaRef.current === '現在地') {
           setLocationStatus(
             Platform.OS === 'web'
@@ -5481,7 +5477,6 @@ export default function App() {
         }
         return null;
       }
-      setLocationPermissionNeedsSettings(false);
 
       const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coords = {
@@ -5509,6 +5504,7 @@ export default function App() {
       if (mode === 'sync-search') {
         setArea('現在地');
         setLocationStatus(formatLocationStatus(prefecture, label));
+        void writeLocalValue(LOCATION_INTRO_STORAGE_KEY, 'granted');
       } else if (areaRef.current === '現在地') {
         setArea('現在地');
         setLocationStatus(formatLocationStatus(prefecture, label));
@@ -5523,14 +5519,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (stage !== 'main' || didAskLocation.current) {
+    if (stage !== 'main' || locationIntroState === 'loading' || didAskLocation.current) {
       return;
     }
     didAskLocation.current = true;
-    // サイトアクセス時、位置情報が既に許可されていれば現在地を取り直し、
-    // 古いキャッシュより実際の現在地を優先する（未許可なら背景モードはプロンプトを出さない）。
+    if (locationIntroState === 'pending') {
+      void requestCurrentLocation('sync-search').then((nextLocation) => {
+        setLocationIntroState('completed');
+        void writeLocalValue(LOCATION_INTRO_STORAGE_KEY, nextLocation ? 'granted' : 'skipped');
+        if (nextLocation) {
+          setMessage('現在地を使えるようになりました。近くのお店から選べます。');
+        }
+      });
+      return;
+    }
+    // すでに「使用中のみ」が許可されている場合は、OSダイアログを出さず現在地だけ更新する。
     void requestCurrentLocation('background');
-  }, [requestCurrentLocation, stage]);
+  }, [locationIntroState, requestCurrentLocation, stage]);
 
   useEffect(() => {
     if (stage !== 'main') {
@@ -6385,47 +6390,6 @@ export default function App() {
     await chooseMapRouletteRestaurant();
   }, [chooseEverythingRandom, chooseMapRouletteRestaurant, drawMode, isLoading, mealTicketState, scrollToContentTop]);
 
-  const completeLocationIntro = useCallback(async (choice: 'granted' | 'skipped') => {
-    setLocationIntroState('completed');
-    await writeLocalValue(LOCATION_INTRO_STORAGE_KEY, choice);
-  }, []);
-
-  const useCurrentLocationFromIntro = useCallback(async () => {
-    if (locationIntroWorking) {
-      return;
-    }
-    setLocationIntroWorking(true);
-    const nextLocation = await requestCurrentLocation('sync-search');
-    setLocationIntroWorking(false);
-    if (nextLocation) {
-      didAskLocation.current = true;
-      await completeLocationIntro('granted');
-      setActiveTab('home');
-      setMessage('現在地を使えるようになりました。近くのお店から選べます。');
-      return;
-    }
-    setMessage('Randishは現在地からお店を選ぶため、位置情報の許可が必要です。');
-  }, [completeLocationIntro, locationIntroWorking, requestCurrentLocation]);
-
-  const continueWithoutLocation = useCallback(async () => {
-    await completeLocationIntro('skipped');
-    userLocationRef.current = null;
-    setUserLocation(null);
-    setActiveTab('home');
-    setLocationStatus('位置情報を使用していません');
-    setMessage('位置情報を使わずに開始しました。エリアを選んでお店を探せます。');
-  }, [completeLocationIntro]);
-
-  const openLocationSettings = useCallback(() => {
-    if (Platform.OS === 'web') {
-      setLocationStatus('ブラウザのサイト設定から位置情報を許可してください');
-      return;
-    }
-    void Linking.openSettings().catch(() => {
-      setLocationStatus('端末の設定アプリを開けませんでした');
-    });
-  }, []);
-
   const saveRestaurantToAlbum = useCallback(async (restaurant: Restaurant) => {
     const localFavorite = toSavedRestaurantFromSelection({
       restaurant,
@@ -6978,19 +6942,6 @@ export default function App() {
     );
   }
 
-  if (stage === 'main' && locationIntroState !== 'completed') {
-    return (
-      <LocationIntroScreen
-        loading={locationIntroState === 'loading' || locationIntroWorking}
-        status={locationStatus}
-        showSettings={locationPermissionNeedsSettings}
-        onUseCurrentLocation={useCurrentLocationFromIntro}
-        onContinueWithoutLocation={continueWithoutLocation}
-        onOpenSettings={openLocationSettings}
-      />
-    );
-  }
-
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="dark-content" />
@@ -7218,90 +7169,6 @@ function AppHeader({
         <Text style={styles.locationText} numberOfLines={1}>{area}</Text>
       </Pressable>
     </View>
-  );
-}
-
-function LocationIntroScreen({
-  loading,
-  status,
-  showSettings,
-  onUseCurrentLocation,
-  onContinueWithoutLocation,
-  onOpenSettings,
-}: {
-  loading: boolean;
-  status: string;
-  showSettings: boolean;
-  onUseCurrentLocation: () => void;
-  onContinueWithoutLocation: () => void;
-  onOpenSettings: () => void;
-}) {
-  return (
-    <SafeAreaView style={styles.locationIntroScreen}>
-      <StatusBar barStyle="dark-content" />
-      <ScrollView contentContainerStyle={styles.locationIntroContainer} showsVerticalScrollIndicator={false}>
-        <Image source={RANDISH_LOGO} style={styles.locationIntroLogo} resizeMode="contain" />
-        <Text style={styles.locationIntroKicker}>LOCATION ACCESS</Text>
-        <Text style={styles.locationIntroTitle}>現在地の利用を確認します</Text>
-        <Text style={styles.locationIntroLead}>下のボタンを押すと、端末の正式な許可画面が開きます。選択肢はアプリではなく、iPhone・Androidが表示します。</Text>
-        <View style={styles.locationIntroOptionList}>
-          <View style={styles.locationIntroOptionCard}>
-            <View style={styles.locationIntroOptionIcon}>
-              <Ionicons name="time-outline" size={20} color={ORANGE} />
-            </View>
-            <View style={styles.locationIntroOptionCopy}>
-              <Text style={styles.locationIntroOptionTitle}>今回のみ許可（対応端末）</Text>
-              <Text style={styles.locationIntroOptionText}>この利用中だけ現在地を使います。iPhoneや一部のAndroidで表示され、次回はもう一度確認されます。</Text>
-            </View>
-          </View>
-          <View style={[styles.locationIntroOptionCard, styles.locationIntroRecommendedOption]}>
-            <View style={styles.locationIntroOptionIcon}>
-              <Ionicons name="phone-portrait-outline" size={20} color={ORANGE} />
-            </View>
-            <View style={styles.locationIntroOptionCopy}>
-              <View style={styles.locationIntroOptionTitleRow}>
-                <Text style={styles.locationIntroOptionTitle}>アプリの使用中のみ許可</Text>
-                <Text style={styles.locationIntroRecommendedBadge}>おすすめ</Text>
-              </View>
-              <Text style={styles.locationIntroOptionText}>Randishを開いている間だけ現在地を使います。近くのお店探しに十分な権限です。</Text>
-            </View>
-          </View>
-          <View style={styles.locationIntroOptionCard}>
-            <View style={styles.locationIntroOptionIcon}>
-              <Ionicons name="infinite-outline" size={20} color="#8a8175" />
-            </View>
-            <View style={styles.locationIntroOptionCopy}>
-              <Text style={styles.locationIntroOptionTitle}>「常に許可」は使いません</Text>
-              <Text style={styles.locationIntroOptionText}>RANDISHは閉じている間に位置情報を取得しません。近くのお店探しには使用中の許可だけで十分です。</Text>
-            </View>
-          </View>
-        </View>
-        <View style={styles.locationIntroNotice}>
-          <Ionicons name="shield-checkmark-outline" size={20} color={ORANGE} />
-          <Text style={styles.locationIntroNoticeText}>
-            正確な現在地はサーバーへ保存せず、この端末内の短期キャッシュと店舗検索にだけ使います。一度選んだ後はダイアログが再表示されないことがあり、その場合は端末の設定から変更できます。
-          </Text>
-        </View>
-        <Pressable
-          style={[styles.locationIntroPrimaryButton, loading && styles.locationIntroButtonDisabled]}
-          onPress={onUseCurrentLocation}
-          disabled={loading}
-        >
-          {loading ? <ActivityIndicator color="#ffffff" /> : <Ionicons name="navigate" size={20} color="#ffffff" />}
-          <Text style={styles.locationIntroPrimaryText}>{Platform.OS === 'web' ? 'ブラウザの許可画面へ' : '端末の許可画面へ'}</Text>
-        </Pressable>
-        {showSettings && Platform.OS !== 'web' && (
-          <Pressable style={styles.locationIntroSettingsButton} onPress={onOpenSettings} disabled={loading}>
-            <Ionicons name="settings-outline" size={18} color={ORANGE} />
-            <Text style={styles.locationIntroSettingsText}>端末の位置情報設定を開く</Text>
-          </Pressable>
-        )}
-        <Pressable style={styles.locationIntroSkipButton} onPress={onContinueWithoutLocation} disabled={loading}>
-          <Text style={styles.locationIntroSkipText}>位置情報を使わずに続ける</Text>
-        </Pressable>
-        <Text style={styles.locationIntroStatus}>{status}</Text>
-      </ScrollView>
-    </SafeAreaView>
   );
 }
 
@@ -13124,16 +12991,68 @@ function MiniGoogleMap({
   distanceLabel: string;
   onPress: () => void;
 }) {
+  const MapModule = useMemo(getNativeMapModule, []);
+  const MapView = MapModule?.default;
+  const Marker = MapModule?.Marker;
+  const latitude = toOptionalNumber(restaurant.latitude);
+  const longitude = toOptionalNumber(restaurant.longitude);
+  const hasCoordinates = latitude != null && longitude != null;
+  const query = hasCoordinates
+    ? `${latitude},${longitude}`
+    : restaurant.address || restaurant.name;
+  const webGoogleMapUrl = `https://maps.google.com/maps?q=${encodeURIComponent(query)}&z=16&t=m&output=embed`;
+  const nativeRegion = hasCoordinates
+    ? {
+      latitude,
+      longitude,
+      latitudeDelta: 0.006,
+      longitudeDelta: 0.006,
+    }
+    : null;
+
   return (
     <Pressable style={styles.miniMapCard} onPress={onPress}>
       <View style={styles.miniMapCanvas}>
-        <View style={[styles.miniMapRoad, styles.miniMapRoadOne]} />
-        <View style={[styles.miniMapRoad, styles.miniMapRoadTwo]} />
-        <View style={[styles.miniMapRoad, styles.miniMapRoadThree]} />
-        <View style={styles.miniMapPark} />
-        <View style={styles.miniMapPin}>
-          <View style={styles.miniMapPinCore} />
-        </View>
+        {Platform.OS === 'web' ? (
+          createElement('iframe', {
+            title: `${restaurant.name} Google Map`,
+            src: webGoogleMapUrl,
+            loading: 'lazy',
+            referrerPolicy: 'no-referrer-when-downgrade',
+            style: {
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              border: 0,
+              pointerEvents: 'none',
+            },
+          })
+        ) : nativeRegion && MapView && Marker ? (
+          <MapView
+            provider={MapModule?.PROVIDER_GOOGLE}
+            pointerEvents="none"
+            style={styles.miniMapNativeMap}
+            initialRegion={nativeRegion}
+            scrollEnabled={false}
+            zoomEnabled={false}
+            pitchEnabled={false}
+            rotateEnabled={false}
+            toolbarEnabled={false}
+          >
+            <Marker coordinate={{ latitude, longitude }} />
+          </MapView>
+        ) : (
+          <>
+            <View style={[styles.miniMapRoad, styles.miniMapRoadOne]} />
+            <View style={[styles.miniMapRoad, styles.miniMapRoadTwo]} />
+            <View style={[styles.miniMapRoad, styles.miniMapRoadThree]} />
+            <View style={styles.miniMapPark} />
+            <View style={styles.miniMapPin}>
+              <View style={styles.miniMapPinCore} />
+            </View>
+          </>
+        )}
       </View>
       <View style={styles.miniMapInfo}>
         <Text style={styles.miniMapLabel}>Google Map</Text>
