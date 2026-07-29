@@ -829,9 +829,13 @@ class RandishLogicTest {
     var provider = new CountingNearbyPlacesProvider();
     var service = new NearbyPlacesService(provider, validationService, 600, 300, false, false, 20);
 
+    validationService.validateNearbyPlacesRequest(35.681236, 139.767125, 100, "ラーメン", null);
+    validationService.validateNearbyPlacesRequest(35.681236, 139.767125, 10_000, "ラーメン", null);
     assertThatThrownBy(() -> service.search(new NearbyPlacesRequest(91.0, 139.767125, 1500, "ラーメン", null, false)))
         .isInstanceOf(BadRequestException.class);
     assertThatThrownBy(() -> service.search(new NearbyPlacesRequest(35.681236, 139.767125, 50, "ラーメン", null, false)))
+        .isInstanceOf(BadRequestException.class);
+    assertThatThrownBy(() -> service.search(new NearbyPlacesRequest(35.681236, 139.767125, 10_001, "ラーメン", null, false)))
         .isInstanceOf(BadRequestException.class);
     assertThat(provider.nearbyCallCount).isZero();
   }

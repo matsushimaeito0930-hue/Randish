@@ -19,7 +19,7 @@ public class ValidationService {
   private static final int MAX_NOTE_LENGTH = 1000;
   private static final int MAX_BUDGET = 1_000_000;
   private static final int MIN_NEARBY_RADIUS_METERS = 100;
-  private static final int MAX_NEARBY_RADIUS_METERS = 5_000;
+  private static final int MAX_NEARBY_RADIUS_METERS = 10_000;
   private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9._:@-]{1,120}");
   private static final Pattern SAFE_PROVIDER = Pattern.compile("[A-Za-z0-9_-]{1,80}");
 
@@ -138,7 +138,7 @@ public class ValidationService {
       throw new BadRequestException("latitude and longitude are required.");
     }
     if (radius != null && (radius < MIN_NEARBY_RADIUS_METERS || radius > MAX_NEARBY_RADIUS_METERS)) {
-      throw new BadRequestException("radius must be between 100 and 5000 meters.");
+      throw new BadRequestException("radius must be between 100 and 10000 meters.");
     }
     optionalSearchText("category", category);
     optionalSearchText("priceRange", priceRange);

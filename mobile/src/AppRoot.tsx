@@ -3961,9 +3961,14 @@ const getPrefectureFromText = (value?: string | null) => {
 
 const isPrefectureName = (value: string) => PREFECTURE_REGIONS.some((item) => item.prefecture === value);
 
-const TRAVEL_AREA_PRESETS: AreaPreset[] = JAPAN_MUNICIPALITY_PRESETS.filter((preset) => {
+const TRAVEL_AREA_PRESETS: AreaPreset[] = ALL_AREA_PRESETS.filter((preset) => {
   const areaValue = getAreaPresetValue(preset);
-  return areaValue !== '現在地' && !isPrefectureName(areaValue) && !isPrefectureName(preset.label);
+  return areaValue !== '現在地'
+    && !isPrefectureName(areaValue)
+    && !isPrefectureName(preset.label)
+    && preset.useCoordinates !== false
+    && preset.latitude !== 0
+    && preset.longitude !== 0;
 });
 
 const pickRandomTravelAreaPreset = () =>
@@ -5506,6 +5511,7 @@ export default function App() {
     const nextGenre = pickRandomTravelGenre(genre);
     const nextDistance = pickRandomDifferent(DISTANCE_OPTIONS, distance);
 
+    areaRef.current = travelSearchArea;
     setArea(travelSearchArea);
     setGenre(nextGenre);
     setDistance(nextDistance);
@@ -5954,6 +5960,7 @@ export default function App() {
         : 'いま候補を選んでいます。');
       return;
     }
+    const isTravelDraw = drawMode === 'travel';
     setActiveTab('random');
     setIsLoading(true);
     setMapRouletteError(null);
@@ -6024,6 +6031,19 @@ export default function App() {
 
       const runId = mapSpinRunIdRef.current + 1;
       mapSpinRunIdRef.current = runId;
+      if (isTravelDraw) {
+        setTravelRevealStep('hidden');
+        setTimeout(() => {
+          if (mapSpinRunIdRef.current === runId) {
+            setTravelRevealStep('genre');
+          }
+        }, 320);
+        setTimeout(() => {
+          if (mapSpinRunIdRef.current === runId) {
+            setTravelRevealStep('area');
+          }
+        }, 920);
+      }
       setMapRouletteTarget(selected);
       setMapRouletteStatus('spinning');
       setMessage(cacheEntry.candidates.length === 1
@@ -6056,6 +6076,9 @@ export default function App() {
         };
         setDrawFailureDetails([]);
         setSelectedRestaurant(normalized);
+        if (isTravelDraw) {
+          setTravelRevealStep('restaurant');
+        }
         setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
         recordDrawForAnalytics(normalized);
         setMapRouletteStatus('result');
@@ -6081,10 +6104,10 @@ export default function App() {
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
-        Animated.spring(mapPinBounce, {
+        Animated.timing(mapPinBounce, {
           toValue: 1,
-          friction: 3,
-          tension: 130,
+          duration: 420,
+          easing: Easing.out(Easing.back(1.6)),
           useNativeDriver: true,
         }),
       ]).start(({ finished }) => {
@@ -6122,6 +6145,7 @@ export default function App() {
     buildCandidateQuery,
     conditionRandom,
     distance,
+    drawMode,
     genre,
     loadCandidatePool,
     mapPinBounce,
