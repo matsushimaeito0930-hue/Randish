@@ -39,6 +39,8 @@ export type RandomRestaurantParams = RestaurantSearchParams & {
 
 export type CandidatePlace = {
   id: string;
+  provider?: string | null;
+  providerPlaceId?: string | null;
   name: string;
   latitude: number;
   longitude: number;
@@ -49,6 +51,7 @@ export type CandidatePlace = {
   address?: string | null;
   distanceMeters?: number | null;
   googleMapsUri?: string | null;
+  photoUrl?: string | null;
 };
 
 export type NearbyPlacesParams = {

@@ -67,6 +67,8 @@ public final class ApiDtos {
 
   public record CandidatePlaceResponse(
       String id,
+      String provider,
+      String providerPlaceId,
       String name,
       Double latitude,
       Double longitude,
@@ -76,7 +78,8 @@ public final class ApiDtos {
       Boolean openNow,
       String address,
       Integer distanceMeters,
-      String googleMapsUri) {
+      String googleMapsUri,
+      String photoUrl) {
   }
 
   public record NearbyPlacesResponse(

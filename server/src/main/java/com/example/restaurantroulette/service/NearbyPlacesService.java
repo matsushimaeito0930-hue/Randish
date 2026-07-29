@@ -366,6 +366,8 @@ public class NearbyPlacesService {
     String genre = restaurant.genre() == null || restaurant.genre().isBlank() ? "restaurant" : restaurant.genre();
     return new CandidatePlaceResponse(
         provider.toLowerCase(Locale.ROOT) + "-" + externalId,
+        provider.toUpperCase(Locale.ROOT),
+        externalId,
         restaurant.name(),
         restaurant.latitude(),
         restaurant.longitude(),
@@ -376,7 +378,8 @@ public class NearbyPlacesService {
         address.isBlank() ? null : address,
         distance,
         "https://www.google.com/maps/search/?api=1&query="
-            + URLEncoder.encode((restaurant.name() + " " + address).trim(), StandardCharsets.UTF_8));
+            + URLEncoder.encode((restaurant.name() + " " + address).trim(), StandardCharsets.UTF_8),
+        restaurant.photoUrl());
   }
 
   private Integer parseBudgetMax(String priceRange) {
@@ -446,6 +449,8 @@ public class NearbyPlacesService {
       double longitude = request.longitude() + offsets[index][1];
       places.add(new CandidatePlaceResponse(
           "mock-place-" + index,
+          "MOCK",
+          "mock-place-" + index,
           names[index][0],
           latitude,
           longitude,
@@ -455,7 +460,8 @@ public class NearbyPlacesService {
           index % 2 == 0,
           "開発用モック住所 " + (index + 1),
           distanceMeters(request.latitude(), request.longitude(), latitude, longitude),
-          "https://www.google.com/maps/search/?api=1&query=" + names[index][0]));
+          "https://www.google.com/maps/search/?api=1&query=" + names[index][0],
+          null));
     }
     return places.stream()
         .filter(place -> place.distanceMeters() == null || place.distanceMeters() <= request.radius())

@@ -622,6 +622,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
         place.location().longitude());
     return Optional.of(new CandidatePlaceResponse(
         place.id(),
+        "GOOGLE_PLACES",
+        place.id(),
         name,
         place.location().latitude(),
         place.location().longitude(),
@@ -631,7 +633,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
         place.currentOpeningHours() == null ? null : place.currentOpeningHours().openNow(),
         place.formattedAddress(),
         distanceMeters,
-        place.googleMapsUri()));
+        place.googleMapsUri(),
+        null));
   }
 
   private String buildNearbyTextQuery(String category) {

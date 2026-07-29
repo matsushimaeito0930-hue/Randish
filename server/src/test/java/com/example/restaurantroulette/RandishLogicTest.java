@@ -7,6 +7,7 @@ import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
 import com.example.restaurantroulette.dto.ApiDtos.CandidatePlaceResponse;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.NearbyPlacesRequest;
+import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
@@ -424,6 +425,76 @@ class RandishLogicTest {
 
     assertThatThrownBy(() -> favoriteService.create(new FavoriteCreateRequest("user-1", "seed-umeda-ramen")))
         .isInstanceOf(ConflictException.class);
+  }
+
+  @Test
+  void externalFavoritesAndHistoriesStoreOnlyProviderIdAndReloadDetailsOnDemand() {
+    ExternalRestaurantProvider provider = Mockito.mock(ExternalRestaurantProvider.class);
+    Restaurant externalRestaurant = new Restaurant(
+        "hotpepper-J000000001",
+        "HOTPEPPER",
+        "J000000001",
+        "APIから再取得した店舗",
+        "大阪",
+        "居酒屋",
+        2000,
+        4000,
+        4.0,
+        5,
+        "大阪府大阪市",
+        "https://example.com/shop.jpg",
+        "test",
+        34.7,
+        135.5);
+    Mockito.when(provider.providerKey()).thenReturn("HOTPEPPER");
+    Mockito.when(provider.isAvailable()).thenReturn(true);
+    Mockito.when(provider.findByExternalId("J000000001", "大阪", "居酒屋", 2000, 4000))
+        .thenReturn(java.util.Optional.of(externalRestaurant));
+    RestaurantQueryService queryService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(provider),
+        mapper,
+        validationService);
+    FavoriteService externalFavoriteService = new FavoriteService(
+        new FavoriteRestaurantRepository(jdbcClient),
+        queryService,
+        mapper,
+        validationService);
+    RandomHistoryService externalHistoryService = new RandomHistoryService(
+        new RandomHistoryRepository(jdbcClient),
+        queryService,
+        mapper,
+        validationService);
+
+    var favorite = externalFavoriteService.create(new FavoriteCreateRequest(
+        "user-external",
+        null,
+        "HOTPEPPER",
+        "J000000001",
+        "大阪",
+        "居酒屋",
+        2000,
+        4000,
+        3000,
+        null,
+        null));
+    var history = externalHistoryService.create(new RandomHistoryCreateRequest(
+        "user-external",
+        null,
+        "HOTPEPPER",
+        "J000000001",
+        "大阪",
+        "居酒屋",
+        2000,
+        4000,
+        3000));
+
+    assertThat(favorite.restaurantId()).isNull();
+    assertThat(favorite.restaurant()).isNull();
+    assertThat(history.restaurantId()).isNull();
+    assertThat(history.restaurant()).isNull();
+    assertThat(externalFavoriteService.findRestaurant(favorite.id()).name()).isEqualTo("APIから再取得した店舗");
+    assertThat(externalHistoryService.findRestaurant(history.id()).name()).isEqualTo("APIから再取得した店舗");
   }
 
   @Test
@@ -865,6 +936,9 @@ class RandishLogicTest {
     assertThat(restaurantProvider.searchCallCount).isEqualTo(1);
     assertThat(response.places()).hasSize(1);
     assertThat(response.places().get(0).id()).isEqualTo("geoapify-geo-test-1");
+    assertThat(response.places().get(0).provider()).isEqualTo("GEOAPIFY");
+    assertThat(response.places().get(0).providerPlaceId()).isEqualTo("geo-test-1");
+    assertThat(response.places().get(0).photoUrl()).isEqualTo("https://example.com/geo-test-1.jpg");
     assertThat(response.places().get(0).distanceMeters()).isLessThanOrEqualTo(500);
     assertThat(response.places().get(0).openNow()).isNull();
   }
@@ -1027,6 +1101,8 @@ class RandishLogicTest {
       lastMaxCandidates = maxCandidates;
       return List.of(new CandidatePlaceResponse(
           "nearby-test-1",
+          "GOOGLE_PLACES",
+          "nearby-test-1",
           "Nearby Test",
           request.latitude(),
           request.longitude(),
@@ -1036,7 +1112,8 @@ class RandishLogicTest {
           true,
           "東京都千代田区丸の内",
           0,
-          "https://www.google.com/maps/search/?api=1&query=Nearby%20Test"));
+          "https://www.google.com/maps/search/?api=1&query=Nearby%20Test",
+          null));
     }
   }
 
@@ -1079,7 +1156,7 @@ class RandishLogicTest {
           4.1,
           4,
           "Osaka Kita",
-          null,
+          "https://example.com/geo-test-1.jpg",
           "test",
           latitude == null ? 34.699826 : latitude + 0.0002,
           longitude == null ? 135.49311 : longitude + 0.0002));

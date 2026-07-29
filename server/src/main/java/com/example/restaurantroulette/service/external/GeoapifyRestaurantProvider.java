@@ -174,19 +174,49 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
     }
 
     CachedRestaurant cached = restaurantCacheByExternalId.get(externalId.trim());
-    if (cached == null) {
-      return Optional.empty();
-    }
-    long ageSeconds = Duration.between(cached.fetchedAt(), Instant.now()).toSeconds();
-    if (ageSeconds > cacheTtlSeconds) {
+    if (cached != null) {
+      long ageSeconds = Duration.between(cached.fetchedAt(), Instant.now()).toSeconds();
+      if (ageSeconds <= cacheTtlSeconds) {
+        Restaurant restaurant = cached.restaurant();
+        return mapper.matchesBudget(restaurant, savedBudgetMin, savedBudgetMax)
+            ? Optional.of(restaurant)
+            : Optional.empty();
+      }
       restaurantCacheByExternalId.remove(externalId.trim());
+    }
+
+    if (!isAvailable()) {
       return Optional.empty();
     }
-    Restaurant restaurant = cached.restaurant();
-    if (!mapper.matchesBudget(restaurant, savedBudgetMin, savedBudgetMax)) {
-      return Optional.empty();
+    try {
+      usageCounter.increment();
+      JsonNode response = restClient.get()
+          .uri(uriBuilder -> uriBuilder
+              .path("/place-details")
+              .queryParam("id", externalId.trim())
+              .queryParam("lang", "ja")
+              .queryParam("apiKey", apiKey)
+              .build())
+          .accept(MediaType.APPLICATION_JSON)
+          .retrieve()
+          .body(JsonNode.class);
+      JsonNode features = response == null ? null : response.path("features");
+      if (features == null || !features.isArray()) {
+        return Optional.empty();
+      }
+      SearchContext context = new SearchContext(savedArea, savedGenre);
+      for (JsonNode feature : features) {
+        Optional<Restaurant> restaurant = mapper.toRestaurant(feature, context)
+            .filter(item -> mapper.matchesBudget(item, savedBudgetMin, savedBudgetMax));
+        if (restaurant.isPresent()) {
+          restaurantCacheByExternalId.put(externalId.trim(), new CachedRestaurant(restaurant.get(), Instant.now()));
+          return restaurant;
+        }
+      }
+    } catch (RuntimeException exception) {
+      logger.warn("[RANDISH_GEOAPIFY] place details fetch failed id={}", externalId, exception);
     }
-    return Optional.of(restaurant);
+    return Optional.empty();
   }
 
   @Override

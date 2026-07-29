@@ -2932,10 +2932,20 @@ const estimateBudgetFromPriceLevel = (priceLevel?: number | null) => {
 const candidatePlaceToRestaurant = (place: CandidatePlace, area: string, genre: string): Restaurant => {
   const displayGenre = place.categories?.find((category) => category && !category.includes('_')) ?? genre ?? '飲食店';
   const budget = estimateBudgetFromPriceLevel(place.priceLevel);
+  const inferredProvider = place.id.startsWith('hotpepper-')
+    ? 'HOTPEPPER'
+    : place.id.startsWith('geoapify-')
+      ? 'GEOAPIFY'
+      : 'GOOGLE_PLACES';
+  const provider = (place.provider || inferredProvider).toUpperCase();
+  const providerPrefix = `${provider.toLowerCase()}-`;
+  const providerPlaceId = place.providerPlaceId
+    || (place.id.startsWith(providerPrefix) ? place.id.slice(providerPrefix.length) : place.id);
+  const providerLabel = getProviderLabel(provider);
   return {
-    id: `google-places-${place.id.replace(/[^A-Za-z0-9_-]/g, '_')}`,
-    externalProvider: 'GOOGLE_PLACES',
-    externalId: place.id,
+    id: `${provider.toLowerCase()}-${providerPlaceId.replace(/[^A-Za-z0-9_-]/g, '_')}`,
+    externalProvider: provider,
+    externalId: providerPlaceId,
     name: place.name,
     area: area === '現在地' ? '現在地周辺' : area,
     genre: displayGenre,
@@ -2943,16 +2953,16 @@ const candidatePlaceToRestaurant = (place: CandidatePlace, area: string, genre: 
     budgetMax: budget.max,
     rating: place.rating ?? 0,
     minutes: place.distanceMeters ? Math.max(1, Math.round((place.distanceMeters / 1000) * 12.5)) : 0,
-    address: place.address ?? 'Google Mapsで住所を確認してください',
-    photoUrl: null,
-    note: 'Google Placesの近隣候補から選ばれました。',
+    address: place.address ?? '地図で住所を確認してください',
+    photoUrl: place.photoUrl ?? null,
+    note: `${providerLabel}の近隣候補から選ばれました。`,
     priceRange: formatCandidatePriceRange(place.priceLevel),
     latitude: place.latitude,
     longitude: place.longitude,
     googleRating: place.rating ?? null,
     googleMapsUri: place.googleMapsUri ?? null,
     openNow: place.openNow ?? null,
-    googlePlaceId: place.id,
+    googlePlaceId: provider === 'GOOGLE_PLACES' ? providerPlaceId : null,
   };
 };
 
@@ -3083,7 +3093,7 @@ const toSavedRestaurantFromSelection = ({
     createdAt,
     photoUri: null,
     photoTakenAt: null,
-    snapshot: restaurant,
+    snapshot: shouldPersistRestaurantId(restaurant) ? restaurant : null,
   };
 };
 
@@ -5145,10 +5155,7 @@ export default function App() {
     })
       .then((history) => {
         syncWorkingApiBaseUrl();
-        const syncedEntry = {
-          ...toDrawHistoryEntry(history),
-          restaurant: history.restaurant ? normalizeRestaurant(history.restaurant) : restaurant,
-        };
+        const syncedEntry = toDrawHistoryEntry(history);
         setDrawHistories((current) => [
           syncedEntry,
           ...current.filter((item) => item.id !== localEntry.id),
@@ -6361,7 +6368,7 @@ export default function App() {
       syncWorkingApiBaseUrl();
       const syncedFavorite = {
         ...toSavedRestaurantFromApi(favorite),
-        snapshot: localFavorite.snapshot,
+        snapshot: shouldPersistRestaurantId(restaurant) ? localFavorite.snapshot : null,
       };
       savedDetailCacheRef.current.delete(localFavorite.id);
       if (shouldPersistRestaurantId(restaurant)) {
@@ -6387,7 +6394,7 @@ export default function App() {
               photoUri: current.favorite.photoUri ?? localFavorite.photoUri ?? null,
               photoTakenAt: current.favorite.photoTakenAt ?? localFavorite.photoTakenAt ?? null,
             },
-            restaurant: localFavorite.snapshot ?? restaurant,
+            restaurant,
           }
           : current
       ));
@@ -10915,6 +10922,7 @@ function SaveTab({
                 preferredArea={savedDetail.favorite.savedArea}
                 uiText={uiText}
                 onMapPress={() => onSavedMapPress(savedDetail.restaurant)}
+                allowExternalPhoto
               />
             </View>
           )}

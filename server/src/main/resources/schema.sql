@@ -398,6 +398,36 @@ ALTER TABLE favorite_restaurants DROP CONSTRAINT IF EXISTS uk_favorite_user_rest
 UPDATE favorite_restaurants
 SET provider_place_id = restaurant_id
 WHERE (provider_place_id IS NULL OR provider_place_id = '') AND restaurant_id IS NOT NULL;
+UPDATE random_histories
+SET provider = 'HOTPEPPER', provider_place_id = SUBSTRING(provider_place_id FROM 11)
+WHERE provider = 'GOOGLE_PLACES' AND provider_place_id LIKE 'hotpepper-%';
+UPDATE random_histories
+SET provider = 'GEOAPIFY', provider_place_id = SUBSTRING(provider_place_id FROM 10)
+WHERE provider = 'GOOGLE_PLACES' AND provider_place_id LIKE 'geoapify-%';
+DELETE FROM favorite_restaurants AS broken
+WHERE broken.provider = 'GOOGLE_PLACES'
+  AND broken.provider_place_id LIKE 'hotpepper-%'
+  AND EXISTS (
+    SELECT 1 FROM favorite_restaurants AS valid
+    WHERE valid.user_id = broken.user_id
+      AND valid.provider = 'HOTPEPPER'
+      AND valid.provider_place_id = SUBSTRING(broken.provider_place_id FROM 11)
+  );
+DELETE FROM favorite_restaurants AS broken
+WHERE broken.provider = 'GOOGLE_PLACES'
+  AND broken.provider_place_id LIKE 'geoapify-%'
+  AND EXISTS (
+    SELECT 1 FROM favorite_restaurants AS valid
+    WHERE valid.user_id = broken.user_id
+      AND valid.provider = 'GEOAPIFY'
+      AND valid.provider_place_id = SUBSTRING(broken.provider_place_id FROM 10)
+  );
+UPDATE favorite_restaurants
+SET provider = 'HOTPEPPER', provider_place_id = SUBSTRING(provider_place_id FROM 11)
+WHERE provider = 'GOOGLE_PLACES' AND provider_place_id LIKE 'hotpepper-%';
+UPDATE favorite_restaurants
+SET provider = 'GEOAPIFY', provider_place_id = SUBSTRING(provider_place_id FROM 10)
+WHERE provider = 'GOOGLE_PLACES' AND provider_place_id LIKE 'geoapify-%';
 ALTER TABLE visit_collections DROP CONSTRAINT IF EXISTS uk_visit_user_restaurant;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
