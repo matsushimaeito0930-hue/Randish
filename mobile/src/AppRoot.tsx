@@ -1016,7 +1016,6 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     footerAnalytics: '分析',
     pageConditionsTitle: '条件を整える',
     pageConditionsLead: '探し込みすぎず、決めるために必要な条件だけを残しました。',
-    apiUrl: 'API URL',
     todayConditions: '今日の条件',
     refreshCandidates: '候補更新',
     areaInputPlaceholder: '現在地エリア',
@@ -1199,7 +1198,6 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     footerAnalytics: 'Stats',
     pageConditionsTitle: 'Set Filters',
     pageConditionsLead: 'Keep only the filters that help you decide.',
-    apiUrl: 'API URL',
     todayConditions: "Today's Filters",
     refreshCandidates: 'Refresh',
     areaInputPlaceholder: 'Current area',
@@ -1382,7 +1380,6 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     footerAnalytics: '分析',
     pageConditionsTitle: '调整条件',
     pageConditionsLead: '只保留帮助你决定的必要条件。',
-    apiUrl: 'API URL',
     todayConditions: '今天的条件',
     refreshCandidates: '更新候选',
     areaInputPlaceholder: '当前位置区域',
@@ -1565,7 +1562,6 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     footerAnalytics: '분석',
     pageConditionsTitle: '조건 정리',
     pageConditionsLead: '결정에 필요한 조건만 남겼습니다.',
-    apiUrl: 'API URL',
     todayConditions: '오늘의 조건',
     refreshCandidates: '후보 갱신',
     areaInputPlaceholder: '현재 위치 지역',
@@ -2941,7 +2937,6 @@ const candidatePlaceToRestaurant = (place: CandidatePlace, area: string, genre: 
   const providerPrefix = `${provider.toLowerCase()}-`;
   const providerPlaceId = place.providerPlaceId
     || (place.id.startsWith(providerPrefix) ? place.id.slice(providerPrefix.length) : place.id);
-  const providerLabel = getProviderLabel(provider);
   return {
     id: `${provider.toLowerCase()}-${providerPlaceId.replace(/[^A-Za-z0-9_-]/g, '_')}`,
     externalProvider: provider,
@@ -2955,7 +2950,7 @@ const candidatePlaceToRestaurant = (place: CandidatePlace, area: string, genre: 
     minutes: place.distanceMeters ? Math.max(1, Math.round((place.distanceMeters / 1000) * 12.5)) : 0,
     address: place.address ?? '地図で住所を確認してください',
     photoUrl: place.photoUrl ?? null,
-    note: `${providerLabel}の近隣候補から選ばれました。`,
+    note: '近くのお店情報から選ばれました。',
     priceRange: formatCandidatePriceRange(place.priceLevel),
     latitude: place.latitude,
     longitude: place.longitude,
@@ -3012,20 +3007,6 @@ const cleanTextOrNull = (value?: string | null) => {
 const parseBudgetNumber = (value: string) => {
   const numeric = Number(value || 0);
   return Number.isFinite(numeric) && numeric > 0 && numeric < 100000 ? numeric : null;
-};
-
-const getProviderLabel = (provider: string) => {
-  const normalized = provider.toUpperCase();
-  if (normalized === 'GOOGLE_PLACES') {
-    return 'Google Maps';
-  }
-  if (normalized === 'GEOAPIFY') {
-    return 'Geoapify';
-  }
-  if (normalized === 'HOTPEPPER') {
-    return 'Hot Pepper';
-  }
-  return 'RANDISH';
 };
 
 const getProviderPlaceId = (restaurant: Restaurant) =>
@@ -4325,7 +4306,7 @@ const createAreaMockRestaurants = (area: string, genre: string): Restaurant[] =>
       minutes: 11,
       address: `${addressPrefix} 2-3`,
       photoUrl: null,
-      note: 'API接続がない時に表示するエリア確認用の候補です。',
+      note: '通信できない時に表示するエリア確認用の候補です。',
       priceRange: '1,800円〜3,800円',
       latitude: latitude + 0.002,
       longitude: longitude + 0.002,
@@ -4788,10 +4769,10 @@ const buildGenreDiagnosticMessage = (requestedGenre: string, restaurants: Restau
 
   const genreSummary = buildGenreSummaryItems(restaurants);
   if (!genreSummary.length) {
-    return `${areaLabel}では「${cleanGenre}」候補が見つかりませんでした。APIのジャンル分類も取得できませんでした。`;
+    return `${areaLabel}では「${cleanGenre}」候補が見つかりませんでした。お店のジャンル情報も取得できませんでした。`;
   }
 
-  return `${areaLabel}では「${cleanGenre}」候補が見つかりません。API上は主に ${genreSummary.join(' / ')} として返っています。`;
+  return `${areaLabel}では「${cleanGenre}」候補が見つかりません。近くのお店は主に ${genreSummary.join(' / ')} に分類されています。`;
 };
 
 type DrawFailureDetailsInput = {
@@ -4826,7 +4807,7 @@ const buildDrawFailureDetails = ({
     || (cleanArea && cleanArea !== '現在地' ? cleanArea : '現在地周辺');
 
   if (diagnosticMessage) {
-    details.push(`API分類: ${diagnosticMessage}`);
+    details.push(`お店情報: ${diagnosticMessage}`);
   }
 
   if (mode === 'location') {
@@ -4837,12 +4818,12 @@ const buildDrawFailureDetails = ({
 
   if (apiMessage) {
     details.push(apiMessage.includes('接続')
-      ? 'API: 店舗検索APIへの接続で止まっています。条件ではなく通信・サーバーURL・APIキー側の可能性があります。'
-      : `API: ${apiMessage}`);
+      ? '通信: お店情報を取得できませんでした。通信環境を確認して、もう一度お試しください。'
+      : `お店情報: ${apiMessage}`);
   }
 
   if (!conditionRandom.genre && cleanGenre && cleanGenre !== 'すべて') {
-    details.push(`ジャンル: 「${cleanGenre}」で絞り込んでいます。API側で別ジャンル扱いだと候補から外れます。`);
+    details.push(`ジャンル: 「${cleanGenre}」で絞り込んでいます。別のジャンルに分類されたお店は候補から外れることがあります。`);
   }
 
   if (!conditionRandom.budget && cleanBudget && Number.isFinite(numericBudget) && numericBudget > 0 && numericBudget < 999999) {
@@ -4854,7 +4835,7 @@ const buildDrawFailureDetails = ({
   }
 
   if (!details.length) {
-    details.push('条件: APIから返った候補が、現在の抽選条件を同時に満たせませんでした。');
+    details.push('条件: 見つかったお店が、現在の抽選条件を同時に満たせませんでした。');
   }
 
   return [...new Set(details)].slice(0, 5);
@@ -5318,7 +5299,7 @@ export default function App() {
       }
       if (normalized.length) {
         const apiGenres = buildGenreSummaryItems(normalized).join(' / ');
-        setMessage(`${genreLabel}で${normalized.length}件から候補を整えました。APIジャンル: ${apiGenres}`);
+        setMessage(`${genreLabel}で${normalized.length}件から候補を整えました。見つかったジャンル: ${apiGenres}`);
       } else {
         const diagnosticMessage = await loadGenreDiagnosticMessage();
         setMessage(diagnosticMessage ?? `${genreLabel}に合うお店が見つかりませんでした。エリアやジャンルを変えてみてください。`);
@@ -5330,7 +5311,7 @@ export default function App() {
           .filter((restaurant) => conditionRandom.genre || restaurantMatchesSelectedGenre(restaurant, genre));
         setRestaurants(normalized);
         const genreLabel = genre === 'すべて' ? 'すべてのジャンル' : genre;
-        const fallbackPrefix = 'APIに接続できないためデモデータで表示しています。';
+        const fallbackPrefix = '通信できないため確認用の候補を表示しています。';
         if (hasHiddenPreviewCondition) {
           const areaLabel = conditionRandom.area ? 'ランダムエリア' : area;
           setMessage(`${fallbackPrefix}${areaLabel}で${normalized.length}件を下準備中。`);
@@ -5732,16 +5713,16 @@ export default function App() {
         try {
           let candidates = searchLocalRestaurants(effectiveDrawApiParams)
             .filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
-          let relaxedDrawMessage = 'APIに接続できないためデモ候補から一店を選びました。';
+          let relaxedDrawMessage = '通信できないため確認用の候補から一店を選びました。';
           if (!candidates.length) {
             candidates = searchLocalRestaurants({ ...effectiveDrawApiParams, distanceMeters: undefined })
               .filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
-            relaxedDrawMessage = 'APIに接続できないため、デモ候補を距離広めで選びました。';
+            relaxedDrawMessage = '通信できないため、確認用の候補を距離広めで選びました。';
           }
           if (!candidates.length && genre !== 'すべて') {
             candidates = createAreaMockRestaurants(effectiveDrawApiParams.area ?? areaRef.current, genre)
               .filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
-            relaxedDrawMessage = 'APIに接続できないため、エリア確認用のデモ候補で補いました。';
+            relaxedDrawMessage = '通信できないため、エリア確認用の候補で補いました。';
           }
           if (!candidates.length) {
             throw new Error(`${genre}に合う候補が見つかりませんでした。`);
@@ -5826,7 +5807,7 @@ export default function App() {
           setSelectedRestaurant(normalized);
           setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
           recordDrawForAnalytics(normalized);
-          setMessage(`APIに接続できないためデモ候補から選びました。${drawAnimation.doneMessage}`);
+          setMessage(`通信できないため確認用の候補から選びました。${drawAnimation.doneMessage}`);
           setTimeout(revealSelectedRestaurant, 980);
           setTimeout(scrollToRandomResult, 1300);
           return;
@@ -5842,7 +5823,7 @@ export default function App() {
         budgetMax: '',
         distance,
         conditionRandom: { area: true, budget: true, distance: true, genre: true },
-        apiMessage: isApiConnectivityError(error) ? '店舗検索APIに接続できませんでした。' : API_DRAW_MESSAGE,
+        apiMessage: isApiConnectivityError(error) ? 'お店情報を取得できませんでした。' : API_DRAW_MESSAGE,
         mode: 'apiError',
       }));
       setMessage(API_DRAW_MESSAGE);
@@ -6129,10 +6110,10 @@ export default function App() {
       logApiUiError('nearby map roulette failed', error, apiBaseUrlCandidates);
       const noKey = error instanceof RandishApiError && error.status === 400;
       const messageText = noKey
-        ? '近隣検索の候補を取得できませんでした。Geoapify/Hot Pepperの設定を確認してください。'
+        ? '近くのお店を取得できませんでした。少し時間をおいて再度お試しください。'
         : isApiConnectivityError(error)
-          ? '店舗検索APIに接続できませんでした。ネットワークを確認してください。'
-          : '店舗検索APIでエラーが発生しました。少し時間をおいて再度お試しください。';
+          ? 'お店情報を取得できませんでした。通信環境を確認してください。'
+          : 'お店情報の読み込みでエラーが発生しました。少し時間をおいて再度お試しください。';
       setMapRouletteError(messageText);
       setDrawFailureDetails(buildDrawFailureDetails({
         area: areaRef.current,
@@ -6226,7 +6207,7 @@ export default function App() {
         setMapRouletteTarget(null);
         logApiUiError('nearby preview failed', error, apiBaseUrlCandidates);
         const messageText = isApiConnectivityError(error)
-          ? '店舗検索APIに接続できませんでした。'
+          ? 'お店情報を取得できませんでした。'
           : '候補の読み込みに失敗しました。';
         setMapRouletteError(messageText);
         setDrawFailureDetails(buildDrawFailureDetails({
@@ -6400,7 +6381,7 @@ export default function App() {
       ));
       setMessage('お気に入りを同期しました。♡は保存済みです。');
     } catch {
-      setMessage('端末内のお気に入りに追加しました。API接続後はサーバーにも反映できます。');
+      setMessage('端末内のお気に入りに追加しました。通信が戻ると自動で同期します。');
     }
   }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, distance, genre, savedRestaurants, syncWorkingApiBaseUrl, userId]);
 
@@ -6952,7 +6933,6 @@ export default function App() {
         {activeTab === 'search' && (
           <SearchTab
             uiText={UI_TEXT[appLanguage]}
-            apiBaseUrl={apiBaseUrl}
             area={area}
             genre={genre}
             budgetMin={budgetMin}
@@ -6962,7 +6942,6 @@ export default function App() {
             conditionRandom={conditionRandom}
             restaurants={visibleRestaurants}
             isLoading={isLoading}
-            onApiBaseUrlChange={setApiBaseUrl}
             onAreaChange={updateArea}
             onGenreChange={updateGenre}
             onBudgetMinChange={updateBudgetMin}
@@ -9508,7 +9487,6 @@ function SegmentedValue({
 
 function SearchTab({
   uiText,
-  apiBaseUrl,
   area,
   genre,
   budgetMin,
@@ -9518,7 +9496,6 @@ function SearchTab({
   conditionRandom,
   restaurants,
   isLoading,
-  onApiBaseUrlChange,
   onAreaChange,
   onGenreChange,
   onBudgetMinChange,
@@ -9533,7 +9510,6 @@ function SearchTab({
   isRestaurantSaved,
 }: {
   uiText: Record<string, string>;
-  apiBaseUrl: string;
   area: string;
   genre: string;
   budgetMin: string;
@@ -9543,7 +9519,6 @@ function SearchTab({
   conditionRandom: ConditionRandomState;
   restaurants: Restaurant[];
   isLoading: boolean;
-  onApiBaseUrlChange: (value: string) => void;
   onAreaChange: (value: string) => void;
   onGenreChange: (value: string) => void;
   onBudgetMinChange: (value: string) => void;
@@ -9565,10 +9540,6 @@ function SearchTab({
   return (
     <View>
       <PageIntro title={uiText.pageConditionsTitle} lead={uiText.pageConditionsLead} />
-      <View style={styles.apiCard}>
-        <Text style={styles.apiLabel}>{uiText.apiUrl}</Text>
-        <TextInput value={apiBaseUrl} onChangeText={onApiBaseUrlChange} style={styles.apiInput} autoCapitalize="none" />
-      </View>
       <FilterPanel
         area={area}
         genre={genre}
@@ -10914,7 +10885,7 @@ function SaveTab({
                 <Ionicons name="camera-outline" size={19} color={ORANGE} />
                 <Text style={styles.savedPhotoButtonText}>{savedDetail.favorite.photoUri ? '写真を撮り直す' : 'ごはん写真を撮る'}</Text>
               </Pressable>
-              <SectionHeader title="店舗情報" action="APIから取得" />
+              <SectionHeader title="店舗情報" action="最新情報" />
               <ResultCard
                 isPro={isPro}
                 restaurant={savedDetail.restaurant}
@@ -11036,7 +11007,6 @@ function SavedPlaceCard({
   onPhotoPress: () => void;
 }) {
   const savedDate = formatShortDate(favorite.createdAt);
-  const providerLabel = getProviderLabel(favorite.provider);
   const snapshot = favorite.snapshot ?? null;
   const savedGenre = favorite.savedGenre ?? snapshot?.genre ?? null;
   return (
@@ -11053,7 +11023,7 @@ function SavedPlaceCard({
       <View style={styles.savedPlaceBody}>
         <View style={styles.savedPlaceTopRow}>
           <Text style={styles.savedPlaceKicker}>{favorite.photoUri ? 'ごはん写真あり' : 'お気に入り'}</Text>
-          <Text style={styles.savedPlaceProvider}>{providerLabel}</Text>
+          <Text style={styles.savedPlaceProvider}>保存済み</Text>
         </View>
         <Text style={styles.savedPlaceTitle} numberOfLines={1}>{`${savedGenre ?? 'お店'}の候補`}</Text>
         <Text style={styles.savedPlaceMeta} numberOfLines={2}>{buildSavedMetaLine(favorite)}</Text>
@@ -13217,7 +13187,7 @@ function HistoryEntrySection({
                   {buildHistoryMetaLine(displayEntry)}
                 </Text>
                 <Text style={styles.historyLookupId} numberOfLines={1}>
-                  {getProviderLabel(entry.provider)} / {formatShortDateTime(entry.createdAt) || '履歴'}
+                  {formatShortDateTime(entry.createdAt) || '保存した履歴'}
                 </Text>
               </View>
             </View>
@@ -13282,7 +13252,7 @@ function HistorySection({
                 <View style={styles.historyLookupBody}>
                   <Text style={styles.historyLookupTitle}>{entry.genre ?? 'お店'}の履歴</Text>
                   <Text style={styles.historyLookupMeta} numberOfLines={1}>{buildHistoryMetaLine(entry)}</Text>
-                  <Text style={styles.historyLookupId} numberOfLines={1}>{getProviderLabel(provider)}</Text>
+                  <Text style={styles.historyLookupId} numberOfLines={1}>保存した履歴</Text>
                 </View>
               </View>
             </View>
