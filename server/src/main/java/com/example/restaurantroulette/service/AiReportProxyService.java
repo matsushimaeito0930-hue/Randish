@@ -72,7 +72,7 @@ public class AiReportProxyService {
     }
 
     if (endpoint == null || requestToken == null) {
-      return statusReport("demo");
+      return statusReport("fallback");
     }
 
     URI endpointUri;

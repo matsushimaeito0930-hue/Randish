@@ -3657,7 +3657,7 @@ const requestAiMonthlyReport = async (
 ): Promise<AiMonthlyReport> => {
   const fallback = buildLocalAiReport(currentAnalytics, savedAnalytics);
   if (!apiBaseUrlCandidates.length || userId === APP_USER_ID) {
-    return fallback;
+    return { ...fallback, source: 'fallback' };
   }
 
   try {
@@ -7242,16 +7242,16 @@ function LocationIntroScreen({
       <ScrollView contentContainerStyle={styles.locationIntroContainer} showsVerticalScrollIndicator={false}>
         <Image source={RANDISH_LOGO} style={styles.locationIntroLogo} resizeMode="contain" />
         <Text style={styles.locationIntroKicker}>LOCATION ACCESS</Text>
-        <Text style={styles.locationIntroTitle}>位置情報の使い方を選択します</Text>
-        <Text style={styles.locationIntroLead}>登録・ログイン後に端末の正式な許可画面が開きます。表示される選択肢はOSのバージョンによって異なります。</Text>
+        <Text style={styles.locationIntroTitle}>現在地の利用を確認します</Text>
+        <Text style={styles.locationIntroLead}>下のボタンを押すと、端末の正式な許可画面が開きます。選択肢はアプリではなく、iPhone・Androidが表示します。</Text>
         <View style={styles.locationIntroOptionList}>
           <View style={styles.locationIntroOptionCard}>
             <View style={styles.locationIntroOptionIcon}>
               <Ionicons name="time-outline" size={20} color={ORANGE} />
             </View>
             <View style={styles.locationIntroOptionCopy}>
-              <Text style={styles.locationIntroOptionTitle}>今回のみ許可</Text>
-              <Text style={styles.locationIntroOptionText}>この利用中だけ現在地を使います。許可が失効した次回は、もう一度確認します。</Text>
+              <Text style={styles.locationIntroOptionTitle}>今回のみ許可（対応端末）</Text>
+              <Text style={styles.locationIntroOptionText}>この利用中だけ現在地を使います。iPhoneや一部のAndroidで表示され、次回はもう一度確認されます。</Text>
             </View>
           </View>
           <View style={[styles.locationIntroOptionCard, styles.locationIntroRecommendedOption]}>
@@ -7271,15 +7271,15 @@ function LocationIntroScreen({
               <Ionicons name="infinite-outline" size={20} color="#8a8175" />
             </View>
             <View style={styles.locationIntroOptionCopy}>
-              <Text style={styles.locationIntroOptionTitle}>常に許可</Text>
-              <Text style={styles.locationIntroOptionText}>Randishはバックグラウンドで追跡しないため、この権限は要求しません。</Text>
+              <Text style={styles.locationIntroOptionTitle}>「常に許可」は使いません</Text>
+              <Text style={styles.locationIntroOptionText}>RANDISHは閉じている間に位置情報を取得しません。近くのお店探しには使用中の許可だけで十分です。</Text>
             </View>
           </View>
         </View>
         <View style={styles.locationIntroNotice}>
           <Ionicons name="shield-checkmark-outline" size={20} color={ORANGE} />
           <Text style={styles.locationIntroNoticeText}>
-            正確な現在地はサーバーへ保存せず、この端末内の短期キャッシュと店舗検索にだけ使います。アプリがOSの選択結果を勝手に変更することはありません。
+            正確な現在地はサーバーへ保存せず、この端末内の短期キャッシュと店舗検索にだけ使います。一度選んだ後はダイアログが再表示されないことがあり、その場合は端末の設定から変更できます。
           </Text>
         </View>
         <Pressable
@@ -9561,7 +9561,7 @@ function SmallField({
         ) : (
           <>
             <TextInput value={value} onChangeText={onChangeText} style={styles.smallInput} keyboardType="number-pad" />
-            <Text style={styles.smallSuffix}>{suffix}</Text>
+            <Text style={styles.smallSuffix} numberOfLines={1}>{suffix}</Text>
           </>
         )}
       </View>
@@ -11779,11 +11779,12 @@ function AiMonthlyReportCard({
   canRefresh?: boolean;
   limitNotice?: string;
 }) {
-  const sourceLabel = report.source === 'gemini'
+  const isAiGenerated = report.source === 'gemini';
+  const sourceLabel = isAiGenerated
     ? 'AI生成'
     : report.source === 'fallback'
-      ? 'ローカル生成'
-      : '端末生成';
+      ? 'AI未接続・簡易版'
+      : '簡易プレビュー';
   const generatedDate = formatShortDateTime(report.generatedAt);
   const isLoading = status === 'loading';
 
@@ -11800,6 +11801,14 @@ function AiMonthlyReportCard({
       </View>
       <Text style={styles.aiReportMood}>{report.mood}</Text>
       <Text style={styles.aiReportSummary}>{report.summary}</Text>
+      {!isAiGenerated ? (
+        <View style={styles.aiReportLimitNotice}>
+          <Ionicons name="alert-circle-outline" size={14} color={ORANGE} />
+          <Text style={styles.aiReportLimitNoticeText}>
+            この内容はAI生成ではありません。AIへの接続が完了しなかったため、履歴を端末内で集計した簡易版です。再生成しても月1回のAI生成枠は消費しません。
+          </Text>
+        </View>
+      ) : null}
       {limitNotice ? (
         <View style={styles.aiReportLimitNotice}>
           <Ionicons name="lock-closed-outline" size={14} color={ORANGE} />
@@ -11844,7 +11853,7 @@ function AiMonthlyReportCard({
       </View>
 
       <View style={styles.aiReportSection}>
-        <Text style={styles.aiReportSectionTitle}>AIからの提案</Text>
+        <Text style={styles.aiReportSectionTitle}>{isAiGenerated ? 'AIからの提案' : '履歴からの提案'}</Text>
         {report.recommendations.map((item, index) => (
           <View key={`${item}-${index}`} style={styles.aiReportListRow}>
             <Ionicons name="bulb-outline" size={15} color="#4f7f58" />
@@ -12711,8 +12720,9 @@ function AnalyticsTab({
         monthLabel: storedReport.monthLabel,
       });
       setAiReportGraphAnalytics(storedReport.analytics ?? null);
-      setAiReportUsed(true);
-      setAiReportStatus(storedReport.report.source === 'fallback' ? 'error' : 'ready');
+      const storedReportIsAiGenerated = storedReport.report.source === 'gemini';
+      setAiReportUsed(storedReportIsAiGenerated);
+      setAiReportStatus(storedReportIsAiGenerated ? 'ready' : 'error');
     });
 
     return () => {
@@ -12755,17 +12765,20 @@ function AnalyticsTab({
     setAiReport(nextReport);
     setAiReportPeriod({ year: reportYear, month: reportMonth, monthLabel: reportAnalytics.monthLabel });
     setAiReportGraphAnalytics(nextReportGraphAnalytics);
-    setAiReportUsed(true);
-    setAiReportStatus(nextReport.source === 'fallback' ? 'error' : 'ready');
+    const generatedByAi = nextReport.source === 'gemini';
+    setAiReportUsed(generatedByAi);
+    setAiReportStatus(generatedByAi ? 'ready' : 'error');
     setAiReportOpen(true);
-    void writeStoredAiMonthlyReport({
-      userId,
-      year: reportYear,
-      month: reportMonth,
-      monthLabel: reportAnalytics.monthLabel,
-      report: nextReport,
-      analytics: nextReportGraphAnalytics,
-    });
+    if (generatedByAi) {
+      void writeStoredAiMonthlyReport({
+        userId,
+        year: reportYear,
+        month: reportMonth,
+        monthLabel: reportAnalytics.monthLabel,
+        report: nextReport,
+        analytics: nextReportGraphAnalytics,
+      });
+    }
   }, [aiReportMonthEndUnlocked, aiReportStatus, apiBaseUrlCandidates, reportAnalytics, reportMonth, reportYear, savedAnalytics, userId]);
 
   const openAiReport = useCallback(() => {
@@ -12783,7 +12796,7 @@ function AnalyticsTab({
     if (!HIDE_PREMIUM && !aiReportMonthEndUnlocked) {
       return;
     }
-    if (!aiReportUsed && aiReportStatus === 'idle') {
+    if (!aiReportUsed && aiReportStatus !== 'loading') {
       void loadAiReport();
       return;
     }
@@ -12833,7 +12846,7 @@ function AnalyticsTab({
           analytics={aiReportMatchesCurrentAnalytics ? reportAnalytics : aiReportGraphAnalytics ?? undefined}
           status={aiReportStatus}
           onRefresh={loadAiReport}
-          canRefresh={false}
+          canRefresh={aiReport?.source !== 'gemini'}
           limitNotice={AI_REPORT_MONTHLY_NOTICE}
         />
       )}

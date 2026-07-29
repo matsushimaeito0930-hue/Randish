@@ -4663,12 +4663,16 @@ export const styles = StyleSheet.create({
   },
   smallInput: {
     flex: 1,
+    minWidth: 0,
     padding: 0,
     fontSize: 20,
     fontWeight: '900',
     color: INK,
   },
   smallSuffix: {
+    flexShrink: 0,
+    minWidth: 42,
+    textAlign: 'right',
     fontSize: 13,
     fontWeight: '900',
     color: '#8b8175',
@@ -12246,4 +12250,3 @@ export const styles = StyleSheet.create({
     color: ORANGE,
   },
 });
-

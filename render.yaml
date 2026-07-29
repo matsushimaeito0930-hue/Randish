@@ -37,7 +37,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: "gemini-1.5-flash"
+        value: "gemini-2.5-flash"
 
       # --- メール送信（Resend）---
       - key: RESEND_API_KEY
