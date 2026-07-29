@@ -427,6 +427,13 @@ export const randishApi = {
   getLastSuccessfulBaseUrl,
   setAuthToken,
 
+  warmAuth: (baseUrl: ApiBaseUrlInput) =>
+    request<void>(baseUrl, 'api/auth/ready', undefined, {
+      skipAuth: true,
+      timeoutMs: 15000,
+      totalTimeoutMs: 15000,
+    }),
+
   getRestaurants: (baseUrl: ApiBaseUrlInput, params?: RestaurantSearchParams) =>
     request<Restaurant[]>(baseUrl, 'api/restaurants', params),
 

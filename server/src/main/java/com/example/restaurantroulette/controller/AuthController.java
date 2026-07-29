@@ -39,6 +39,11 @@ public class AuthController {
     this.emailRegistrationService = emailRegistrationService;
   }
 
+  @GetMapping("/ready")
+  public ResponseEntity<Void> ready() {
+    return ResponseEntity.noContent().build();
+  }
+
   @PostMapping("/register")
   public EmailVerificationResponse register(@RequestBody UserCreateRequest request) {
     return emailRegistrationService.requestRegistration(request);

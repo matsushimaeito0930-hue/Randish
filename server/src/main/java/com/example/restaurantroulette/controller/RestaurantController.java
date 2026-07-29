@@ -41,11 +41,30 @@ public class RestaurantController {
       @RequestParam(required = false) Double latitude,
       @RequestParam(required = false) Double longitude,
       @RequestParam(required = false) Integer range,
-      @RequestParam(required = false) Integer radius) {
+      @RequestParam(required = false) Integer radius,
+      @RequestParam(required = false) Integer distanceMeters) {
     Double effectiveLatitude = latitude == null ? lat : latitude;
     Double effectiveLongitude = longitude == null ? lng : longitude;
     Integer effectiveRange = range == null && radius != null ? radiusToHotPepperRange(radius) : range;
-    return restaurantQueryService.search(area, genre, budgetMin, budgetMax, effectiveLatitude, effectiveLongitude, effectiveRange);
+    List<RestaurantResponse> restaurants = restaurantQueryService.search(
+        area,
+        genre,
+        budgetMin,
+        budgetMax,
+        effectiveLatitude,
+        effectiveLongitude,
+        effectiveRange);
+    if (effectiveLatitude == null || effectiveLongitude == null || distanceMeters == null || distanceMeters <= 0) {
+      return restaurants;
+    }
+    return restaurants.stream()
+        .filter(restaurant -> restaurant.latitude() != null && restaurant.longitude() != null)
+        .filter(restaurant -> distanceMeters(
+            effectiveLatitude,
+            effectiveLongitude,
+            restaurant.latitude(),
+            restaurant.longitude()) <= distanceMeters)
+        .toList();
   }
 
   @GetMapping("/random")
@@ -104,5 +123,18 @@ public class RestaurantController {
       return 4;
     }
     return 5;
+  }
+
+  private int distanceMeters(double fromLatitude, double fromLongitude, double toLatitude, double toLongitude) {
+    double earthRadiusMeters = 6_371_000;
+    double latitudeDelta = Math.toRadians(toLatitude - fromLatitude);
+    double longitudeDelta = Math.toRadians(toLongitude - fromLongitude);
+    double fromLatitudeRad = Math.toRadians(fromLatitude);
+    double toLatitudeRad = Math.toRadians(toLatitude);
+    double haversine = Math.sin(latitudeDelta / 2) * Math.sin(latitudeDelta / 2)
+        + Math.cos(fromLatitudeRad) * Math.cos(toLatitudeRad)
+        * Math.sin(longitudeDelta / 2) * Math.sin(longitudeDelta / 2);
+    return (int) Math.round(earthRadiusMeters * 2
+        * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine)));
   }
 }

@@ -52,6 +52,16 @@ public class RandomRestaurantService {
         request.longitude(),
         request.range(),
         RANDOM_CANDIDATE_POOL_LIMIT);
+    if (request.latitude() != null && request.longitude() != null && distanceMeters != null) {
+      candidates = candidates.stream()
+          .filter(restaurant -> restaurant.latitude() != null && restaurant.longitude() != null)
+          .filter(restaurant -> distanceMeters(
+              request.latitude(),
+              request.longitude(),
+              restaurant.latitude(),
+              restaurant.longitude()) <= distanceMeters)
+          .toList();
+    }
     if (candidates.isEmpty()) {
       throw new NotFoundException("No restaurants match the requested conditions.");
     }
@@ -64,7 +74,16 @@ public class RandomRestaurantService {
     List<Restaurant> preferredCandidates = candidates.stream()
         .filter(restaurant -> !recentRestaurantIds.contains(historyKey(restaurant.externalProvider(), restaurant.externalId())))
         .toList();
-    List<Restaurant> lotteryPool = preferredCandidates.isEmpty() ? candidates : preferredCandidates;
+    List<Restaurant> freshCandidatePool = preferredCandidates.isEmpty() ? candidates : preferredCandidates;
+    List<Restaurant> freshCandidatesWithPhotos = freshCandidatePool.stream()
+        .filter(restaurant -> restaurant.photoUrl() != null && !restaurant.photoUrl().isBlank())
+        .toList();
+    List<Restaurant> allCandidatesWithPhotos = candidates.stream()
+        .filter(restaurant -> restaurant.photoUrl() != null && !restaurant.photoUrl().isBlank())
+        .toList();
+    List<Restaurant> lotteryPool = !freshCandidatesWithPhotos.isEmpty()
+        ? freshCandidatesWithPhotos
+        : !allCandidatesWithPhotos.isEmpty() ? allCandidatesWithPhotos : freshCandidatePool;
     Restaurant selected = lotteryPool.get(ThreadLocalRandom.current().nextInt(lotteryPool.size()));
 
     restaurantQueryService.cacheForUserAction(selected);
@@ -87,5 +106,18 @@ public class RandomRestaurantService {
     return "%s:%s".formatted(
         provider == null ? "" : provider.trim().toUpperCase(),
         providerPlaceId == null ? "" : providerPlaceId.trim());
+  }
+
+  private int distanceMeters(double fromLatitude, double fromLongitude, double toLatitude, double toLongitude) {
+    double earthRadiusMeters = 6_371_000;
+    double latitudeDelta = Math.toRadians(toLatitude - fromLatitude);
+    double longitudeDelta = Math.toRadians(toLongitude - fromLongitude);
+    double fromLatitudeRad = Math.toRadians(fromLatitude);
+    double toLatitudeRad = Math.toRadians(toLatitude);
+    double haversine = Math.sin(latitudeDelta / 2) * Math.sin(latitudeDelta / 2)
+        + Math.cos(fromLatitudeRad) * Math.cos(toLatitudeRad)
+        * Math.sin(longitudeDelta / 2) * Math.sin(longitudeDelta / 2);
+    return (int) Math.round(earthRadiusMeters * 2
+        * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine)));
   }
 }

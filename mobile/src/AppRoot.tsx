@@ -24,7 +24,7 @@ import {
   View,
 } from 'react-native';
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
-import type { ApiUsageResponse, AuthResponse, CandidatePlace, Favorite as ApiFavorite, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory } from './services/randishApi';
+import type { ApiUsageResponse, AuthResponse, CandidatePlace, Favorite as ApiFavorite, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory, RestaurantSearchParams } from './services/randishApi';
 import { sendManagementDrawEvent } from './services/managementEvents';
 import {
   getNativeBillingSetupMessage,
@@ -464,6 +464,12 @@ const isAuthTokenExpiredError = (error: unknown) =>
   error instanceof RandishApiError
   && error.kind === 'http'
   && (error.status === 401 || error.status === 403);
+
+const isTransientAuthRestoreError = (error: unknown) =>
+  isApiConnectivityError(error)
+  || (error instanceof RandishApiError
+    && error.kind === 'http'
+    && (error.status === 429 || (error.status != null && error.status >= 500)));
 
 const isOAuthCallbackUrl = (url: string) =>
   url.startsWith(NATIVE_OAUTH_REDIRECT_URI) || url.includes('/auth/callback');
@@ -2966,11 +2972,13 @@ const pickCandidateFromPool = (candidates: CandidatePlace[], usedIds: string[], 
     return { selected: null, nextUsedIds: usedIds };
   }
 
+  const candidatesWithPhotos = candidates.filter((candidate) => Boolean(candidate.photoUrl?.trim()));
+  const preferredCandidates = candidatesWithPhotos.length ? candidatesWithPhotos : candidates;
   const used = new Set(usedIds);
-  let pool = candidates.filter((candidate) => !used.has(candidate.id));
+  let pool = preferredCandidates.filter((candidate) => !used.has(candidate.id));
   if (pool.length === 0) {
     used.clear();
-    pool = candidates;
+    pool = preferredCandidates;
   }
   if (pool.length > 1 && lastSelectedId) {
     const different = pool.filter((candidate) => candidate.id !== lastSelectedId);
@@ -2978,7 +2986,7 @@ const pickCandidateFromPool = (candidates: CandidatePlace[], usedIds: string[], 
       pool = different;
     }
   }
-  const selected = pool[Math.floor(Math.random() * pool.length)] ?? candidates[0];
+  const selected = pool[Math.floor(Math.random() * pool.length)] ?? preferredCandidates[0];
   return {
     selected,
     nextUsedIds: [...used, selected.id],
@@ -4634,7 +4642,11 @@ const filterMockRestaurants = (genre: string, area: string, budgetMin: string, b
 
 const includesAny = (source: string, keywords: string[]) => keywords.some((keyword) => source.includes(keyword));
 
-const pickRandomRestaurant = (items: Restaurant[]) => items[Math.floor(Math.random() * items.length)];
+const pickRandomRestaurant = (items: Restaurant[]) => {
+  const itemsWithPhotos = items.filter((item) => Boolean(item.photoUrl?.trim()));
+  const preferredItems = itemsWithPhotos.length ? itemsWithPhotos : items;
+  return preferredItems[Math.floor(Math.random() * preferredItems.length)];
+};
 
 const pickFreshRestaurant = (items: Restaurant[], recentIds: Set<string>, currentId?: string) => {
   const freshItems = items.filter((item) => !recentIds.has(item.id));
@@ -5167,6 +5179,7 @@ export default function App() {
     ]).start();
 
     const restoreAuthSession = async () => {
+      void randishApi.warmAuth(apiBaseUrlCandidates).catch(() => undefined);
       await new Promise((resolve) => setTimeout(resolve, 900));
       if (cancelled) {
         return;
@@ -5179,6 +5192,13 @@ export default function App() {
       }
 
       randishApi.setAuthToken(storedSession.accessToken);
+      const continueWithStoredSession = () => {
+        if (cancelled || !storedSession.userId) {
+          return false;
+        }
+        enterMain(storedSession.userId, storedSession.displayName);
+        return true;
+      };
       try {
         const auth = await randishApi.getCurrentUser(apiBaseUrlCandidates);
         if (cancelled) {
@@ -5202,14 +5222,18 @@ export default function App() {
             syncWorkingApiBaseUrl();
             await enterAuthenticatedSession(refreshedAuth, refreshedAccessToken, refreshedAuth.refreshToken ?? storedSession.refreshToken);
             return;
-          } catch {
-            // Fall through to clearing the stale session.
+          } catch (refreshError) {
+            if (isTransientAuthRestoreError(refreshError) && continueWithStoredSession()) {
+              return;
+            }
+            // A definitive refresh failure falls through to clearing the stale session.
           }
         }
-        randishApi.setAuthToken(null);
-        if (!isApiConnectivityError(error)) {
-          await clearStoredAuthSession();
+        if (isTransientAuthRestoreError(error) && continueWithStoredSession()) {
+          return;
         }
+        randishApi.setAuthToken(null);
+        await clearStoredAuthSession();
         if (!cancelled) {
           setStage('login');
         }
@@ -5220,7 +5244,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [apiBaseUrlCandidates, enterAuthenticatedSession, logoOpacity, logoScale, syncWorkingApiBaseUrl]);
+  }, [apiBaseUrlCandidates, enterAuthenticatedSession, enterMain, logoOpacity, logoScale, syncWorkingApiBaseUrl]);
 
   const apiParams = useMemo(
     () => {
@@ -5281,6 +5305,101 @@ export default function App() {
       return null;
     }
   }, [apiBaseUrlCandidates, area, conditionRandom.genre, genre, previewApiParams, syncWorkingApiBaseUrl]);
+
+  const loadDrawNoMatchDiagnosis = useCallback(async (params: RestaurantSearchParams) => {
+    const cleanGenre = genre.trim();
+    const numericBudget = Number(budgetMax.replace(/,/g, ''));
+    const hasGenre = Boolean(cleanGenre && cleanGenre !== 'すべて');
+    const hasBudget = Boolean(budgetMax.trim() && Number.isFinite(numericBudget) && numericBudget > 0);
+    const hasDistance = Boolean(distance.trim() && params.latitude != null && params.longitude != null);
+    const rawAreaLabel = travelDisplayArea?.trim() || areaRef.current.trim() || '現在地';
+    const areaLabel = rawAreaLabel === '現在地'
+      ? `${userLocationRef.current?.label?.trim() || '現在地'}周辺`
+      : rawAreaLabel;
+    const distanceScope = hasDistance ? `${areaLabel}の${distance}以内` : areaLabel;
+    const requestHasCandidates = async (probeParams: RestaurantSearchParams) => {
+      try {
+        const candidates = await randishApi.getRestaurants(apiBaseUrlCandidates, probeParams);
+        syncWorkingApiBaseUrl();
+        return candidates.length > 0;
+      } catch {
+        return false;
+      }
+    };
+    const withoutDistance = {
+      ...params,
+      range: undefined,
+      distanceMeters: undefined,
+    };
+
+    if (hasDistance && await requestHasCandidates(withoutDistance)) {
+      return {
+        message: `${distanceScope}には、現在のジャンル・予算に合うお店はありません。`,
+        details: [
+          `距離条件: ${distanceScope}では0件です。`,
+          '距離を広げると、同じジャンル・予算の候補があります。',
+        ],
+      };
+    }
+
+    if (hasGenre && await requestHasCandidates({ ...params, genre: undefined })) {
+      return {
+        message: `${distanceScope}には「${cleanGenre}」のお店はありません。`,
+        details: [
+          `ジャンル条件: 「${cleanGenre}」では0件です。`,
+          'ジャンルを外すと、この範囲内に候補があります。',
+        ],
+      };
+    }
+
+    if (hasBudget && await requestHasCandidates({ ...params, budgetMin: undefined, budgetMax: undefined })) {
+      return {
+        message: `${distanceScope}には${numericBudget.toLocaleString('ja-JP')}円以内のお店はありません。`,
+        details: [
+          `予算条件: ${numericBudget.toLocaleString('ja-JP')}円以内では0件です。`,
+          '予算の上限を外すと、この範囲内に候補があります。',
+        ],
+      };
+    }
+
+    const withoutGenreOrBudget = {
+      ...params,
+      genre: undefined,
+      budgetMin: undefined,
+      budgetMax: undefined,
+    };
+    if (await requestHasCandidates(withoutGenreOrBudget)) {
+      return {
+        message: `${distanceScope}には、選んだジャンルと予算を両方満たすお店はありません。`,
+        details: [
+          '組み合わせ条件: ジャンルと予算を同時に指定すると0件です。',
+          'ジャンルか予算のどちらかを広げると候補があります。',
+        ],
+      };
+    }
+
+    if (hasDistance && await requestHasCandidates({
+      ...withoutGenreOrBudget,
+      range: undefined,
+      distanceMeters: undefined,
+    })) {
+      return {
+        message: `${distanceScope}には検索できるお店がありません。`,
+        details: [
+          `エリア・距離条件: ${distanceScope}では0件です。`,
+          '距離を広げると候補があります。',
+        ],
+      };
+    }
+
+    return {
+      message: `${areaLabel}には、現在検索できるお店がありません。`,
+      details: [
+        `エリア条件: ${areaLabel}では0件です。`,
+        '別の駅・市区町村または現在地を選んでください。',
+      ],
+    };
+  }, [apiBaseUrlCandidates, budgetMax, distance, genre, syncWorkingApiBaseUrl, travelDisplayArea]);
 
   const loadRestaurants = useCallback(async () => {
     setIsLoading(true);
@@ -5749,28 +5868,29 @@ export default function App() {
       }
       setSelectedRestaurant(null);
       logApiUiError('condition draw failed', error, apiBaseUrlCandidates);
-      const diagnosticMessage = isApiConnectivityError(error) ? null : await loadGenreDiagnosticMessage();
       const noMatchError = isNoRestaurantMatchError(error) || toDebugErrorMessage(error).includes('候補が見つかりません');
-      const messageText = isTravelDraw && noMatchError
-        ? 'この旅先は候補が少なすぎました。もう一度押すと別の旅先で探せます。'
-        : noMatchError
-          ? diagnosticMessage ?? '条件に合う候補が見つかりませんでした。距離・予算・ジャンルを少し広げてください。'
-          : diagnosticMessage ?? API_DRAW_MESSAGE;
-      setDrawFailureDetails(buildDrawFailureDetails({
+      const noMatchDiagnosis = noMatchError
+        ? await loadDrawNoMatchDiagnosis(effectiveDrawApiParams)
+        : null;
+      const diagnosticMessage = !noMatchError && !isApiConnectivityError(error)
+        ? await loadGenreDiagnosticMessage()
+        : null;
+      const messageText = noMatchDiagnosis?.message ?? diagnosticMessage ?? API_DRAW_MESSAGE;
+      setDrawFailureDetails(noMatchDiagnosis?.details ?? buildDrawFailureDetails({
         area,
         genre,
         budgetMax,
         distance,
         conditionRandom,
         diagnosticMessage,
-        apiMessage: noMatchError ? null : messageText,
-        mode: noMatchError ? 'noMatch' : 'apiError',
+        apiMessage: messageText,
+        mode: 'apiError',
       }));
       setMessage(messageText);
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, area, budgetMax, conditionRandom, distance, drawApiParams, drawMode, genre, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
+  }, [apiBaseUrlCandidates, area, budgetMax, conditionRandom, distance, drawApiParams, drawMode, genre, loadDrawNoMatchDiagnosis, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
@@ -5980,18 +6100,16 @@ export default function App() {
 
       const cacheEntry = await loadCandidatePool(query);
       if (cacheEntry.candidates.length === 0) {
+        const diagnosis = await loadDrawNoMatchDiagnosis({
+          ...drawApiParams,
+          latitude: query.center.latitude,
+          longitude: query.center.longitude,
+          distanceMeters: query.radius,
+        });
         setMapRouletteStatus('empty');
-        setMapRouletteError('条件に合う店舗が見つかりませんでした。');
-        setDrawFailureDetails(buildDrawFailureDetails({
-          area: areaRef.current,
-          genre,
-          budgetMax,
-          distance,
-          conditionRandom,
-          centerLabel: query.center.label,
-          mode: 'noMatch',
-        }));
-        setMessage('条件に合う店舗が見つかりませんでした。距離を広げるか、条件を減らしてください。');
+        setMapRouletteError(diagnosis.message);
+        setDrawFailureDetails(diagnosis.details);
+        setMessage(diagnosis.message);
         setIsLoading(false);
         return;
       }
@@ -6133,9 +6251,11 @@ export default function App() {
     buildCandidateQuery,
     conditionRandom,
     distance,
+    drawApiParams,
     drawMode,
     genre,
     loadCandidatePool,
+    loadDrawNoMatchDiagnosis,
     mapPinBounce,
     mapPinProgress,
     mapRouletteStatus,
@@ -6187,16 +6307,15 @@ export default function App() {
           setDrawFailureDetails([]);
           setMessage(`${query.center.label} 周辺に${cacheEntry.candidates.length}件の候補を表示しました。STARTで一店を選びます。`);
         } else {
-          setMapRouletteError('条件に合う店舗が見つかりませんでした。');
-          setDrawFailureDetails(buildDrawFailureDetails({
-            area: areaRef.current,
-            genre,
-            budgetMax,
-            distance,
-            conditionRandom,
-            centerLabel: query.center.label,
-            mode: 'noMatch',
-          }));
+          const diagnosis = await loadDrawNoMatchDiagnosis({
+            ...drawApiParams,
+            latitude: query.center.latitude,
+            longitude: query.center.longitude,
+            distanceMeters: query.radius,
+          });
+          setMapRouletteError(diagnosis.message);
+          setDrawFailureDetails(diagnosis.details);
+          setMessage(diagnosis.message);
         }
       } catch (error) {
         if (cancelled) {
@@ -6234,9 +6353,11 @@ export default function App() {
     buildCandidateQuery,
     conditionRandom,
     distance,
+    drawApiParams,
     drawMode,
     genre,
     loadCandidatePool,
+    loadDrawNoMatchDiagnosis,
     mapPinBounce,
     mapPinProgress,
   ]);

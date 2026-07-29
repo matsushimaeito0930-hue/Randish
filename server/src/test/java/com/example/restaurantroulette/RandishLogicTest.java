@@ -126,6 +126,115 @@ class RandishLogicTest {
   }
 
   @Test
+  void randomAppliesExactDistanceMeters() {
+    RestaurantQueryService queryService = Mockito.mock(RestaurantQueryService.class);
+    RandomHistoryService historyService = Mockito.mock(RandomHistoryService.class);
+    Restaurant near = new Restaurant(
+        "near",
+        "HOTPEPPER",
+        "near",
+        "Near restaurant",
+        "Tokyo",
+        "cafe",
+        1000,
+        2000,
+        0,
+        0,
+        "near",
+        "https://example.com/near.jpg",
+        "",
+        35.68125,
+        139.7671);
+    Restaurant far = new Restaurant(
+        "far",
+        "HOTPEPPER",
+        "far",
+        "Far restaurant",
+        "Tokyo",
+        "cafe",
+        1000,
+        2000,
+        0,
+        0,
+        "far",
+        "https://example.com/far.jpg",
+        "",
+        35.6912,
+        139.7671);
+    Mockito.when(queryService.searchRandomEntities(null, "cafe", 0, 2000, 35.6812, 139.7671, 1, 360))
+        .thenReturn(List.of(near, far));
+    RandomRestaurantService service = new RandomRestaurantService(queryService, historyService, mapper, validationService);
+
+    var selected = service.choose(new RandomRestaurantRequest(
+        ValidationService.GUEST_USER_ID,
+        null,
+        "cafe",
+        0,
+        2000,
+        35.6812,
+        139.7671,
+        1,
+        100));
+
+    assertThat(selected.id()).isEqualTo("near");
+  }
+
+  @Test
+  void randomPrefersCandidateWithDisplayablePhoto() {
+    RestaurantQueryService queryService = Mockito.mock(RestaurantQueryService.class);
+    RandomHistoryService historyService = Mockito.mock(RandomHistoryService.class);
+    Restaurant withoutPhoto = new Restaurant(
+        "without-photo",
+        "GEOAPIFY",
+        "without-photo",
+        "No photo",
+        "Tokyo",
+        "cafe",
+        1000,
+        2000,
+        0,
+        0,
+        "address",
+        null,
+        "",
+        35.6812,
+        139.7671);
+    Restaurant withPhoto = new Restaurant(
+        "with-photo",
+        "HOTPEPPER",
+        "with-photo",
+        "With photo",
+        "Tokyo",
+        "cafe",
+        1000,
+        2000,
+        0,
+        0,
+        "address",
+        "https://example.com/photo.jpg",
+        "",
+        35.6812,
+        139.7671);
+    Mockito.when(queryService.searchRandomEntities(null, "cafe", 0, 2000, null, null, null, 360))
+        .thenReturn(List.of(withoutPhoto, withPhoto));
+    RandomRestaurantService service = new RandomRestaurantService(queryService, historyService, mapper, validationService);
+
+    var selected = service.choose(new RandomRestaurantRequest(
+        ValidationService.GUEST_USER_ID,
+        null,
+        "cafe",
+        0,
+        2000,
+        null,
+        null,
+        null,
+        null));
+
+    assertThat(selected.id()).isEqualTo("with-photo");
+    assertThat(selected.photoUrl()).isEqualTo("https://example.com/photo.jpg");
+  }
+
+  @Test
   void registerUserPersistsInDatabase() {
     var user = userService.register(new UserCreateRequest("RANDISH@example.com", "password123", "Randish User"));
     var found = userService.findById(user.id());
