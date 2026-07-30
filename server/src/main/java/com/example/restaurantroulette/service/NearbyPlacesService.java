@@ -32,7 +32,6 @@ public class NearbyPlacesService {
   private static final int DEFAULT_CACHE_TTL_SECONDS = 600;
   private static final int DEFAULT_CACHE_DISTANCE_METERS = 300;
   private static final int DEFAULT_MAX_RESULTS = 20;
-  private static final int GOOGLE_FALLBACK_MIN_RESTAURANT_CANDIDATES = 10;
 
   private final GooglePlacesEnrichmentService googlePlacesEnrichmentService;
   private final RestaurantQueryService restaurantQueryService;
@@ -107,7 +106,8 @@ public class NearbyPlacesService {
     NearbyCacheKey cacheKey = NearbyCacheKey.from(normalized, premium);
     cleanupExpired(cacheKey);
 
-    Optional<NearbyCacheEntry> cached = findCacheEntry(cacheKey, normalized);
+    boolean googleSearchAvailable = googlePlacesEnrichmentService.isAvailable();
+    Optional<NearbyCacheEntry> cached = googleSearchAvailable ? Optional.empty() : findCacheEntry(cacheKey, normalized);
     if (cached.isPresent()) {
       NearbyCacheEntry entry = cached.get();
       logger.info("[RANDISH_PLACES] cache hit key={} ageSeconds={} distanceMeters={}",
@@ -128,17 +128,15 @@ public class NearbyPlacesService {
     }
 
     List<CandidatePlaceResponse> googlePlaces = List.of();
-    if (premium
-        && restaurantPlaces.size() < GOOGLE_FALLBACK_MIN_RESTAURANT_CANDIDATES
-        && googlePlacesEnrichmentService.isAvailable()) {
-      logger.info("[RANDISH_PLACES] google fallback nearby search key={} radius={} category={} openNow={} currentCount={}",
+    if (googleSearchAvailable) {
+      logger.info("[RANDISH_PLACES] google photo enrichment search key={} radius={} category={} openNow={} currentCount={}",
           cacheKey,
           normalized.radius(),
           normalized.category(),
           normalized.openNow(),
           restaurantPlaces.size());
-      googlePlaces = searchGooglePlaces(normalized, maxResults - restaurantPlaces.size());
-    } else if (premium && !googlePlacesEnrichmentService.isAvailable() && restaurantPlaces.isEmpty()) {
+      googlePlaces = searchGooglePlaces(normalized, maxResults);
+    } else if (restaurantPlaces.isEmpty()) {
       logger.info("[RANDISH_PLACES] no restaurant provider candidates while Google Places is unavailable");
     }
 
@@ -156,11 +154,13 @@ public class NearbyPlacesService {
         Instant.now(),
         source,
         List.copyOf(places));
-    cache.compute(cacheKey, (key, entries) -> {
-      List<NearbyCacheEntry> nextEntries = entries == null ? new ArrayList<>() : new ArrayList<>(entries);
-      nextEntries.add(entry);
-      return nextEntries;
-    });
+    if (!googleSearchAvailable) {
+      cache.compute(cacheKey, (key, entries) -> {
+        List<NearbyCacheEntry> nextEntries = entries == null ? new ArrayList<>() : new ArrayList<>(entries);
+        nextEntries.add(entry);
+        return nextEntries;
+      });
+    }
 
     return new NearbyPlacesResponse(
         entry.places(),
@@ -267,11 +267,42 @@ public class NearbyPlacesService {
 
   private void appendUniqueCandidates(List<CandidatePlaceResponse> merged, List<CandidatePlaceResponse> candidates) {
     for (CandidatePlaceResponse candidate : candidates) {
-      boolean duplicate = merged.stream().anyMatch(existing -> isSameCandidate(existing, candidate));
-      if (!duplicate) {
+      int duplicateIndex = -1;
+      for (int index = 0; index < merged.size(); index++) {
+        if (isSameCandidate(merged.get(index), candidate)) {
+          duplicateIndex = index;
+          break;
+        }
+      }
+      if (duplicateIndex < 0) {
         merged.add(candidate);
+      } else {
+        merged.set(duplicateIndex, mergeCandidatePhoto(merged.get(duplicateIndex), candidate));
       }
     }
+  }
+
+  private CandidatePlaceResponse mergeCandidatePhoto(CandidatePlaceResponse primary, CandidatePlaceResponse supplement) {
+    boolean needsPhoto = primary.photoUrl() == null || primary.photoUrl().isBlank();
+    if (!needsPhoto || supplement.photoUrl() == null || supplement.photoUrl().isBlank()) {
+      return primary;
+    }
+    return new CandidatePlaceResponse(
+        primary.id(),
+        primary.provider(),
+        primary.providerPlaceId(),
+        primary.name(),
+        primary.latitude(),
+        primary.longitude(),
+        primary.categories(),
+        primary.rating(),
+        primary.priceLevel(),
+        primary.openNow() == null ? supplement.openNow() : primary.openNow(),
+        primary.address(),
+        primary.distanceMeters(),
+        supplement.googleMapsUri() == null ? primary.googleMapsUri() : supplement.googleMapsUri(),
+        supplement.photoUrl(),
+        supplement.photoAttributions() == null ? List.of() : supplement.photoAttributions());
   }
 
   private String nearbySource(List<CandidatePlaceResponse> restaurantPlaces, List<CandidatePlaceResponse> googlePlaces) {
@@ -379,7 +410,8 @@ public class NearbyPlacesService {
         distance,
         "https://www.google.com/maps/search/?api=1&query="
             + URLEncoder.encode((restaurant.name() + " " + address).trim(), StandardCharsets.UTF_8),
-        restaurant.photoUrl());
+        restaurant.photoUrl(),
+        List.of());
   }
 
   private Integer parseBudgetMax(String priceRange) {
@@ -461,7 +493,8 @@ public class NearbyPlacesService {
           "開発用モック住所 " + (index + 1),
           distanceMeters(request.latitude(), request.longitude(), latitude, longitude),
           "https://www.google.com/maps/search/?api=1&query=" + names[index][0],
-          null));
+          null,
+          List.of()));
     }
     return places.stream()
         .filter(place -> place.distanceMeters() == null || place.distanceMeters() <= request.radius())

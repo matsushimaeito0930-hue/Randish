@@ -20,6 +20,12 @@ export type Restaurant = {
   nextOpenTime?: string | null;
   nextCloseTime?: string | null;
   googlePlaceId?: string | null;
+  photoAttributions?: PhotoAttribution[];
+};
+
+export type PhotoAttribution = {
+  displayName: string;
+  uri?: string | null;
 };
 
 export type RestaurantSearchParams = {
@@ -52,6 +58,7 @@ export type CandidatePlace = {
   distanceMeters?: number | null;
   googleMapsUri?: string | null;
   photoUrl?: string | null;
+  photoAttributions?: PhotoAttribution[];
 };
 
 export type NearbyPlacesParams = {

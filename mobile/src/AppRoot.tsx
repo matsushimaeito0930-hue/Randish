@@ -2964,6 +2964,7 @@ const candidatePlaceToRestaurant = (place: CandidatePlace, area: string, genre: 
     googleMapsUri: place.googleMapsUri ?? null,
     openNow: place.openNow ?? null,
     googlePlaceId: provider === 'GOOGLE_PLACES' ? providerPlaceId : null,
+    photoAttributions: place.photoAttributions ?? [],
   };
 };
 
@@ -13142,7 +13143,16 @@ function RestaurantVisual({
   const genreVisual = getGenreVisual(restaurant.genre);
   const externalPhotoUrl = allowExternalPhoto ? restaurant.photoUrl : null;
   const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
-  const imageCredit = restaurant.externalProvider === 'HOTPEPPER' ? '画像提供：ホットペッパー グルメ' : null;
+  const googlePhotoAttributions = restaurant.photoAttributions ?? [];
+  const imageCredit = restaurant.externalProvider === 'HOTPEPPER'
+    ? '画像提供：ホットペッパー グルメ'
+    : googlePhotoAttributions.length > 0
+      ? `写真：${googlePhotoAttributions.map((attribution) => attribution.displayName).join(' / ')}（Google Maps）`
+      : restaurant.externalProvider === 'GOOGLE_PLACES'
+        ? '画像提供：Google Maps'
+        : null;
+  const imageCreditUrl = googlePhotoAttributions.find((attribution) => Boolean(attribution.uri))?.uri
+    ?? (restaurant.externalProvider === 'GOOGLE_PLACES' ? restaurant.googleMapsUri : null);
 
   useEffect(() => {
     setPhotoLoadFailed(false);
@@ -13158,9 +13168,15 @@ function RestaurantVisual({
           onError={() => setPhotoLoadFailed(true)}
         />
         {large && imageCredit && (
-          <Text style={styles.hotpepperImageCredit} numberOfLines={1}>
-            {imageCredit}
-          </Text>
+          <Pressable
+            style={styles.hotpepperImageCredit}
+            disabled={!imageCreditUrl}
+            onPress={() => imageCreditUrl && Linking.openURL(imageCreditUrl)}
+            accessibilityRole={imageCreditUrl ? 'link' : undefined}
+            accessibilityLabel={imageCredit}
+          >
+            <Text style={styles.placePhotoCreditText} numberOfLines={1}>{imageCredit}</Text>
+          </Pressable>
         )}
       </View>
     );

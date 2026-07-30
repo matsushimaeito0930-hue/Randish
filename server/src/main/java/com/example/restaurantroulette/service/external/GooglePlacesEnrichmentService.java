@@ -2,6 +2,7 @@ package com.example.restaurantroulette.service.external;
 
 import com.example.restaurantroulette.dto.ApiDtos.CandidatePlaceResponse;
 import com.example.restaurantroulette.dto.ApiDtos.NearbyPlacesRequest;
+import com.example.restaurantroulette.dto.ApiDtos.PhotoAttributionResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.entity.Restaurant;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -47,6 +48,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "places.types",
       "places.priceLevel",
       "places.photos.name",
+      "places.photos.authorAttributions",
       "places.googleMapsUri",
       "places.currentOpeningHours.openNow",
       "places.currentOpeningHours.nextOpenTime",
@@ -59,6 +61,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "places.rating",
       "places.types",
       "places.priceLevel",
+      "places.photos.name",
+      "places.photos.authorAttributions",
       "places.googleMapsUri",
       "places.currentOpeningHours.openNow");
   private static final String BUSINESS_STATUS_FIELD_MASK = String.join(",",
@@ -76,6 +80,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "types",
       "priceLevel",
       "photos.name",
+      "photos.authorAttributions",
       "googleMapsUri",
       "currentOpeningHours.openNow",
       "currentOpeningHours.nextOpenTime",
@@ -446,6 +451,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
         return restaurant;
       }
 
+      boolean hasExistingPhoto = restaurant.photoUrl() != null && !restaurant.photoUrl().isBlank();
+
       return new RestaurantResponse(
           restaurant.id(),
           restaurant.externalProvider(),
@@ -458,7 +465,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           place.rating() == null ? restaurant.rating() : place.rating(),
           restaurant.minutes(),
           place.formattedAddress() == null ? restaurant.address() : place.formattedAddress(),
-          restaurant.photoUrl() == null ? googlePhotoUrl(place) : restaurant.photoUrl(),
+          hasExistingPhoto ? restaurant.photoUrl() : googlePhotoUrl(place),
           restaurant.note(),
           place.location() == null || place.location().latitude() == null ? restaurant.latitude() : place.location().latitude(),
           place.location() == null || place.location().longitude() == null ? restaurant.longitude() : place.location().longitude(),
@@ -467,7 +474,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           place.currentOpeningHours() == null ? null : place.currentOpeningHours().openNow(),
           place.currentOpeningHours() == null ? null : place.currentOpeningHours().nextOpenTime(),
           place.currentOpeningHours() == null ? null : place.currentOpeningHours().nextCloseTime(),
-          place.id());
+          place.id(),
+          hasExistingPhoto ? restaurant.photoAttributions() : googlePhotoAttributions(place));
     } catch (RuntimeException exception) {
       logger.warn("Google Places enrichment failed for restaurant: {}", restaurant.name(), exception);
       return restaurant;
@@ -527,6 +535,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           .toEntity(byte[].class);
       MediaType contentType = image.getHeaders().getContentType();
       return ResponseEntity.ok()
+          .header("Cache-Control", "no-store")
           .contentType(contentType == null ? MediaType.IMAGE_JPEG : contentType)
           .body(image.getBody());
     } catch (RuntimeException exception) {
@@ -634,7 +643,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
         place.formattedAddress(),
         distanceMeters,
         place.googleMapsUri(),
-        null));
+        googlePhotoUrl(place),
+        googlePhotoAttributions(place)));
   }
 
   private String buildNearbyTextQuery(String category) {
@@ -693,7 +703,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           hours == null ? null : hours.openNow(),
           hours == null ? null : hours.nextOpenTime(),
           hours == null ? null : hours.nextCloseTime(),
-          place.id());
+          place.id(),
+          restaurant.photoAttributions());
     } catch (RuntimeException exception) {
       logger.warn("Google Places business status enrichment failed for restaurant: {}", restaurant.name(), exception);
       return restaurant;
@@ -947,6 +958,35 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
     return "/api/google-places/photos?name=" + URLEncoder.encode(photoName, StandardCharsets.UTF_8);
   }
 
+  private List<PhotoAttributionResponse> googlePhotoAttributions(GooglePlace place) {
+    if (place == null || place.photos() == null || place.photos().isEmpty()) {
+      return List.of();
+    }
+    GooglePhoto photo = place.photos().getFirst();
+    if (photo.authorAttributions() == null) {
+      return List.of();
+    }
+    return photo.authorAttributions().stream()
+        .filter(attribution -> attribution != null
+            && attribution.displayName() != null
+            && !attribution.displayName().isBlank())
+        .map(attribution -> new PhotoAttributionResponse(
+            attribution.displayName().trim(),
+            normalizeAttributionUri(attribution.uri())))
+        .toList();
+  }
+
+  private String normalizeAttributionUri(String uri) {
+    if (uri == null || uri.isBlank()) {
+      return null;
+    }
+    String normalized = uri.trim();
+    if (normalized.startsWith("//")) {
+      return "https:" + normalized;
+    }
+    return normalized.startsWith("https://") ? normalized : null;
+  }
+
   private String restaurantGenre(String requestedGenre, String keyword) {
     if (!requestedGenre.isBlank() && !ALL_GENRES.equals(requestedGenre)) {
       return requestedGenre;
@@ -1161,7 +1201,11 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
-  private record GooglePhoto(String name) {
+  private record GooglePhoto(String name, List<GoogleAuthorAttribution> authorAttributions) {
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  private record GoogleAuthorAttribution(String displayName, String uri, String photoUri) {
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)

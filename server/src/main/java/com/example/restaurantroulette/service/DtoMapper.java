@@ -10,6 +10,7 @@ import com.example.restaurantroulette.entity.FavoriteRestaurant;
 import com.example.restaurantroulette.entity.RandomHistory;
 import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.entity.VisitCollection;
+import java.util.List;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -36,7 +37,8 @@ public class DtoMapper {
         null,
         null,
         null,
-        null);
+        null,
+        List.of());
   }
 
   public RandomHistoryResponse toRandomHistoryResponse(RandomHistory history, Restaurant restaurant) {

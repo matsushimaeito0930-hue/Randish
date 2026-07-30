@@ -5,10 +5,12 @@ import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.exception.NotFoundException;
+import com.example.restaurantroulette.service.external.GooglePlacesEnrichmentService;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -20,16 +22,28 @@ public class RandomRestaurantService {
   private final RandomHistoryService randomHistoryService;
   private final DtoMapper mapper;
   private final ValidationService validationService;
+  private final GooglePlacesEnrichmentService googlePlacesEnrichmentService;
+
+  @Autowired
+  public RandomRestaurantService(
+      RestaurantQueryService restaurantQueryService,
+      RandomHistoryService randomHistoryService,
+      DtoMapper mapper,
+      ValidationService validationService,
+      GooglePlacesEnrichmentService googlePlacesEnrichmentService) {
+    this.restaurantQueryService = restaurantQueryService;
+    this.randomHistoryService = randomHistoryService;
+    this.mapper = mapper;
+    this.validationService = validationService;
+    this.googlePlacesEnrichmentService = googlePlacesEnrichmentService;
+  }
 
   public RandomRestaurantService(
       RestaurantQueryService restaurantQueryService,
       RandomHistoryService randomHistoryService,
       DtoMapper mapper,
       ValidationService validationService) {
-    this.restaurantQueryService = restaurantQueryService;
-    this.randomHistoryService = randomHistoryService;
-    this.mapper = mapper;
-    this.validationService = validationService;
+    this(restaurantQueryService, randomHistoryService, mapper, validationService, null);
   }
 
   public RestaurantResponse choose(RandomRestaurantRequest request) {
@@ -99,7 +113,8 @@ public class RandomRestaurantService {
           request.budgetMax(),
           distanceMeters));
     }
-    return mapper.toRestaurantResponse(selected);
+    RestaurantResponse response = mapper.toRestaurantResponse(selected);
+    return googlePlacesEnrichmentService == null ? response : googlePlacesEnrichmentService.enrich(response);
   }
 
   private String historyKey(String provider, String providerPlaceId) {

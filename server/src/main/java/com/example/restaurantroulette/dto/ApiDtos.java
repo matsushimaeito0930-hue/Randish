@@ -30,7 +30,8 @@ public final class ApiDtos {
       Boolean openNow,
       String nextOpenTime,
       String nextCloseTime,
-      String googlePlaceId) {
+      String googlePlaceId,
+      List<PhotoAttributionResponse> photoAttributions) {
   }
 
   public record RestaurantSearchRequest(
@@ -79,7 +80,13 @@ public final class ApiDtos {
       String address,
       Integer distanceMeters,
       String googleMapsUri,
-      String photoUrl) {
+      String photoUrl,
+      List<PhotoAttributionResponse> photoAttributions) {
+  }
+
+  public record PhotoAttributionResponse(
+      String displayName,
+      String uri) {
   }
 
   public record NearbyPlacesResponse(

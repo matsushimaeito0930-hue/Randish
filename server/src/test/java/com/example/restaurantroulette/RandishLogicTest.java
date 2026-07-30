@@ -7,8 +7,10 @@ import com.example.restaurantroulette.dto.ApiDtos.AuthResponse;
 import com.example.restaurantroulette.dto.ApiDtos.CandidatePlaceResponse;
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.NearbyPlacesRequest;
+import com.example.restaurantroulette.dto.ApiDtos.PhotoAttributionResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
+import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.dto.ApiDtos.VisitCreateRequest;
@@ -217,7 +219,13 @@ class RandishLogicTest {
         139.7671);
     Mockito.when(queryService.searchRandomEntities(null, "cafe", 0, 2000, null, null, null, 360))
         .thenReturn(List.of(withoutPhoto, withPhoto));
-    RandomRestaurantService service = new RandomRestaurantService(queryService, historyService, mapper, validationService);
+    var enrichmentService = new CountingEnrichmentService();
+    RandomRestaurantService service = new RandomRestaurantService(
+        queryService,
+        historyService,
+        mapper,
+        validationService,
+        enrichmentService);
 
     var selected = service.choose(new RandomRestaurantRequest(
         ValidationService.GUEST_USER_ID,
@@ -232,6 +240,7 @@ class RandishLogicTest {
 
     assertThat(selected.id()).isEqualTo("with-photo");
     assertThat(selected.photoUrl()).isEqualTo("https://example.com/photo.jpg");
+    assertThat(enrichmentService.enrichCallCount).isEqualTo(1);
   }
 
   @Test
@@ -963,7 +972,7 @@ class RandishLogicTest {
   }
 
   @Test
-  void nearbyPlacesCacheAvoidsRepeatedProviderCallsForSamePool() {
+  void nearbyPlacesDoesNotCacheTemporaryGooglePhotoReferences() {
     var provider = new CountingNearbyPlacesProvider();
     var service = new NearbyPlacesService(provider, validationService, 600, 300, false, false, 20);
     var request = new NearbyPlacesRequest(35.681236, 139.767125, 1500, "ラーメン", null, false);
@@ -972,8 +981,8 @@ class RandishLogicTest {
     var second = service.search(new NearbyPlacesRequest(35.681336, 139.767225, 1500, "ラーメン", null, false), true);
 
     assertThat(first.cacheHit()).isFalse();
-    assertThat(second.cacheHit()).isTrue();
-    assertThat(provider.nearbyCallCount).isEqualTo(1);
+    assertThat(second.cacheHit()).isFalse();
+    assertThat(provider.nearbyCallCount).isEqualTo(2);
     assertThat(second.places()).extracting("id").containsExactly("nearby-test-1");
   }
 
@@ -989,18 +998,21 @@ class RandishLogicTest {
   }
 
   @Test
-  void nearbyPlacesDoesNotCallGoogleForFreeUsersAndSeparatesPremiumCache() {
+  void nearbyPlacesUsesGoogleForFreeUsersAndSeparatesPremiumCache() {
     var googleProvider = new CountingNearbyPlacesProvider();
     var service = new NearbyPlacesService(googleProvider, validationService, 600, 300, false, false, 20);
     var request = new NearbyPlacesRequest(35.681236, 139.767125, 1500, "ラーメン", null, true);
 
     var freeResponse = service.search(request, false);
-    var premiumResponse = service.search(request, true);
 
-    assertThat(freeResponse.places()).isEmpty();
+    assertThat(freeResponse.places()).extracting("id").containsExactly("nearby-test-1");
     assertThat(freeResponse.cacheHit()).isFalse();
     assertThat(googleProvider.nearbyCallCount).isEqualTo(1);
+
+    var premiumResponse = service.search(request, true);
+
     assertThat(premiumResponse.cacheHit()).isFalse();
+    assertThat(googleProvider.nearbyCallCount).isEqualTo(2);
     assertThat(premiumResponse.places()).extracting("id").containsExactly("nearby-test-1");
   }
 
@@ -1076,12 +1088,12 @@ class RandishLogicTest {
     assertThat(response.source()).isEqualTo("HYBRID_PLACES");
     assertThat(restaurantProvider.searchCallCount).isEqualTo(1);
     assertThat(googleProvider.nearbyCallCount).isEqualTo(1);
-    assertThat(googleProvider.lastMaxCandidates).isEqualTo(19);
+    assertThat(googleProvider.lastMaxCandidates).isEqualTo(20);
     assertThat(response.places()).extracting("id").containsExactly("geoapify-geo-test-1", "nearby-test-1");
   }
 
   @Test
-  void nearbyPlacesSkipsGoogleFallbackWhenRestaurantProvidersReturnEnoughCandidates() {
+  void nearbyPlacesStillUsesGoogleForPhotosWhenRestaurantProvidersReturnEnoughCandidates() {
     var googleProvider = new CountingNearbyPlacesProvider();
     var restaurantProvider = new BulkNearbyRestaurantProvider(10);
     var restaurantService = new RestaurantQueryService(
@@ -1101,10 +1113,39 @@ class RandishLogicTest {
 
     var response = service.search(new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false));
 
-    assertThat(response.source()).isEqualTo("RANDISH_RESTAURANTS");
+    assertThat(response.source()).isEqualTo("HYBRID_PLACES");
     assertThat(restaurantProvider.searchCallCount).isEqualTo(1);
-    assertThat(googleProvider.nearbyCallCount).isZero();
-    assertThat(response.places()).hasSize(10);
+    assertThat(googleProvider.nearbyCallCount).isEqualTo(1);
+    assertThat(response.places()).hasSize(11);
+  }
+
+  @Test
+  void nearbyPlacesCopiesGooglePhotoAndAttributionToMatchingNonHotPepperCandidate() {
+    var googleProvider = new MatchingNearbyPlacesProvider();
+    var restaurantProvider = new BulkNearbyRestaurantProvider(1);
+    var restaurantService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(restaurantProvider),
+        mapper,
+        validationService);
+    var service = new NearbyPlacesService(
+        googleProvider,
+        restaurantService,
+        validationService,
+        600,
+        300,
+        false,
+        false,
+        20);
+
+    var response = service.search(new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false));
+
+    assertThat(response.places()).hasSize(1);
+    assertThat(response.places().getFirst().provider()).isEqualTo("GEOAPIFY");
+    assertThat(response.places().getFirst().photoUrl()).isEqualTo("/api/google-places/photos?name=test-photo");
+    assertThat(response.places().getFirst().photoAttributions())
+        .extracting(PhotoAttributionResponse::displayName)
+        .containsExactly("Photo Author");
   }
 
   @Test
@@ -1222,7 +1263,53 @@ class RandishLogicTest {
           "東京都千代田区丸の内",
           0,
           "https://www.google.com/maps/search/?api=1&query=Nearby%20Test",
-          null));
+          null,
+          List.of()));
+    }
+  }
+
+  private static class CountingEnrichmentService extends GooglePlacesEnrichmentService {
+    private int enrichCallCount;
+
+    private CountingEnrichmentService() {
+      super(RestClient.builder());
+    }
+
+    @Override
+    public RestaurantResponse enrich(RestaurantResponse restaurant) {
+      enrichCallCount++;
+      return restaurant;
+    }
+  }
+
+  private static class MatchingNearbyPlacesProvider extends GooglePlacesEnrichmentService {
+    private MatchingNearbyPlacesProvider() {
+      super(RestClient.builder());
+    }
+
+    @Override
+    public boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    public List<CandidatePlaceResponse> searchNearbyCandidates(NearbyPlacesRequest request, int maxCandidates) {
+      return List.of(new CandidatePlaceResponse(
+          "google-match-1",
+          "GOOGLE_PLACES",
+          "google-match-1",
+          "HAL Ramen 0",
+          request.latitude(),
+          request.longitude(),
+          List.of("ramen"),
+          4.5,
+          2,
+          true,
+          "Osaka Kita 0",
+          0,
+          "https://maps.google.com/?cid=1",
+          "/api/google-places/photos?name=test-photo",
+          List.of(new PhotoAttributionResponse("Photo Author", "https://maps.google.com/contrib/1"))));
     }
   }
 

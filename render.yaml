@@ -31,7 +31,7 @@ services:
       - key: GOOGLE_PLACES_API_KEY
         sync: false
       - key: RANDISH_GOOGLE_PLACES_ENABLED
-        value: "false"
+        value: "true"
 
       # --- AIレポート（Gemini）---
       - key: GEMINI_API_KEY

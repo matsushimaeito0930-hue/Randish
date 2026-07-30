@@ -10464,6 +10464,8 @@ export const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
     backgroundColor: 'rgba(23,20,17,0.72)',
+  },
+  placePhotoCreditText: {
     fontSize: 10,
     lineHeight: 13,
     fontWeight: '800',
