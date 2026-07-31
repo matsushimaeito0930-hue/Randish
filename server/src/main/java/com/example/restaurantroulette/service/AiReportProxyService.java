@@ -14,10 +14,13 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AiReportProxyService {
+  private static final Logger logger = LoggerFactory.getLogger(AiReportProxyService.class);
   private static final int MAX_BODY_BYTES = 24_000;
 
   private final ObjectMapper objectMapper;
@@ -68,10 +71,12 @@ public class AiReportProxyService {
       if (geminiReport != null) {
         return geminiReport;
       }
+      logger.warn("[RANDISH_AI] Gemini report generation failed; returning fallback. model={}", geminiModel);
       return statusReport("fallback");
     }
 
     if (endpoint == null || requestToken == null) {
+      logger.warn("[RANDISH_AI] No AI backend configured (GEMINI_API_KEY / AI_REPORT_ENDPOINT missing); returning fallback.");
       return statusReport("fallback");
     }
 
@@ -123,7 +128,11 @@ public class AiReportProxyService {
 
     ObjectNode generationConfig = body.putObject("generationConfig");
     generationConfig.put("temperature", 0.55);
-    generationConfig.put("maxOutputTokens", 1800);
+    // Gemini 2.5 系は thinking が既定で有効で、思考トークンも maxOutputTokens を消費する。
+    // 少ない上限のままだと思考だけで枠を使い切り、本文が空 (finishReason=MAX_TOKENS) になって
+    // レポートが必ず fallback になるため、thinking を無効化しつつ出力枠を広げる。
+    generationConfig.putObject("thinkingConfig").put("thinkingBudget", 0);
+    generationConfig.put("maxOutputTokens", 4096);
     generationConfig.put("responseMimeType", "application/json");
 
     String geminiRequestBody;
@@ -143,6 +152,8 @@ public class AiReportProxyService {
     try {
       HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        logger.warn("[RANDISH_AI] Gemini HTTP {} model={} body={}",
+            response.statusCode(), geminiModel, abbreviate(response.body()));
         return null;
       }
       return parseGeminiReport(response.body());
@@ -150,15 +161,27 @@ public class AiReportProxyService {
       if (error instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
+      logger.warn("[RANDISH_AI] Gemini request failed model={} error={}", geminiModel, error.toString());
       return null;
     }
+  }
+
+  private static String abbreviate(String value) {
+    if (value == null) {
+      return "";
+    }
+    String trimmed = value.strip();
+    return trimmed.length() <= 500 ? trimmed : trimmed.substring(0, 500) + "...";
   }
 
   private JsonNode parseGeminiReport(String responseBody) {
     try {
       JsonNode response = objectMapper.readTree(responseBody);
+      String finishReason = response.path("candidates").path(0).path("finishReason").asText("");
       JsonNode parts = response.path("candidates").path(0).path("content").path("parts");
       if (!parts.isArray()) {
+        logger.warn("[RANDISH_AI] Gemini returned no content parts. finishReason={} usage={}",
+            finishReason, response.path("usageMetadata"));
         return null;
       }
       String text = null;
@@ -170,10 +193,14 @@ public class AiReportProxyService {
         }
       }
       if (text == null) {
+        logger.warn("[RANDISH_AI] Gemini returned empty text. finishReason={} usage={}",
+            finishReason, response.path("usageMetadata"));
         return null;
       }
       JsonNode report = objectMapper.readTree(stripJsonFence(text));
       if (!report.isObject() || !hasMinimumReportContent(report)) {
+        logger.warn("[RANDISH_AI] Gemini JSON missing required fields. finishReason={} text={}",
+            finishReason, abbreviate(text));
         return null;
       }
       ObjectNode reportObject = report.deepCopy();
@@ -183,6 +210,8 @@ public class AiReportProxyService {
       }
       return reportObject;
     } catch (IOException error) {
+      logger.warn("[RANDISH_AI] Failed to parse Gemini response as JSON. error={} body={}",
+          error.toString(), abbreviate(responseBody));
       return null;
     }
   }
