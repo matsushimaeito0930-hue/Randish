@@ -4135,6 +4135,32 @@ const getRepresentativeOriginPresetForArea = (area: string) => {
   ) ?? null;
 };
 
+/**
+ * 座標プリセットが無いエリア（江東区など多くの市区町村）のために、
+ * 同じ都道府県の座標付きプリセットを地図の中心として使う。
+ * これが無いと、東京のエリアを選んでいるのに地図が現在地（大阪など）のままになる。
+ */
+const getPrefectureFallbackOrigin = (area: string): UserLocation | null => {
+  const cleanArea = (area ?? '').trim();
+  if (!cleanArea || cleanArea === '現在地') {
+    return null;
+  }
+  const prefecture = getPrefectureFromText(cleanArea)
+    ?? getPrefectureFromText(
+      JAPAN_MUNICIPALITY_PRESETS.find((preset) =>
+        preset.label === cleanArea || preset.searchValue === cleanArea)?.group,
+    );
+  if (!prefecture) {
+    return null;
+  }
+  const preset = ALL_AREA_PRESETS.find((candidate) =>
+    hasUsablePresetCoordinates(candidate) && getPresetPrefecture(candidate) === prefecture);
+  if (!preset || preset.latitude == null || preset.longitude == null) {
+    return null;
+  }
+  return { latitude: preset.latitude, longitude: preset.longitude, label: cleanArea };
+};
+
 const normalizeSearchText = (value?: string | null) =>
   (value ?? '')
     .toLowerCase()
@@ -10236,9 +10262,12 @@ function RandomTab({
       if (isEverythingRandom || conditionRandom.area || (isTravelDraw && !canShowTravelArea)) {
         return userLocation;
       }
+      // 優先順位: エリアの座標プリセット → 検索結果の位置 → 同じ都道府県の代表地点 → 現在地
       return getSearchOriginForArea(displayAreaBase, userLocation)
         ?? getSearchOriginForArea(area, userLocation)
         ?? searchResultOrigin
+        ?? getPrefectureFallbackOrigin(displayAreaBase)
+        ?? getPrefectureFallbackOrigin(area)
         ?? userLocation;
     },
     [area, canShowTravelArea, conditionRandom.area, displayAreaBase, isEverythingRandom, isTravelDraw, searchResultOrigin, userLocation],
