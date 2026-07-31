@@ -4161,6 +4161,42 @@ const getPrefectureFallbackOrigin = (area: string): UserLocation | null => {
   return { latitude: preset.latitude, longitude: preset.longitude, label: cleanArea };
 };
 
+/**
+ * 候補一覧に出ているお店の位置から中心を作る。
+ * 一覧(/api/restaurants)はエリア名だけでも検索できるが、
+ * 抽選(/api/places/nearby)は座標が必須という非対称がある。
+ * 「12件出ているのに検索地点の座標が取れません」を防ぐ最後の砦。
+ */
+const getOriginFromRestaurants = (list: Restaurant[], label: string): UserLocation | null => {
+  const points = list
+    .map((restaurant) => ({
+      latitude: toOptionalNumber(restaurant.latitude),
+      longitude: toOptionalNumber(restaurant.longitude),
+    }))
+    .filter((point): point is { latitude: number; longitude: number } =>
+      point.latitude != null && point.longitude != null);
+  if (!points.length) {
+    return null;
+  }
+  return {
+    latitude: points.reduce((total, point) => total + point.latitude, 0) / points.length,
+    longitude: points.reduce((total, point) => total + point.longitude, 0) / points.length,
+    label: label.trim() || '検索エリア',
+  };
+};
+
+/** 地図ピン（抽選候補）の位置から中心を作る。上と同じ目的の予備。 */
+const getOriginFromCandidatePlaces = (list: CandidatePlace[], label: string): UserLocation | null => {
+  if (!list.length) {
+    return null;
+  }
+  return {
+    latitude: list.reduce((total, place) => total + place.latitude, 0) / list.length,
+    longitude: list.reduce((total, place) => total + place.longitude, 0) / list.length,
+    label: label.trim() || '検索エリア',
+  };
+};
+
 const normalizeSearchText = (value?: string | null) =>
   (value ?? '')
     .toLowerCase()
@@ -5059,7 +5095,11 @@ export default function App() {
   // ホームの「今日のおすすめ」用。ジャンル・予算を外して取得し、いろいろな店が出るようにする。
   const [recommendations, setRecommendations] = useState<Restaurant[]>([]);
   // 検索結果から求めたエリアの中心。抽選の座標としても使う。
+  // 計算は抽選タブ側で行うため、コールバックで受け取ってここに保持する。
   const searchResultOriginRef = useRef<UserLocation | null>(null);
+  const handleSearchOriginResolved = useCallback((origin: UserLocation | null) => {
+    searchResultOriginRef.current = origin;
+  }, []);
 
   const scrollToContentTop = useCallback((animated = true) => {
     setTimeout(() => {
@@ -6293,8 +6333,9 @@ export default function App() {
 
   const buildCandidateQuery = useCallback(async (): Promise<CandidateQuery | null> => {
     const cleanArea = areaRef.current.trim();
+    const isCurrentLocationArea = !cleanArea || cleanArea === '現在地';
     let center: UserLocation | null = null;
-    if (!cleanArea || cleanArea === '現在地') {
+    if (isCurrentLocationArea) {
       center = userLocationRef.current;
       if (!center) {
         setMapRouletteStatus('locating');
@@ -6306,6 +6347,15 @@ export default function App() {
       center = getSearchOriginForArea(cleanArea, null)
         ?? searchResultOriginRef.current
         ?? getPrefectureFallbackOrigin(cleanArea);
+    }
+
+    // ここまでで座標が決まらなくても、候補一覧や地図ピンがすでに手元にあるなら
+    // その位置から中心を作る。「候補は出ているのに座標が取れません」を出さないため。
+    if (!center) {
+      const fallbackLabel = cleanArea || '検索エリア';
+      center = getOriginFromRestaurants(restaurantsRef.current, fallbackLabel)
+        ?? getOriginFromCandidatePlaces(candidateCacheRef.current?.candidates ?? [], fallbackLabel)
+        ?? (isCurrentLocationArea ? userLocationRef.current : null);
     }
 
     if (!center) {
@@ -6434,7 +6484,7 @@ export default function App() {
           conditionRandom,
           mode: 'location',
         }));
-        setMessage('検索地点の座標が取れませんでした。駅・市区町村を選び直すか、現在地を取得してください。');
+        setMessage('抽選の起点になる場所がまだ決まっていません。エリアを選ぶか、現在地の取得を許可してください。');
         setIsLoading(false);
         return;
       }
@@ -7402,6 +7452,8 @@ export default function App() {
             mapRouletteStatus={mapRouletteStatus}
             mapRouletteError={mapRouletteError}
             drawFailureDetails={drawFailureDetails}
+            restaurants={visibleRestaurants}
+            onSearchOriginResolved={handleSearchOriginResolved}
             history={randomHistory}
             conditionRandom={conditionRandom}
             travelRevealStep={travelRevealStep}
@@ -10214,6 +10266,8 @@ function RandomTab({
   mapRouletteStatus,
   mapRouletteError,
   drawFailureDetails,
+  restaurants,
+  onSearchOriginResolved,
   history,
   conditionRandom,
   travelRevealStep,
@@ -10251,6 +10305,8 @@ function RandomTab({
   mapRouletteStatus: MapRouletteStatus;
   mapRouletteError: string | null;
   drawFailureDetails: string[];
+  restaurants: Restaurant[];
+  onSearchOriginResolved: (origin: UserLocation | null) => void;
   history: Restaurant[];
   conditionRandom: ConditionRandomState;
   travelRevealStep: TravelRevealStep;
@@ -10365,8 +10421,8 @@ function RandomTab({
   }, [area, displayAreaBase, restaurants]);
 
   useEffect(() => {
-    searchResultOriginRef.current = searchResultOrigin;
-  }, [searchResultOrigin]);
+    onSearchOriginResolved(searchResultOrigin);
+  }, [onSearchOriginResolved, searchResultOrigin]);
 
   const selectedSearchOrigin = useMemo(
     () => {
@@ -10380,7 +10436,9 @@ function RandomTab({
         ?? getSearchOriginForArea(area, null)
         ?? searchResultOrigin
         ?? getPrefectureFallbackOrigin(displayAreaBase)
-        ?? getPrefectureFallbackOrigin(area);
+        ?? getPrefectureFallbackOrigin(area)
+        // 抽選に出ているピンの位置も使う（抽選できるのに地図だけ出ない、を防ぐ）
+        ?? getOriginFromCandidatePlaces(mapCandidates, explicitArea);
       if (resolved) {
         return resolved;
       }
@@ -10388,7 +10446,7 @@ function RandomTab({
       // 「選んだ場所と違う地図」になって紛らわしいので、あえて中心を持たせない。
       return isCurrentLocationArea ? userLocation : null;
     },
-    [area, canShowTravelArea, conditionRandom.area, displayAreaBase, isEverythingRandom, isTravelDraw, searchResultOrigin, userLocation],
+    [area, canShowTravelArea, conditionRandom.area, displayAreaBase, isEverythingRandom, isTravelDraw, mapCandidates, searchResultOrigin, userLocation],
   );
   const rouletteConditionItems = [
     { label: uiText.genreLabel, value: displayGenre, icon: 'restaurant-outline', active: true },
