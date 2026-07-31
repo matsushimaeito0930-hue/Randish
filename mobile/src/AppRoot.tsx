@@ -5451,7 +5451,19 @@ export default function App() {
 
   const hasHiddenPreviewCondition = conditionRandom.area || conditionRandom.budget || conditionRandom.genre;
 
-  const visibleRestaurants = restaurants;
+  // 候補一覧(/api/restaurants)と抽選の候補(/api/places/nearby)は別APIなので、
+  // 片方だけ失敗すると「候補0件なのに抽選は20件」というちぐはぐな表示になる。
+  // 一覧が空のときは抽選が使っている候補をそのまま見せて、必ず数を一致させる。
+  const visibleRestaurants = useMemo(() => {
+    if (restaurants.length) {
+      return restaurants;
+    }
+    if (!mapCandidates.length) {
+      return restaurants;
+    }
+    return mapCandidates.map((candidate) =>
+      candidatePlaceToRestaurant(candidate, areaRef.current, genre));
+  }, [genre, mapCandidates, restaurants]);
 
   /**
    * 候補が少ない時に「どの条件を広げれば増えるか」を案内する。
