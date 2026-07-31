@@ -5001,7 +5001,11 @@ export default function App() {
         return;
       }
       const hasForegroundPermission = permission?.status === 'granted' || permission?.granted === true;
-      setLocationIntroState(hasForegroundPermission || introValue === 'skipped' ? 'completed' : 'pending');
+      // 一度でも選択済み（許可 or スキップ）なら、開くたびに許可ダイアログを出さない。
+      // Safari などは Permissions API で geolocation の状態を返さないため、
+      // hasForegroundPermission だけで判定すると「許可済みでも毎回聞かれる」状態になる。
+      const hasRecordedChoice = introValue === 'granted' || introValue === 'skipped';
+      setLocationIntroState(hasForegroundPermission || hasRecordedChoice ? 'completed' : 'pending');
       if (cachedLocationValue && introValue !== 'skipped') {
         try {
           const parsed = JSON.parse(cachedLocationValue) as StoredUserLocation;
@@ -5468,7 +5472,14 @@ export default function App() {
       const permission = mode === 'background' && Location.getForegroundPermissionsAsync
         ? await Location.getForegroundPermissionsAsync()
         : await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== 'granted') {
+      const permissionGranted = permission?.status === 'granted' || permission?.granted === true;
+      // Safari などは geolocation の許可状態を Permissions API で返さない（status が確定しない）。
+      // 背景更新はダイアログを出さない経路なので、明示的な denied 以外は取得を試みる。
+      // ブラウザ側で許可済みならプロンプトなしで現在地が取れ、未許可なら静かに失敗する。
+      const canAttemptSilently = mode === 'background'
+        && Platform.OS === 'web'
+        && permission?.status !== 'denied';
+      if (!permissionGranted && !canAttemptSilently) {
         if (mode === 'sync-search' || areaRef.current === '現在地') {
           setLocationStatus(
             Platform.OS === 'web'
