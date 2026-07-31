@@ -549,6 +549,34 @@ const getMetroScriptUrl = () => {
   }
 };
 
+/**
+ * 外部リンク（Googleマップなど）を開く。
+ * Web で Linking.openURL / window.open を使うと、新しいタブが about:blank から始まるため
+ * 戻る操作で about:blank が表示されてしまう。
+ * アンカー要素のクリックで開くと about:blank の履歴が残らない。
+ */
+const openExternalLink = (url: string) => {
+  if (!url) {
+    return;
+  }
+  if (Platform.OS !== 'web') {
+    void Linking.openURL(url);
+    return;
+  }
+  const runtimeDocument = (globalThis as typeof globalThis & { document?: Document }).document;
+  if (!runtimeDocument?.body) {
+    void Linking.openURL(url);
+    return;
+  }
+  const anchor = runtimeDocument.createElement('a');
+  anchor.href = url;
+  anchor.target = '_blank';
+  anchor.rel = 'noopener noreferrer';
+  runtimeDocument.body.appendChild(anchor);
+  anchor.click();
+  runtimeDocument.body.removeChild(anchor);
+};
+
 const getWebLocationUrl = () => {
   const runtimeGlobal = globalThis as typeof globalThis & { location?: { href?: string } };
   return runtimeGlobal.location?.href;
@@ -5186,12 +5214,12 @@ export default function App() {
     recordDrawForAnalytics(restaurant);
     setMessage(`${restaurant.name} を今日の一店にしました。分析に記録しました。`);
     if (restaurant.googleMapsUri) {
-      Linking.openURL(restaurant.googleMapsUri);
+      openExternalLink(restaurant.googleMapsUri);
       return;
     }
     const query = encodeURIComponent(`${restaurant.name} ${restaurant.address ?? ''}`.trim());
     if (query) {
-      Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+      openExternalLink(`https://www.google.com/maps/search/?api=1&query=${query}`);
     }
   }, [recordDrawForAnalytics]);
 
@@ -5444,9 +5472,12 @@ export default function App() {
     try {
       const data = await randishApi.getRestaurants(apiBaseUrlCandidates, previewApiParams);
       syncWorkingApiBaseUrl();
-      const normalized = data
-        .map(normalizeRestaurant)
+      const apiRestaurants = data.map(normalizeRestaurant);
+      const genreMatched = apiRestaurants
         .filter((restaurant) => conditionRandom.genre || restaurantMatchesSelectedGenre(restaurant, genre));
+      // サーバー側で既にジャンル検索済みなので、端末側の追加フィルタで全部落ちてしまった場合は
+      // サーバーの結果をそのまま使う。（「候補0件なのに抽選では店が出る」不一致を防ぐ）
+      const normalized = genreMatched.length ? genreMatched : apiRestaurants;
       setRestaurants(normalized);
       const genreLabel = genre === 'すべて' ? 'すべてのジャンル' : genre;
       if (hasHiddenPreviewCondition) {
@@ -6578,20 +6609,20 @@ export default function App() {
   const openMap = useCallback(() => {
     if (!selectedRestaurant) return;
     if (selectedRestaurant.googleMapsUri) {
-      Linking.openURL(selectedRestaurant.googleMapsUri);
+      openExternalLink(selectedRestaurant.googleMapsUri);
       return;
     }
     const query = encodeURIComponent(`${selectedRestaurant.name} ${selectedRestaurant.address}`);
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+    openExternalLink(`https://www.google.com/maps/search/?api=1&query=${query}`);
   }, [selectedRestaurant]);
 
   const openSavedMap = useCallback((restaurant: Restaurant) => {
     if (restaurant.googleMapsUri) {
-      Linking.openURL(restaurant.googleMapsUri);
+      openExternalLink(restaurant.googleMapsUri);
       return;
     }
     const query = encodeURIComponent(`${restaurant.name} ${restaurant.address}`);
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+    openExternalLink(`https://www.google.com/maps/search/?api=1&query=${query}`);
   }, []);
 
   const updateSavedFoodPhoto = useCallback((favoriteId: string, photoUri: string) => {
@@ -10037,11 +10068,11 @@ function RandomTab({
       return;
     }
     if ('googleMapsUri' in destination && destination.googleMapsUri) {
-      Linking.openURL(destination.googleMapsUri);
+      openExternalLink(destination.googleMapsUri);
       return;
     }
     const queryValue = encodeURIComponent(`${destination.latitude},${destination.longitude}`);
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${queryValue}`);
+    openExternalLink(`https://www.google.com/maps/search/?api=1&query=${queryValue}`);
   }, [mapCandidates, mapRouletteTarget, selectedSearchOrigin]);
   const distanceOriginText = useMemo(() => {
     const originName = selectedSearchOrigin?.label ?? (displayArea !== '？' ? displayArea : '選択地点');
@@ -13443,7 +13474,7 @@ function RestaurantVisual({
           <Pressable
             style={styles.hotpepperImageCredit}
             disabled={!imageCreditUrl}
-            onPress={() => imageCreditUrl && Linking.openURL(imageCreditUrl)}
+            onPress={() => imageCreditUrl && openExternalLink(imageCreditUrl)}
             accessibilityRole={imageCreditUrl ? 'link' : undefined}
             accessibilityLabel={imageCredit}
           >
@@ -13608,7 +13639,7 @@ function HotPepperCredit({ compact = false }: { compact?: boolean }) {
   return (
     <Pressable
       style={[styles.hotpepperCredit, compact && styles.hotpepperCreditCompact]}
-      onPress={() => Linking.openURL(HOTPEPPER_CREDIT_URL)}
+      onPress={() => openExternalLink(HOTPEPPER_CREDIT_URL)}
       accessibilityLabel="ホットペッパーグルメ Webサービス"
     >
       <Image source={{ uri: HOTPEPPER_CREDIT_IMAGE_URL }} style={styles.hotpepperCreditImage} resizeMode="contain" />
