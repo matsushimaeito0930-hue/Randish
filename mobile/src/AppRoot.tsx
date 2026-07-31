@@ -5425,6 +5425,32 @@ export default function App() {
 
   const visibleRestaurants = restaurants;
 
+  /**
+   * 候補が少ない時に「どの条件を広げれば増えるか」を案内する。
+   * 実際に絞り込みが効いている条件だけを挙げる（広げようがない条件は言わない）。
+   */
+  const buildFewCandidatesHint = useCallback((count: number) => {
+    if (count > 5) {
+      return null;
+    }
+    const suggestions: string[] = [];
+    const budgetValue = Number(budgetMax || 0);
+    const canRaiseBudget = budgetValue > 0
+      && budgetValue < Number(BUDGET_MAX_OPTIONS[BUDGET_MAX_OPTIONS.length - 1]);
+    if (canRaiseBudget) {
+      suggestions.push('予算を上げる');
+    }
+    const distanceIndex = DISTANCE_OPTIONS.indexOf(distance);
+    const usesDistance = Boolean(previewApiParams.latitude != null && previewApiParams.longitude != null);
+    if (usesDistance && distanceIndex >= 0 && distanceIndex < DISTANCE_OPTIONS.length - 1) {
+      suggestions.push('距離を広げる');
+    }
+    if (!suggestions.length) {
+      return count === 0 ? null : 'ジャンルやエリアを変えると候補が増えます。';
+    }
+    return `候補が少なめです。${suggestions.join('か')}と、もっと選べます。`;
+  }, [budgetMax, distance, previewApiParams.latitude, previewApiParams.longitude]);
+
   const loadGenreDiagnosticMessage = useCallback(async () => {
     const cleanGenre = genre.trim();
     if (!cleanGenre || cleanGenre === 'すべて' || conditionRandom.genre) {
@@ -5579,7 +5605,11 @@ export default function App() {
       }
       if (normalized.length) {
         const apiGenres = buildGenreSummaryItems(normalized).join(' / ');
-        setMessage(`${genreLabel}で${normalized.length}件から候補を整えました。見つかったジャンル: ${apiGenres}`);
+        // 候補が少ないと同じ店ばかり当たるので、実際に効く条件だけを案内する。
+        const hint = buildFewCandidatesHint(normalized.length);
+        setMessage(hint
+          ? `${genreLabel}で${normalized.length}件。${hint}`
+          : `${genreLabel}で${normalized.length}件から候補を整えました。見つかったジャンル: ${apiGenres}`);
       } else {
         const diagnosticMessage = await loadGenreDiagnosticMessage();
         setMessage(diagnosticMessage ?? `${genreLabel}に合うお店が見つかりませんでした。エリアやジャンルを変えてみてください。`);
@@ -5609,7 +5639,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, area, conditionRandom.area, conditionRandom.genre, genre, hasHiddenPreviewCondition, loadGenreDiagnosticMessage, previewApiParams, syncWorkingApiBaseUrl]);
+  }, [apiBaseUrlCandidates, area, buildFewCandidatesHint, conditionRandom.area, conditionRandom.genre, genre, hasHiddenPreviewCondition, loadGenreDiagnosticMessage, previewApiParams, syncWorkingApiBaseUrl]);
 
   useEffect(() => {
     loadRestaurants();
