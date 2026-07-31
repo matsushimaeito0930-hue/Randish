@@ -5633,8 +5633,14 @@ export default function App() {
         }
         return;
       }
+      // 通信エラーで一覧を空にすると「候補0件」と誤解される。
+      // 実際に0件だったわけではないので、前回の候補は残したまま状況だけ伝える。
+      if (isApiConnectivityError(error)) {
+        setMessage('お店データに接続中です。少し待ってからもう一度お試しください。');
+        return;
+      }
       setRestaurants([]);
-      const diagnosticMessage = isApiConnectivityError(error) ? null : await loadGenreDiagnosticMessage();
+      const diagnosticMessage = await loadGenreDiagnosticMessage();
       setMessage(diagnosticMessage ?? API_CONNECTION_MESSAGE);
     } finally {
       setIsLoading(false);
@@ -5644,6 +5650,23 @@ export default function App() {
   useEffect(() => {
     loadRestaurants();
   }, [loadRestaurants]);
+
+  // サーバー起動待ちなどで候補が取れなかったときは、自動でもう一度取りにいく。
+  // （利用者に「0件」と見せたまま放置しない）
+  useEffect(() => {
+    if (isLoading || restaurants.length) {
+      return;
+    }
+    const hasScope = Boolean(previewApiParams.area)
+      || (previewApiParams.latitude != null && previewApiParams.longitude != null);
+    if (!hasScope) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      void loadRestaurants();
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [isLoading, loadRestaurants, previewApiParams, restaurants.length]);
 
   // 「今日のおすすめ」はジャンル・予算を外して取得する（条件のジャンルに偏らせない）。
   const recommendationScopeKey = `${previewApiParams.area ?? ''}|${previewApiParams.latitude ?? ''}|${previewApiParams.longitude ?? ''}|${previewApiParams.range ?? ''}`;

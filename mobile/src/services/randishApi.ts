@@ -283,8 +283,11 @@ type RequestOptions = {
 type ApiBaseUrlInput = string | readonly string[];
 type ApiErrorKind = 'connection' | 'timeout' | 'http';
 
-const REQUEST_TIMEOUT_MS = 5000;
-const REQUEST_TOTAL_TIMEOUT_MS = 9000;
+// サーバー（Render無料プラン）はスリープからの復帰に60秒前後かかることがある。
+// 以前は5秒/合計9秒で諦めていたため、起動待ちのあいだ通信が必ず失敗し、
+// 画面には「候補0件」と出てしまっていた。起動を待てる長さにする。
+const REQUEST_TIMEOUT_MS = 30000;
+const REQUEST_TOTAL_TIMEOUT_MS = 75000;
 const MAGIC_LINK_REQUEST_TIMEOUT_MS = 75000;
 const MIN_REQUEST_TIMEOUT_MS = 1200;
 
