@@ -3130,8 +3130,8 @@ const buildHistoryMetaLine = (entry: DrawHistoryEntry) => [
   formatDistanceMeters(entry.rangeMeters),
 ].join(' / ');
 
-const API_CONNECTION_MESSAGE = 'お店データに接続できませんでした。サーバーを確認して、もう一度試してください。';
-const API_DRAW_MESSAGE = '抽選データに接続できませんでした。少し時間をおいてもう一度押してください。';
+const API_CONNECTION_MESSAGE = 'お店データを読み込めませんでした。通信環境を確認して、少し時間をおいてからもう一度お試しください。';
+const API_DRAW_MESSAGE = '抽選データを読み込めませんでした。少し時間をおいて、もう一度お試しください。';
 
 const toDebugErrorMessage = (error: unknown) => {
   if (error instanceof Error) {
@@ -3210,9 +3210,14 @@ const logApiUiError = (context: string, error: unknown, baseUrls: readonly strin
 const isNoRestaurantMatchError = (error: unknown) =>
   error instanceof RandishApiError && error.kind === 'http' && error.status === 404;
 
+// API に接続できない時に確認用のダミー店舗（「麺や RANDISH」など）を出すかどうか。
+// 実店舗と紛らわしいため既定では無効。true にするとオフライン確認用の候補が表示される。
+const USE_RESTAURANT_DEMO_FALLBACK = false;
+
 const shouldUseRestaurantDemoFallback = (error: unknown) =>
-  isApiConnectivityError(error)
-  || (error instanceof RandishApiError && [502, 503, 504].includes(error.status ?? 0));
+  USE_RESTAURANT_DEMO_FALLBACK
+  && (isApiConnectivityError(error)
+    || (error instanceof RandishApiError && [502, 503, 504].includes(error.status ?? 0)));
 
 const isSameMonth = (dateText: string, monthDate: Date) => {
   const date = new Date(dateText);
