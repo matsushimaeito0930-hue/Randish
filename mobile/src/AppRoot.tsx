@@ -5028,6 +5028,8 @@ export default function App() {
   useEffect(() => {
     restaurantsRef.current = restaurants;
   }, [restaurants]);
+  // ホームの「今日のおすすめ」用。ジャンル・予算を外して取得し、いろいろな店が出るようにする。
+  const [recommendations, setRecommendations] = useState<Restaurant[]>([]);
 
   const scrollToContentTop = useCallback((animated = true) => {
     setTimeout(() => {
@@ -5533,10 +5535,29 @@ export default function App() {
   }, [apiBaseUrlCandidates, budgetMax, distance, genre, syncWorkingApiBaseUrl, travelDisplayArea]);
 
   const loadRestaurants = useCallback(async () => {
+    // 現在地もエリア指定も無い状態（起動直後のGPS取得前など）で検索すると必ず0件になる。
+    // 誤って「0件」と見せないよう、条件が揃うまで検索しない。
+    const hasSearchScope = Boolean(previewApiParams.area)
+      || (previewApiParams.latitude != null && previewApiParams.longitude != null);
+    if (!hasSearchScope) {
+      setMessage('現在地を確認しています。位置情報が取れたら近くのお店を探します。');
+      return;
+    }
     setIsLoading(true);
     try {
-      const data = await randishApi.getRestaurants(apiBaseUrlCandidates, previewApiParams);
+      let data = await randishApi.getRestaurants(apiBaseUrlCandidates, previewApiParams);
       syncWorkingApiBaseUrl();
+      let relaxedByBudget = false;
+      // 予算の初期値（1,500円）のままだと、焼肉など単価の高いジャンルが全滅して0件になる。
+      // 0件のときは予算条件を外して探し直す。
+      if (!data.length && previewApiParams.budgetMax && previewApiParams.budgetMax < 999999) {
+        const withoutBudget = { ...previewApiParams, budgetMin: undefined, budgetMax: undefined };
+        const relaxed = await randishApi.getRestaurants(apiBaseUrlCandidates, withoutBudget);
+        if (relaxed.length) {
+          data = relaxed;
+          relaxedByBudget = true;
+        }
+      }
       const apiRestaurants = data.map(normalizeRestaurant);
       const genreMatched = apiRestaurants
         .filter((restaurant) => conditionRandom.genre || restaurantMatchesSelectedGenre(restaurant, genre));
@@ -5544,6 +5565,10 @@ export default function App() {
       // サーバーの結果をそのまま使う。（「候補0件なのに抽選では店が出る」不一致を防ぐ）
       const normalized = genreMatched.length ? genreMatched : apiRestaurants;
       setRestaurants(normalized);
+      if (relaxedByBudget && normalized.length) {
+        setMessage(`予算内のお店が見つからなかったので、予算をひろげて${normalized.length}件を表示しています。`);
+        return;
+      }
       const genreLabel = genre === 'すべて' ? 'すべてのジャンル' : genre;
       if (hasHiddenPreviewCondition) {
         const areaLabel = conditionRandom.area ? 'ランダムエリア' : area;
@@ -5587,6 +5612,37 @@ export default function App() {
   useEffect(() => {
     loadRestaurants();
   }, [loadRestaurants]);
+
+  // 「今日のおすすめ」はジャンル・予算を外して取得する（条件のジャンルに偏らせない）。
+  const recommendationScopeKey = `${previewApiParams.area ?? ''}|${previewApiParams.latitude ?? ''}|${previewApiParams.longitude ?? ''}|${previewApiParams.range ?? ''}`;
+  useEffect(() => {
+    const hasScope = Boolean(previewApiParams.area)
+      || (previewApiParams.latitude != null && previewApiParams.longitude != null);
+    if (!hasScope) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await randishApi.getRestaurants(apiBaseUrlCandidates, {
+          area: previewApiParams.area,
+          latitude: previewApiParams.latitude,
+          longitude: previewApiParams.longitude,
+          range: previewApiParams.range,
+          distanceMeters: previewApiParams.distanceMeters,
+        });
+        if (!cancelled) {
+          setRecommendations(data.map(normalizeRestaurant));
+        }
+      } catch {
+        // おすすめは補助的な表示なので、失敗しても何もしない。
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBaseUrlCandidates, recommendationScopeKey]);
 
   const requestCurrentLocation = useCallback(async (mode: LocationRequestMode = 'sync-search') => {
     const Location = getOptionalLocationModule();
@@ -7190,6 +7246,7 @@ export default function App() {
             onCurrentLocationSearch={prepareCurrentLocationSearch}
             onRequireRegistration={openRegistration}
             onLogout={handleLogout}
+            recommendations={recommendations}
             onVisitRecommendation={handleVisitRecommendation}
           />
         )}
@@ -7845,6 +7902,7 @@ function HomeTab({
   onCurrentLocationSearch,
   onRequireRegistration,
   onLogout,
+  recommendations,
   onVisitRecommendation,
 }: {
   apiBaseUrlCandidates: readonly string[];
@@ -7884,6 +7942,7 @@ function HomeTab({
   onCurrentLocationSearch: () => void;
   onRequireRegistration: () => void;
   onLogout: () => void;
+  recommendations: Restaurant[];
   onVisitRecommendation: (restaurant: Restaurant) => void;
 }) {
   return (
@@ -7919,7 +7978,7 @@ function HomeTab({
         onLogout={onLogout}
       />
       <HomeRecommendationCarousel
-        restaurants={restaurants}
+        restaurants={recommendations.length ? recommendations : restaurants}
         isLoading={isLoading}
         onVisit={onVisitRecommendation}
       />
@@ -7947,12 +8006,30 @@ function HomeRecommendationCarousel({
     if (usable.length <= RECOMMENDATION_COUNT) {
       return usable;
     }
-    const step = Math.max(1, Math.floor(usable.length / RECOMMENDATION_COUNT));
-    const spread: Restaurant[] = [];
-    for (let index = 0; index < usable.length && spread.length < RECOMMENDATION_COUNT; index += step) {
-      spread.push(usable[index]);
+    // 同じジャンルばかり並ばないよう、まずジャンル違いを1件ずつ拾う。
+    const picked: Restaurant[] = [];
+    const usedGenres = new Set<string>();
+    for (const restaurant of usable) {
+      if (picked.length >= RECOMMENDATION_COUNT) {
+        break;
+      }
+      const genreKey = (restaurant.genre ?? '').trim();
+      if (genreKey && usedGenres.has(genreKey)) {
+        continue;
+      }
+      usedGenres.add(genreKey);
+      picked.push(restaurant);
     }
-    return spread.slice(0, RECOMMENDATION_COUNT);
+    // ジャンル数が足りなければ残りから補う。
+    for (const restaurant of usable) {
+      if (picked.length >= RECOMMENDATION_COUNT) {
+        break;
+      }
+      if (!picked.includes(restaurant)) {
+        picked.push(restaurant);
+      }
+    }
+    return picked.slice(0, RECOMMENDATION_COUNT);
   }, [restaurants]);
 
   if (!picks.length) {

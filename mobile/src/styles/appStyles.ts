@@ -5434,11 +5434,16 @@ export const styles = StyleSheet.create({
   },
   homeRecommendItem: {
     width: 168,
+    // カードの高さを揃え、ボタン位置がカードごとにずれないようにする。
+    minHeight: 268,
     padding: 12,
     borderRadius: 20,
     backgroundColor: '#fffdf9',
     borderWidth: 1,
     borderColor: LINE,
+  },
+  homeRecommendBody: {
+    flex: 1,
   },
   homeRecommendPhoto: {
     width: '100%',
@@ -5467,7 +5472,8 @@ export const styles = StyleSheet.create({
     color: '#6d6258',
   },
   homeRecommendButton: {
-    marginTop: 10,
+    // 名前が1行/2行でもボタンが下端で揃うようにする。
+    marginTop: 'auto',
     minHeight: 34,
     flexDirection: 'row',
     alignItems: 'center',
