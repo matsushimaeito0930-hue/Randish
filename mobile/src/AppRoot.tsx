@@ -2967,6 +2967,54 @@ const estimateBudgetFromPriceLevel = (priceLevel?: number | null) => {
   }
 };
 
+/**
+ * 検索結果（候補一覧）の店舗を地図ピン用の候補に変換する。
+ * 候補一覧と地図のピンは元々別APIのため件数がズレていた。
+ * 一覧に出ている店もピン（＝抽選対象）に含めて数を揃える。
+ */
+const restaurantToCandidatePlace = (restaurant: Restaurant): CandidatePlace | null => {
+  const latitude = toOptionalNumber(restaurant.latitude);
+  const longitude = toOptionalNumber(restaurant.longitude);
+  if (latitude == null || longitude == null) {
+    return null;
+  }
+  const provider = (restaurant.externalProvider || 'RANDISH').toUpperCase();
+  const providerPlaceId = restaurant.externalId || restaurant.id;
+  return {
+    id: restaurant.id || `${provider.toLowerCase()}-${providerPlaceId}`,
+    provider,
+    providerPlaceId,
+    name: restaurant.name,
+    latitude,
+    longitude,
+    categories: restaurant.genre ? [restaurant.genre] : [],
+    rating: toOptionalNumber(restaurant.rating) ?? null,
+    priceLevel: null,
+    openNow: null,
+    address: restaurant.address ?? null,
+    distanceMeters: null,
+    googleMapsUri: restaurant.googleMapsUri ?? null,
+    photoUrl: restaurant.photoUrl ?? null,
+    photoAttributions: restaurant.photoAttributions ?? [],
+  };
+};
+
+const mergeCandidatePlaces = (base: CandidatePlace[], extra: CandidatePlace[]) => {
+  const seen = new Set<string>();
+  const keyOf = (place: CandidatePlace) =>
+    `${(place.name ?? '').trim().toLowerCase()}@${place.latitude.toFixed(4)},${place.longitude.toFixed(4)}`;
+  const merged: CandidatePlace[] = [];
+  for (const place of [...base, ...extra]) {
+    const key = keyOf(place);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(place);
+  }
+  return merged;
+};
+
 const candidatePlaceToRestaurant = (place: CandidatePlace, area: string, genre: string): Restaurant => {
   const displayGenre = place.categories?.find((category) => category && !category.includes('_')) ?? genre ?? '飲食店';
   const budget = estimateBudgetFromPriceLevel(place.priceLevel);
@@ -4975,6 +5023,11 @@ export default function App() {
   const areaRef = useRef(area);
   const userIdRef = useRef(userId);
   const userLocationRef = useRef<UserLocation | null>(userLocation);
+  // 候補一覧の最新値。地図の候補プールに混ぜるために参照する。
+  const restaurantsRef = useRef<Restaurant[]>(restaurants);
+  useEffect(() => {
+    restaurantsRef.current = restaurants;
+  }, [restaurants]);
 
   const scrollToContentTop = useCallback((animated = true) => {
     setTimeout(() => {
@@ -6138,8 +6191,14 @@ export default function App() {
     const cached = getUsableCandidateCache(query);
     if (cached) {
       console.info('[RANDISH MAP] キャッシュからの再抽選');
-      setMapCandidates(cached.candidates);
-      setMapRouletteStatus(cached.candidates.length ? 'candidatesReady' : 'empty');
+      // キャッシュ後に候補一覧が更新されている場合もあるので、ここでも取り込む。
+      const cachedSearchCandidates = restaurantsRef.current
+        .map(restaurantToCandidatePlace)
+        .filter((place): place is CandidatePlace => place != null);
+      const cachedMerged = mergeCandidatePlaces(cached.candidates, cachedSearchCandidates);
+      cached.candidates = cachedMerged;
+      setMapCandidates(cachedMerged);
+      setMapRouletteStatus(cachedMerged.length ? 'candidatesReady' : 'empty');
       return cached;
     }
 
@@ -6158,10 +6217,16 @@ export default function App() {
       openNow: query.openNow,
     });
     syncWorkingApiBaseUrl();
+    // 地図のピン＝抽選対象。候補一覧に出ている店（座標があるもの）も混ぜて、
+    // 「38件と出ているのにピンが少ない」というズレをなくす。
+    const searchCandidates = restaurantsRef.current
+      .map(restaurantToCandidatePlace)
+      .filter((place): place is CandidatePlace => place != null);
+    const mergedCandidates = mergeCandidatePlaces(response.places ?? [], searchCandidates);
     const nextCache: CandidateCacheEntry = {
       key: query.key,
       center: query.center,
-      candidates: response.places ?? [],
+      candidates: mergedCandidates,
       fetchedAt: Date.now(),
       usedIds: [],
       lastSelectedId: null,
