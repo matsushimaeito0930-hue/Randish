@@ -5850,6 +5850,18 @@ export default function App() {
           normalized = freshAlternative;
         }
       }
+
+      // 「もう一回引く」で直前と同じ店が出るのは避ける。
+      // ここまでで同じ店が残っている場合は、候補が2件以上あるかぎり必ず別の店に差し替える。
+      const previousDrawId = selectedRestaurant?.id;
+      if (previousDrawId && normalized.id === previousDrawId) {
+        const alternatives = await loadAlternatives();
+        const otherCandidates = alternatives.filter((item) => item.id !== previousDrawId);
+        if (otherCandidates.length) {
+          normalized = pickFreshRestaurant(otherCandidates, recentIds, previousDrawId)
+            ?? pickRandomRestaurant(otherCandidates);
+        }
+      }
       setDrawFailureDetails([]);
       setSelectedRestaurant(normalized);
       // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。

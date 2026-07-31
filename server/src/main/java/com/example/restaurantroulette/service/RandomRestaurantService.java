@@ -3,6 +3,7 @@ package com.example.restaurantroulette.service;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
+import com.example.restaurantroulette.entity.RandomHistory;
 import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.exception.NotFoundException;
 import com.example.restaurantroulette.service.external.GooglePlacesEnrichmentService;
@@ -80,11 +81,16 @@ public class RandomRestaurantService {
       throw new NotFoundException("No restaurants match the requested conditions.");
     }
 
-    Set<String> recentRestaurantIds = validationService.isGuestUserId(userId)
-        ? Set.of()
-        : randomHistoryService.findRecentEntities(userId, RECENT_HISTORY_LIMIT).stream()
-            .map(history -> historyKey(history.provider(), history.providerPlaceId()))
-            .collect(Collectors.toSet());
+    List<RandomHistory> recentHistories = validationService.isGuestUserId(userId)
+        ? List.of()
+        : randomHistoryService.findRecentEntities(userId, RECENT_HISTORY_LIMIT);
+    Set<String> recentRestaurantIds = recentHistories.stream()
+        .map(history -> historyKey(history.provider(), history.providerPlaceId()))
+        .collect(Collectors.toSet());
+    // 直前に引いた店（履歴の先頭 = 最新）は「もう一回引く」で連続して出さない。
+    String lastDrawnKey = recentHistories.isEmpty()
+        ? null
+        : historyKey(recentHistories.get(0).provider(), recentHistories.get(0).providerPlaceId());
     List<Restaurant> preferredCandidates = candidates.stream()
         .filter(restaurant -> !recentRestaurantIds.contains(historyKey(restaurant.externalProvider(), restaurant.externalId())))
         .toList();
@@ -93,6 +99,15 @@ public class RandomRestaurantService {
     // 写真を持たない提供元（Geoapify など）が多いと、写真付きの数店だけが延々と繰り返し当たっていた。
     // 条件に合う候補は全て当たるようにしつつ、写真付きを少しだけ出やすくする重み付け抽選にする。
     List<Restaurant> lotteryPool = freshCandidatePool.isEmpty() ? candidates : freshCandidatePool;
+    if (lastDrawnKey != null && lotteryPool.size() > 1) {
+      List<Restaurant> withoutLastDrawn = lotteryPool.stream()
+          .filter(restaurant ->
+              !lastDrawnKey.equals(historyKey(restaurant.externalProvider(), restaurant.externalId())))
+          .toList();
+      if (!withoutLastDrawn.isEmpty()) {
+        lotteryPool = withoutLastDrawn;
+      }
+    }
     Restaurant selected = pickWeightedByPhoto(lotteryPool);
 
     restaurantQueryService.cacheForUserAction(selected);

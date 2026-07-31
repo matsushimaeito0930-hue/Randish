@@ -32,6 +32,12 @@ services:
         sync: false
       - key: RANDISH_GOOGLE_PLACES_ENABLED
         value: "true"
+      # Google Places の呼び出し上限。ここに達すると自動的に Google の利用を止め、
+      # HotPepper / Geoapify だけで動作する（課金の暴走防止）。カウントはサーバー起動ごとにリセット。
+      - key: RANDISH_GOOGLE_PLACES_SESSION_LIMIT
+        value: "1000"
+      - key: RANDISH_GOOGLE_PLACES_API_LIMIT
+        value: "1000"
 
       # --- AIレポート（Gemini）---
       - key: GEMINI_API_KEY
