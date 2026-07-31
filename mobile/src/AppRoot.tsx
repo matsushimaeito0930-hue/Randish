@@ -5094,7 +5094,7 @@ export default function App() {
         recentRestaurants.push(entry.restaurant);
       });
       setDrawHistories(entries);
-      setRandomHistory(recentRestaurants.slice(0, 8));
+      setRandomHistory(recentRestaurants.slice(0, 24));
     } catch {
       // Keep the current in-app session history when the API is not reachable yet.
     }
@@ -5171,7 +5171,7 @@ export default function App() {
     setRandomHistory((current) => [
       restaurant,
       ...current.filter((item) => item.id !== restaurant.id),
-    ].slice(0, 8));
+    ].slice(0, 24));
     recordDrawForAnalytics(restaurant);
     setMessage(`${restaurant.name} を今日の一店にしました。分析に記録しました。`);
     if (restaurant.googleMapsUri) {
@@ -5852,7 +5852,8 @@ export default function App() {
       }
       setDrawFailureDetails([]);
       setSelectedRestaurant(normalized);
-      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+      // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
+      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
       recordDrawForAnalytics(normalized);
       const doneMessage = recentIds.has(normalized.id) ? '候補が一巡しています。条件を広げると新しい店が出やすくなります。' : drawAnimation.doneMessage;
       setMessage(isTravelDraw ? relaxedDrawMessage ?? '最後にお店を開きます。' : relaxedDrawMessage ?? doneMessage);
@@ -5891,7 +5892,8 @@ export default function App() {
 
           const normalized = pickFreshRestaurant(candidates, recentIds, selectedRestaurant?.id) ?? pickRandomRestaurant(candidates);
           setSelectedRestaurant(normalized);
-          setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+          // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
+      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
           recordDrawForAnalytics(normalized);
           const doneMessage = recentIds.has(normalized.id) ? '候補が一巡しています。条件を広げると新しい店が出やすくなります。' : drawAnimation.doneMessage;
           if (isTravelDraw) {
@@ -5956,7 +5958,8 @@ export default function App() {
       }
       setDrawFailureDetails([]);
       setSelectedRestaurant(normalized);
-      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+      // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
+      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
       recordDrawForAnalytics(normalized);
       setMessage(recentIds.has(normalized.id) ? 'ぜんぶおまかせの候補が一巡しています。条件を少し変えると広がります。' : `ぜんぶおまかせ。${drawAnimation.doneMessage}`);
       setTimeout(revealSelectedRestaurant, 980);
@@ -5967,7 +5970,8 @@ export default function App() {
           const candidates = searchLocalRestaurants();
           const normalized = pickFreshRestaurant(candidates, recentIds, selectedRestaurant?.id) ?? pickRandomRestaurant(candidates);
           setSelectedRestaurant(normalized);
-          setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+          // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
+      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
           recordDrawForAnalytics(normalized);
           setMessage(`通信できないため確認用の候補から選びました。${drawAnimation.doneMessage}`);
           setTimeout(revealSelectedRestaurant, 980);
@@ -6227,7 +6231,8 @@ export default function App() {
         if (isTravelDraw) {
           setTravelRevealStep('restaurant');
         }
-        setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+        // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
+      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
         recordDrawForAnalytics(normalized);
         setMapRouletteStatus('result');
         setMessage(cacheEntry.candidates.length === 1
@@ -6719,7 +6724,8 @@ export default function App() {
       setDrawHistories((current) => current.map((item) => (
         item.id === entry.id ? { ...item, restaurant: normalized } : item
       )));
-      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 8));
+      // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
+      setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
       setSelectedRestaurant(normalized);
       setActiveTab('random');
       setMessage('履歴から店舗情報を再取得しました。');

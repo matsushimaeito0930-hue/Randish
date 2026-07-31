@@ -89,16 +89,11 @@ public class RandomRestaurantService {
         .filter(restaurant -> !recentRestaurantIds.contains(historyKey(restaurant.externalProvider(), restaurant.externalId())))
         .toList();
     List<Restaurant> freshCandidatePool = preferredCandidates.isEmpty() ? candidates : preferredCandidates;
-    List<Restaurant> freshCandidatesWithPhotos = freshCandidatePool.stream()
-        .filter(restaurant -> restaurant.photoUrl() != null && !restaurant.photoUrl().isBlank())
-        .toList();
-    List<Restaurant> allCandidatesWithPhotos = candidates.stream()
-        .filter(restaurant -> restaurant.photoUrl() != null && !restaurant.photoUrl().isBlank())
-        .toList();
-    List<Restaurant> lotteryPool = !freshCandidatesWithPhotos.isEmpty()
-        ? freshCandidatesWithPhotos
-        : !allCandidatesWithPhotos.isEmpty() ? allCandidatesWithPhotos : freshCandidatePool;
-    Restaurant selected = lotteryPool.get(ThreadLocalRandom.current().nextInt(lotteryPool.size()));
+    // 以前は「写真がある候補」だけを抽選対象にしていたため、
+    // 写真を持たない提供元（Geoapify など）が多いと、写真付きの数店だけが延々と繰り返し当たっていた。
+    // 条件に合う候補は全て当たるようにしつつ、写真付きを少しだけ出やすくする重み付け抽選にする。
+    List<Restaurant> lotteryPool = freshCandidatePool.isEmpty() ? candidates : freshCandidatePool;
+    Restaurant selected = pickWeightedByPhoto(lotteryPool);
 
     restaurantQueryService.cacheForUserAction(selected);
     if (!validationService.isGuestUserId(userId)) {
@@ -115,6 +110,34 @@ public class RandomRestaurantService {
     }
     RestaurantResponse response = mapper.toRestaurantResponse(selected);
     return googlePlacesEnrichmentService == null ? response : googlePlacesEnrichmentService.enrich(response);
+  }
+
+  /**
+   * 候補全体から1件を抽選する。写真がある店は少しだけ当たりやすくするが、
+   * 写真が無い店も必ず当たり得るようにして、同じ数店だけが繰り返されるのを防ぐ。
+   */
+  private Restaurant pickWeightedByPhoto(List<Restaurant> pool) {
+    final int photoWeight = 3;
+    final int noPhotoWeight = 1;
+    int totalWeight = 0;
+    for (Restaurant restaurant : pool) {
+      totalWeight += hasPhoto(restaurant) ? photoWeight : noPhotoWeight;
+    }
+    if (totalWeight <= 0) {
+      return pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
+    }
+    int target = ThreadLocalRandom.current().nextInt(totalWeight);
+    for (Restaurant restaurant : pool) {
+      target -= hasPhoto(restaurant) ? photoWeight : noPhotoWeight;
+      if (target < 0) {
+        return restaurant;
+      }
+    }
+    return pool.get(pool.size() - 1);
+  }
+
+  private boolean hasPhoto(Restaurant restaurant) {
+    return restaurant.photoUrl() != null && !restaurant.photoUrl().isBlank();
   }
 
   private String historyKey(String provider, String providerPlaceId) {
