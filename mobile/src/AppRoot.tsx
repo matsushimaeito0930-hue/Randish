@@ -2999,18 +2999,39 @@ const restaurantToCandidatePlace = (restaurant: Restaurant): CandidatePlace | nu
   };
 };
 
+/**
+ * 一覧に出す候補と地図のピンの上限。
+ * 一覧とピンで別々の上限を持つと件数が食い違って見えるため、必ず同じ値を使う。
+ */
+const MAX_VISIBLE_CANDIDATES = 60;
+
+const candidatePlaceKey = (place: CandidatePlace) =>
+  `${(place.name ?? '').trim().toLowerCase()}@${place.latitude.toFixed(4)},${place.longitude.toFixed(4)}`;
+
 const mergeCandidatePlaces = (base: CandidatePlace[], extra: CandidatePlace[]) => {
-  const seen = new Set<string>();
-  const keyOf = (place: CandidatePlace) =>
-    `${(place.name ?? '').trim().toLowerCase()}@${place.latitude.toFixed(4)},${place.longitude.toFixed(4)}`;
+  const indexByKey = new Map<string, number>();
   const merged: CandidatePlace[] = [];
   for (const place of [...base, ...extra]) {
-    const key = keyOf(place);
-    if (seen.has(key)) {
+    const key = candidatePlaceKey(place);
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex == null) {
+      indexByKey.set(key, merged.length);
+      merged.push(place);
       continue;
     }
-    seen.add(key);
-    merged.push(place);
+    // 同じ店が両方の検索結果に出た場合、写真を持っているほうの情報を引き継ぐ。
+    // （ホットペッパーやGoogleの写真を、写真の無いOpenStreetMap側の店にも回せる）
+    const existing = merged[existingIndex];
+    if (!existing.photoUrl?.trim() && place.photoUrl?.trim()) {
+      merged[existingIndex] = {
+        ...existing,
+        photoUrl: place.photoUrl,
+        photoAttributions: place.photoAttributions ?? existing.photoAttributions,
+        googleMapsUri: existing.googleMapsUri ?? place.googleMapsUri,
+        rating: existing.rating ?? place.rating,
+        address: existing.address ?? place.address,
+      };
+    }
   }
   return merged;
 };
@@ -5492,22 +5513,46 @@ export default function App() {
   const hasHiddenPreviewCondition = conditionRandom.area || conditionRandom.budget || conditionRandom.genre;
 
   // 候補一覧(/api/restaurants)と抽選の候補(/api/places/nearby)は別APIなので、
-  // 片方だけ失敗すると「候補0件なのに抽選は20件」というちぐはぐな表示になる。
-  // 一覧が空のときは抽選が使っている候補をそのまま見せて、必ず数を一致させる。
+  // そのままだと「一覧0件なのに抽選では店が出る」「一覧の件数と地図のピン数が合わない」が起きる。
+  // ここで両方を1つの集合にまとめ、一覧・ピン・抽選プールがすべて同じものを見るようにする。
+  const unifiedCandidates = useMemo(() => {
+    const fromSearchList = restaurants
+      .map(restaurantToCandidatePlace)
+      .filter((place): place is CandidatePlace => place != null);
+    return mergeCandidatePlaces(fromSearchList, mapCandidates).slice(0, MAX_VISIBLE_CANDIDATES);
+  }, [mapCandidates, restaurants]);
+
   const visibleRestaurants = useMemo(() => {
-    const base = restaurants.length
-      ? restaurants
-      : mapCandidates.map((candidate) =>
-        candidatePlaceToRestaurant(candidate, areaRef.current, genre));
-    if (!base.length) {
-      return base;
+    // 一覧側の店舗情報のほうが予算・所要時間などが揃っているので、同じ店なら一覧側を使う。
+    const detailedByKey = new Map<string, Restaurant>();
+    for (const restaurant of restaurants) {
+      const place = restaurantToCandidatePlace(restaurant);
+      if (place) {
+        detailedByKey.set(candidatePlaceKey(place), restaurant);
+      }
+    }
+    const base = unifiedCandidates.map((place) => {
+      const detailed = detailedByKey.get(candidatePlaceKey(place));
+      if (!detailed) {
+        return candidatePlaceToRestaurant(place, areaRef.current, genre);
+      }
+      // 写真だけは、統合で引き継いだものがあればそちらを優先する。
+      return detailed.photoUrl?.trim() || !place.photoUrl?.trim()
+        ? detailed
+        : { ...detailed, photoUrl: toAbsoluteApiAssetUrl(place.photoUrl) };
+    });
+    // 座標が無くて地図に出せない店も、一覧からは落とさない。
+    const withoutCoordinates = restaurants.filter((restaurant) => restaurantToCandidatePlace(restaurant) == null);
+    const all = [...base, ...withoutCoordinates];
+    if (!all.length) {
+      return all;
     }
     // 写真がある店（ホットペッパー・Googleなど）を先に並べる。
-    // 写真なし（Geoapifyなど）も落とさず後ろに置く。
-    const withPhoto = base.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
-    const withoutPhoto = base.filter((restaurant) => !restaurant.photoUrl?.trim());
+    // 写真なし（OpenStreetMapなど）も落とさず後ろに置く。
+    const withPhoto = all.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
+    const withoutPhoto = all.filter((restaurant) => !restaurant.photoUrl?.trim());
     return [...withPhoto, ...withoutPhoto];
-  }, [genre, mapCandidates, restaurants]);
+  }, [genre, restaurants, unifiedCandidates]);
 
   /**
    * 候補が少ない時に「どの条件を広げれば増えるか」を案内する。
@@ -7447,7 +7492,7 @@ export default function App() {
             isLoading={isLoading}
             selectedRestaurant={selectedRestaurant}
             userLocation={userLocation}
-            mapCandidates={mapCandidates}
+            mapCandidates={unifiedCandidates}
             mapRouletteTarget={mapRouletteTarget}
             mapRouletteStatus={mapRouletteStatus}
             mapRouletteError={mapRouletteError}
@@ -10713,8 +10758,8 @@ function RouletteMapView({
     };
   }, [candidates, mapCenter.latitude, mapCenter.longitude]);
   const [visibleRegion, setVisibleRegion] = useState(region);
-  // 候補件数とピン数が食い違って見えないよう、地図に出すピンの上限を広げる。
-  const displayCandidates = useMemo(() => candidates.slice(0, 60), [candidates]);
+  // 候補一覧と同じ上限を使う。ここだけ別の数にすると「一覧12件なのにピンは8個」になる。
+  const displayCandidates = useMemo(() => candidates.slice(0, MAX_VISIBLE_CANDIDATES), [candidates]);
   const showGenreEffect = genreFocused && (candidates.length > 0 || loading || status === 'searching' || status === 'spinning');
   const activeCandidateId = useMemo(() => {
     if (status === 'result') {
@@ -13835,7 +13880,7 @@ function CandidateCard({ restaurant, uiText = UI_TEXT.ja }: { restaurant: Restau
   return (
     <View style={styles.candidateCard}>
       <View style={styles.candidateImageWrap}>
-        <RestaurantVisual restaurant={restaurant} large />
+        <RestaurantVisual restaurant={restaurant} large allowExternalPhoto />
         <View style={styles.candidateShade} />
         <View style={styles.candidateTopBadge}>
           <Text style={styles.candidateTopBadgeText}>{getRatingLabel(restaurant)}</Text>
