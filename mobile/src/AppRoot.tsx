@@ -9835,7 +9835,15 @@ function SearchTab({
       </View>
       <View style={styles.decisionActionRow}>
         <Pressable style={[styles.bigDecisionButton, styles.bigDecisionButtonPrimary]} onPress={onRandomPress}>
-          <Text style={styles.bigDecisionSmall}>{isLoading ? uiText.checkingCandidates : `${restaurants.length}${uiText.candidateDrawSuffix}`}</Text>
+          {/* 候補が取れていない時に「0件から抽選」と出ると誤解を招くため、
+              件数が確定している時だけ表示する。 */}
+          <Text style={styles.bigDecisionSmall}>
+            {isLoading
+              ? uiText.checkingCandidates
+              : restaurants.length
+                ? `${restaurants.length}${uiText.candidateDrawSuffix}`
+                : uiText.checkingCandidates}
+          </Text>
           <Text style={styles.bigDecisionText}>{uiText.decisionButton}</Text>
         </Pressable>
         <Pressable style={[styles.bigDecisionButton, styles.bigDecisionButtonRandom]} onPress={onAllRandomPress}>
@@ -9853,6 +9861,8 @@ function SearchTab({
           onSavePress={() => onRestaurantSave(restaurant)}
         />
       ))}
+      {/* 写真を表示している提供元のクレジット表記 */}
+      {restaurants.some((restaurant) => restaurant.externalProvider === 'HOTPEPPER') && <HotPepperCredit />}
     </View>
   );
 }
@@ -10273,7 +10283,8 @@ function RouletteMapView({
     };
   }, [candidates, mapCenter.latitude, mapCenter.longitude]);
   const [visibleRegion, setVisibleRegion] = useState(region);
-  const displayCandidates = useMemo(() => candidates.slice(0, 18), [candidates]);
+  // 候補件数とピン数が食い違って見えないよう、地図に出すピンの上限を広げる。
+  const displayCandidates = useMemo(() => candidates.slice(0, 60), [candidates]);
   const showGenreEffect = genreFocused && (candidates.length > 0 || loading || status === 'searching' || status === 'spinning');
   const activeCandidateId = useMemo(() => {
     if (status === 'result') {
@@ -13351,7 +13362,9 @@ function RestaurantCard({
   return (
     <View style={styles.restaurantCard}>
       <View style={styles.restaurantThumbWrap}>
-        <RestaurantVisual restaurant={restaurant} />
+        {/* ジャンルアイコンより実際の店舗写真のほうが伝わるため、取得できていれば写真を出す。
+            （写真は保存せず表示のみ。ホットペッパーの写真にはカード下部でクレジットを表示） */}
+        <RestaurantVisual restaurant={restaurant} allowExternalPhoto />
       </View>
       <View style={styles.restaurantBody}>
         <View style={styles.restaurantTitleRow}>
