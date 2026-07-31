@@ -5098,7 +5098,6 @@ export default function App() {
   const subscription = useSubscription(userId, apiBaseUrlCandidates);
   // 食券を「使った」状態（見た目のみ）。抽選自体はブロックしない。
   const [usedTicketKeys, setUsedTicketKeys] = useState<Set<MealSlotKey>>(() => new Set<MealSlotKey>());
-  const [ticketConfirm, setTicketConfirm] = useState<{ key: MealSlotKey; label: string } | null>(null);
   const mealTicketState = useMemo(
     () => buildMealTicketState(now, drawHistories, subscription.isPro, DEV_DISABLE_MEAL_TICKET_LIMIT, usedTicketKeys),
     [drawHistories, now, subscription.isPro, usedTicketKeys],
@@ -6488,28 +6487,19 @@ export default function App() {
       scrollToContentTop();
       return;
     }
-    // その時間帯の食券をまだ使っていなければ「◯の食券を使いますね？」と確認する。
-    // 一度使ったあとは確認を出さないので、「もう一回引く」は何度でも引ける。
+    // その時間帯の食券は「使った」ことにして表示を減らすが、抽選は絶対に止めない。
+    // （確認ダイアログで止める方式は、押しても何も起きないように見えるため採用しない）
     if (FEATURE_MEAL_TICKETS_ENABLED && !usedTicketKeys.has(currentTicket.key)) {
-      setTicketConfirm({ key: currentTicket.key, label: currentTicket.label });
-      return;
+      const ticketKey = currentTicket.key;
+      setUsedTicketKeys((current) => {
+        const next = new Set(current);
+        next.add(ticketKey);
+        return next;
+      });
+      setMessage(`${currentTicket.label}の食券を使いました。`);
     }
     await runPreparedDraw();
   }, [isLoading, mealTicketState, runPreparedDraw, scrollToContentTop, usedTicketKeys]);
-
-  const confirmTicketDraw = useCallback(async () => {
-    if (!ticketConfirm) {
-      return;
-    }
-    const ticketKey = ticketConfirm.key;
-    setUsedTicketKeys((current) => {
-      const next = new Set(current);
-      next.add(ticketKey);
-      return next;
-    });
-    setTicketConfirm(null);
-    await runPreparedDraw();
-  }, [runPreparedDraw, ticketConfirm]);
 
   const saveRestaurantToAlbum = useCallback(async (restaurant: Restaurant) => {
     const localFavorite = toSavedRestaurantFromSelection({
@@ -7264,41 +7254,6 @@ export default function App() {
         </Pressable>
       )}
       <AppFooter activeTab={activeTab} onPress={handleFooterPress} uiText={UI_TEXT[appLanguage]} />
-      {/* 食券の確認。ticketConfirm / confirmTicketDraw はこの App コンポーネントの状態なので、
-          必ずこの中でレンダリングする（別コンポーネントに置くと未定義参照でクラッシュする）。 */}
-      <Modal
-        visible={ticketConfirm != null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setTicketConfirm(null)}
-        statusBarTranslucent
-      >
-        <View style={styles.logoutModalOverlay}>
-          <View style={styles.logoutSheet}>
-            <View style={styles.logoutSheetIcon}>
-              <Ionicons name="ticket-outline" size={28} color={ORANGE} />
-            </View>
-            <Text style={styles.logoutSheetTitle}>{ticketConfirm?.label}の食券を使いますね？</Text>
-            <Text style={styles.logoutSheetLead}>
-              いまの時間帯は「{ticketConfirm?.label}」の一枚です。使うと今日のこの枠が消費されます。
-            </Text>
-            <View style={styles.logoutSheetNotice}>
-              <Ionicons name="ticket-outline" size={17} color={ORANGE} />
-              <Text style={styles.logoutSheetNoticeText}>
-                今日の食券: {Math.max(0, mealTicketState.totalFreeCount - mealTicketState.usedFreeCount)}/{mealTicketState.totalFreeCount}
-              </Text>
-            </View>
-            <View style={styles.logoutSheetActions}>
-              <Pressable style={styles.logoutSheetCancelButton} onPress={() => setTicketConfirm(null)}>
-                <Text style={styles.logoutSheetCancelText}>やめる</Text>
-              </Pressable>
-              <Pressable style={styles.logoutSheetActionButton} onPress={() => { void confirmTicketDraw(); }}>
-                <Text style={styles.logoutSheetActionText}>この食券で引く</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
