@@ -4966,7 +4966,9 @@ export default function App() {
   const [area, setArea] = useState('現在地');
   const [genre, setGenre] = useState('ラーメン');
   const [budgetMin, setBudgetMin] = useState('0');
-  const [budgetMax, setBudgetMax] = useState('1500');
+  // 初期値を 1,500円 にすると居酒屋・焼肉など単価の高いジャンルが全滅して
+  // 「0件」になってしまうため、既定は予算指定なしにする（ユーザーが選んだ時だけ絞る）。
+  const [budgetMax, setBudgetMax] = useState('');
   const [distance, setDistance] = useState('1.5km');
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
@@ -5761,7 +5763,7 @@ export default function App() {
     resultRevealValue.setValue(0);
     Animated.timing(spinValue, {
       toValue: 1,
-      duration: 1550,
+      duration: 800,
       easing: Easing.out(Easing.exp),
       useNativeDriver: true,
     }).start();
@@ -6038,7 +6040,7 @@ export default function App() {
           setMessage(`旅の一店を開きました。${normalized.name}`);
         }, 1500);
       }
-      const resultRevealDelay = isTravelDraw ? 1680 : 980;
+      const resultRevealDelay = isTravelDraw ? 900 : 520;
       setTimeout(revealSelectedRestaurant, resultRevealDelay);
       setTimeout(scrollToRandomResult, resultRevealDelay + 320);
     } catch (error) {
@@ -6137,8 +6139,8 @@ export default function App() {
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
       recordDrawForAnalytics(normalized);
       setMessage(recentIds.has(normalized.id) ? 'ぜんぶおまかせの候補が一巡しています。条件を少し変えると広がります。' : `ぜんぶおまかせ。${drawAnimation.doneMessage}`);
-      setTimeout(revealSelectedRestaurant, 980);
-      setTimeout(scrollToRandomResult, 1300);
+      setTimeout(revealSelectedRestaurant, 520);
+      setTimeout(scrollToRandomResult, 780);
     } catch (error) {
       if (shouldUseRestaurantDemoFallback(error)) {
         try {
@@ -6149,8 +6151,8 @@ export default function App() {
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
           recordDrawForAnalytics(normalized);
           setMessage(`通信できないため確認用の候補から選びました。${drawAnimation.doneMessage}`);
-          setTimeout(revealSelectedRestaurant, 980);
-          setTimeout(scrollToRandomResult, 1300);
+          setTimeout(revealSelectedRestaurant, 520);
+          setTimeout(scrollToRandomResult, 780);
           return;
         } catch {
           // Continue to the regular error message below.
@@ -6440,13 +6442,13 @@ export default function App() {
       Animated.sequence([
         Animated.timing(mapPinProgress, {
           toValue: 1,
-          duration: 2800,
+          duration: 1200,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(mapPinBounce, {
           toValue: 1,
-          duration: 420,
+          duration: 260,
           easing: Easing.out(Easing.back(1.6)),
           useNativeDriver: true,
         }),
@@ -10154,14 +10156,39 @@ function RandomTab({
   const conditionAreaLabel = formatHiddenCondition(areaLabel, displayArea);
   const conditionBudgetLabel = formatHiddenCondition(uiText.budget, displayBudget);
   const conditionDistanceLabel = formatHiddenCondition(uiText.distanceLabel, displayDistance);
+  // エリアを指定していて座標プリセットが無い場合（高石市など多くの市町村）に、
+  // 検索で見つかったお店の位置から中心を作る。これが無いと地図が現在地のままになる。
+  const searchResultOrigin = useMemo(() => {
+    const cleanArea = (displayAreaBase || area || '').trim();
+    if (!cleanArea || cleanArea === '現在地') {
+      return null;
+    }
+    const points = restaurants
+      .map((restaurant) => ({
+        latitude: toOptionalNumber(restaurant.latitude),
+        longitude: toOptionalNumber(restaurant.longitude),
+      }))
+      .filter((point): point is { latitude: number; longitude: number } =>
+        point.latitude != null && point.longitude != null);
+    if (!points.length) {
+      return null;
+    }
+    const latitude = points.reduce((total, point) => total + point.latitude, 0) / points.length;
+    const longitude = points.reduce((total, point) => total + point.longitude, 0) / points.length;
+    return { latitude, longitude, label: cleanArea };
+  }, [area, displayAreaBase, restaurants]);
+
   const selectedSearchOrigin = useMemo(
     () => {
       if (isEverythingRandom || conditionRandom.area || (isTravelDraw && !canShowTravelArea)) {
         return userLocation;
       }
-      return getSearchOriginForArea(displayAreaBase, userLocation) ?? getSearchOriginForArea(area, userLocation) ?? userLocation;
+      return getSearchOriginForArea(displayAreaBase, userLocation)
+        ?? getSearchOriginForArea(area, userLocation)
+        ?? searchResultOrigin
+        ?? userLocation;
     },
-    [area, canShowTravelArea, conditionRandom.area, displayAreaBase, isEverythingRandom, isTravelDraw, userLocation],
+    [area, canShowTravelArea, conditionRandom.area, displayAreaBase, isEverythingRandom, isTravelDraw, searchResultOrigin, userLocation],
   );
   const rouletteConditionItems = [
     { label: uiText.genreLabel, value: displayGenre, icon: 'restaurant-outline', active: true },
