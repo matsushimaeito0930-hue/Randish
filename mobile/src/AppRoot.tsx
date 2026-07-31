@@ -3009,8 +3009,10 @@ const pickCandidateFromPool = (candidates: CandidatePlace[], usedIds: string[], 
     return { selected: null, nextUsedIds: usedIds };
   }
 
-  const candidatesWithPhotos = candidates.filter((candidate) => Boolean(candidate.photoUrl?.trim()));
-  const preferredCandidates = candidatesWithPhotos.length ? candidatesWithPhotos : candidates;
+  // 以前は「写真がある候補」だけを抽選対象にしていたため、
+  // 写真なしの提供元（Geoapify など）が多いと同じ数店だけが繰り返し当たっていた。
+  // 全候補を対象にしつつ、写真ありを少しだけ出やすくする重み付け抽選にする。
+  const preferredCandidates = candidates;
   const used = new Set(usedIds);
   let pool = preferredCandidates.filter((candidate) => !used.has(candidate.id));
   if (pool.length === 0) {
@@ -3023,7 +3025,18 @@ const pickCandidateFromPool = (candidates: CandidatePlace[], usedIds: string[], 
       pool = different;
     }
   }
-  const selected = pool[Math.floor(Math.random() * pool.length)] ?? preferredCandidates[0];
+  const weightOf = (candidate: CandidatePlace) => (candidate.photoUrl?.trim() ? 3 : 1);
+  const totalWeight = pool.reduce((total, candidate) => total + weightOf(candidate), 0);
+  let target = Math.random() * totalWeight;
+  let weightedPick: CandidatePlace | null = null;
+  for (const candidate of pool) {
+    target -= weightOf(candidate);
+    if (target < 0) {
+      weightedPick = candidate;
+      break;
+    }
+  }
+  const selected = weightedPick ?? pool[pool.length - 1] ?? preferredCandidates[0];
   return {
     selected,
     nextUsedIds: [...used, selected.id],

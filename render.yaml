@@ -32,6 +32,9 @@ services:
         sync: false
       - key: RANDISH_GOOGLE_PLACES_ENABLED
         value: "true"
+      # 抽選候補の最大件数。少ないと同じ店ばかり当たるため広めにする（コード側上限は120）。
+      - key: RANDISH_PLACES_MAX_RESULTS
+        value: "60"
       # Google Places の呼び出し上限。ここに達すると自動的に Google の利用を止め、
       # HotPepper / Geoapify だけで動作する（課金の暴走防止）。カウントはサーバー起動ごとにリセット。
       - key: RANDISH_GOOGLE_PLACES_SESSION_LIMIT

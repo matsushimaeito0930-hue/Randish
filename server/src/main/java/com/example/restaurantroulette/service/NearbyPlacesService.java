@@ -31,7 +31,9 @@ public class NearbyPlacesService {
   private static final int DEFAULT_RADIUS_METERS = 1500;
   private static final int DEFAULT_CACHE_TTL_SECONDS = 600;
   private static final int DEFAULT_CACHE_DISTANCE_METERS = 300;
-  private static final int DEFAULT_MAX_RESULTS = 20;
+  private static final int DEFAULT_MAX_RESULTS = 60;
+  // 環境変数で増やせる上限。ここで頭打ちにすると候補が増えず抽選が偏るため、余裕を持たせる。
+  private static final int ABSOLUTE_MAX_RESULTS = 120;
 
   private final GooglePlacesEnrichmentService googlePlacesEnrichmentService;
   private final RestaurantQueryService restaurantQueryService;
@@ -94,7 +96,7 @@ public class NearbyPlacesService {
     this.cacheDistanceMeters = Math.max(50, cacheDistanceMeters);
     this.mockEnabled = mockEnabled;
     this.productionRuntime = productionRuntime;
-    this.maxResults = Math.max(1, Math.min(maxResults, DEFAULT_MAX_RESULTS));
+    this.maxResults = Math.max(1, Math.min(maxResults, ABSOLUTE_MAX_RESULTS));
   }
 
   public NearbyPlacesResponse search(NearbyPlacesRequest request) {
