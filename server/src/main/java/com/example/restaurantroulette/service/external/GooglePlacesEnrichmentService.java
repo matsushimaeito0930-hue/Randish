@@ -916,7 +916,9 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
 
   private boolean matchesFoodPlace(List<String> types) {
     if (types == null || types.isEmpty()) {
-      return true;
+      // フィールドマスクで places.types を要求しているため、通常は空にならない。
+      // 空のまま通すと美容室などの非飲食店が候補に混ざるので採用しない。
+      return false;
     }
     return normalizeTypes(types).stream().anyMatch(FOOD_PLACE_TYPES::contains);
   }

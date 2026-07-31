@@ -1,6 +1,22 @@
-﻿import { StyleSheet } from 'react-native';
+﻿import { Platform, StyleSheet } from 'react-native';
 
 import { CARD, FAVORITE_PINK, INK, LINE, ORANGE, PAPER } from '../constants/theme';
+
+/**
+ * 地図ピン用の影。
+ * react-native-web は shadow* を box-shadow に変換するため、
+ * 中身が透明なピン用コンテナだと「四角い枠」が見えてしまう。
+ * Web ではアイコンの形に沿う drop-shadow を使う。
+ */
+const pinShadow = (rgba: string, radius: number, offsetY: number, nativeColor: string, nativeOpacity: number) =>
+  (Platform.OS === 'web'
+    ? { filter: `drop-shadow(0px ${offsetY}px ${radius}px ${rgba})` }
+    : {
+      shadowColor: nativeColor,
+      shadowOpacity: nativeOpacity,
+      shadowRadius: radius,
+      shadowOffset: { width: 0, height: offsetY },
+    }) as object;
 
 export const styles = StyleSheet.create({
   screen: {
@@ -5359,16 +5375,94 @@ export const styles = StyleSheet.create({
     top: 12,
     backgroundColor: ORANGE,
   },
+  homeRecommendCard: {
+    marginTop: 16,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 16,
+    borderRadius: 24,
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+  homeRecommendHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  homeRecommendKicker: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+    color: ORANGE,
+  },
+  homeRecommendTitle: {
+    marginTop: 4,
+    fontSize: 20,
+    fontWeight: '900',
+    color: INK,
+  },
+  homeRecommendLead: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#6d6258',
+  },
+  homeRecommendScroll: {
+    paddingTop: 14,
+    paddingRight: 4,
+    gap: 12,
+  },
+  homeRecommendItem: {
+    width: 148,
+    padding: 10,
+    borderRadius: 18,
+    backgroundColor: '#fffdf9',
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+  homeRecommendName: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '900',
+    color: INK,
+  },
+  homeRecommendMeta: {
+    marginTop: 3,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#8a7f74',
+  },
+  homeRecommendPrice: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#6d6258',
+  },
+  homeRecommendButton: {
+    marginTop: 10,
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderRadius: 17,
+    backgroundColor: ORANGE,
+  },
+  homeRecommendButtonText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#ffffff',
+  },
   mapRouletteOriginDot: {
     position: 'absolute',
     width: 30,
     height: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000000',
-    shadowOpacity: 0.22,
-    shadowRadius: 9,
-    shadowOffset: { width: 0, height: 5 },
+    ...pinShadow('rgba(0,0,0,0.22)', 9, 5, '#000000', 0.22),
   },
   mapRouletteCandidateDot: {
     position: 'absolute',
@@ -5393,16 +5487,10 @@ export const styles = StyleSheet.create({
     height: 30,
     alignItems: 'center',
     justifyContent: 'flex-start',
-    shadowColor: '#000000',
-    shadowOpacity: 0.2,
-    shadowRadius: 7,
-    shadowOffset: { width: 0, height: 4 },
+    ...pinShadow('rgba(0,0,0,0.2)', 7, 4, '#000000', 0.2),
   },
   mapRouletteCandidatePinDotActive: {
-    shadowColor: '#e3322b',
-    shadowOpacity: 0.34,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
+    ...pinShadow('rgba(227,50,43,0.34)', 12, 6, '#e3322b', 0.34),
   },
   mapRouletteCandidatePinDotSelected: {
     transform: [{ scale: 1.12 }],

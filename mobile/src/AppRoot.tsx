@@ -5159,6 +5159,26 @@ export default function App() {
       .catch(() => undefined);
   }, [apiBaseUrlCandidates, area, budgetMax, budgetMin, distance, genre, syncWorkingApiBaseUrl, userId]);
 
+  // ホームの「今日のおすすめ」から店を選んだとき。
+  // 抽選と同じように履歴へ残して分析（推定外食費・ジャンル傾向）に反映する。
+  const handleVisitRecommendation = useCallback((restaurant: Restaurant) => {
+    setSelectedRestaurant(restaurant);
+    setRandomHistory((current) => [
+      restaurant,
+      ...current.filter((item) => item.id !== restaurant.id),
+    ].slice(0, 8));
+    recordDrawForAnalytics(restaurant);
+    setMessage(`${restaurant.name} を今日の一店にしました。分析に記録しました。`);
+    if (restaurant.googleMapsUri) {
+      Linking.openURL(restaurant.googleMapsUri);
+      return;
+    }
+    const query = encodeURIComponent(`${restaurant.name} ${restaurant.address ?? ''}`.trim());
+    if (query) {
+      Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+    }
+  }, [recordDrawForAnalytics]);
+
   useEffect(() => {
     if (didRestoreAuth.current) {
       return;
@@ -7012,6 +7032,7 @@ export default function App() {
             onCurrentLocationSearch={prepareCurrentLocationSearch}
             onRequireRegistration={openRegistration}
             onLogout={handleLogout}
+            onVisitRecommendation={handleVisitRecommendation}
           />
         )}
         {activeTab === 'search' && (
@@ -7664,6 +7685,7 @@ function HomeTab({
   onCurrentLocationSearch,
   onRequireRegistration,
   onLogout,
+  onVisitRecommendation,
 }: {
   apiBaseUrlCandidates: readonly string[];
   area: string;
@@ -7702,6 +7724,7 @@ function HomeTab({
   onCurrentLocationSearch: () => void;
   onRequireRegistration: () => void;
   onLogout: () => void;
+  onVisitRecommendation: (restaurant: Restaurant) => void;
 }) {
   return (
     <View>
@@ -7735,6 +7758,78 @@ function HomeTab({
         onRequireRegistration={onRequireRegistration}
         onLogout={onLogout}
       />
+      <HomeRecommendationCarousel
+        restaurants={restaurants}
+        isLoading={isLoading}
+        onVisit={onVisitRecommendation}
+      />
+    </View>
+  );
+}
+
+const RECOMMENDATION_COUNT = 5;
+
+function HomeRecommendationCarousel({
+  restaurants,
+  isLoading,
+  onVisit,
+}: {
+  restaurants: Restaurant[];
+  isLoading: boolean;
+  onVisit: (restaurant: Restaurant) => void;
+}) {
+  // 候補が入れ替わるたびに並びが飛ばないよう、リストの並びから安定して5件選ぶ。
+  const picks = useMemo(() => {
+    const usable = restaurants.filter((restaurant) => Boolean(restaurant?.name?.trim()));
+    if (usable.length <= RECOMMENDATION_COUNT) {
+      return usable;
+    }
+    const step = Math.max(1, Math.floor(usable.length / RECOMMENDATION_COUNT));
+    const spread: Restaurant[] = [];
+    for (let index = 0; index < usable.length && spread.length < RECOMMENDATION_COUNT; index += step) {
+      spread.push(usable[index]);
+    }
+    return spread.slice(0, RECOMMENDATION_COUNT);
+  }, [restaurants]);
+
+  if (!picks.length) {
+    return null;
+  }
+
+  return (
+    <View style={styles.homeRecommendCard}>
+      <View style={styles.homeRecommendHeader}>
+        <View>
+          <Text style={styles.homeRecommendKicker}>TODAY'S PICK</Text>
+          <Text style={styles.homeRecommendTitle}>今日のおすすめ</Text>
+        </View>
+        {isLoading && <ActivityIndicator color={ORANGE} />}
+      </View>
+      <Text style={styles.homeRecommendLead}>
+        気になる一店を選ぶと、抽選と同じように分析へ記録されます。
+      </Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.homeRecommendScroll}
+      >
+        {picks.map((restaurant, index) => (
+          <View key={`${restaurant.id}-${index}`} style={styles.homeRecommendItem}>
+            <RestaurantVisual restaurant={restaurant} allowExternalPhoto />
+            <Text style={styles.homeRecommendName} numberOfLines={2}>{restaurant.name}</Text>
+            <Text style={styles.homeRecommendMeta} numberOfLines={1}>
+              {[restaurant.area, restaurant.genre].filter(Boolean).join(' / ') || 'お店'}
+            </Text>
+            <Text style={styles.homeRecommendPrice} numberOfLines={1}>
+              {formatPrice(restaurant)}
+            </Text>
+            <Pressable style={styles.homeRecommendButton} onPress={() => onVisit(restaurant)}>
+              <Ionicons name="navigate-outline" size={14} color="#ffffff" />
+              <Text style={styles.homeRecommendButtonText}>この店にいく</Text>
+            </Pressable>
+          </View>
+        ))}
+      </ScrollView>
     </View>
   );
 }

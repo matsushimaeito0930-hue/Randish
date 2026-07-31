@@ -96,6 +96,11 @@ public class GeoapifyRestaurantMapper {
         buildStreetAddress(properties),
         normalizeAreaForDisplay(context.area()));
     List<String> categories = categories(properties);
+    // OSM 由来のデータには飲食店以外（美容室など）が紛れ込むことがあるため、
+    // カテゴリが取得できている場合は飲食系カテゴリを持つものだけを採用する。
+    if (!isFoodCategory(categories)) {
+      return Optional.empty();
+    }
     if (!matchesRequestedGenre(name, address, categories, context.genre())) {
       return Optional.empty();
     }
@@ -145,6 +150,18 @@ public class GeoapifyRestaurantMapper {
         || normalized.isBlank()
         || ALL_GENRES.equals(normalized)
         || "all".equalsIgnoreCase(normalized);
+  }
+
+  private boolean isFoodCategory(List<String> categories) {
+    if (categories == null || categories.isEmpty()) {
+      // カテゴリ情報が無い場合は判定できないため、従来どおり通す。
+      return true;
+    }
+    return categories.stream()
+        .filter(category -> category != null)
+        .map(category -> category.toLowerCase(java.util.Locale.ROOT))
+        .anyMatch(category -> category.startsWith("catering")
+            || category.startsWith("commercial.food_and_drink"));
   }
 
   private boolean matchesRequestedGenre(String name, String address, List<String> categories, String genre) {
