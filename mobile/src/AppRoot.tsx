@@ -1106,6 +1106,9 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     required: '必須',
     optional: '任意',
     authSocialLead: 'メールアドレスを入力すると、認証コードをお送りします。',
+    authStartTitle: 'メールではじめる',
+    authStartSubmit: '認証コードを送信',
+    authStartNote: '初めての方はそのまま登録され、登録済みの方はログインします。パスワードは不要です。',
     authRegisterTitle: '会員登録',
     authRegisterDesc: 'メールアドレスだけで会員登録できます。メールに届く認証コードを入力してください。',
     authRegisterLead: 'メールアドレスを入力すると、会員登録用コードをお送りします。',
@@ -1288,6 +1291,9 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     required: 'Required',
     optional: 'Optional',
     authSocialLead: 'Enter your email address and we will send you a verification code.',
+    authStartTitle: 'Continue with email',
+    authStartSubmit: 'Send verification code',
+    authStartNote: 'A new address is registered automatically; an existing one simply signs in. No password needed.',
     authRegisterTitle: 'Create Account',
     authRegisterDesc: 'Register with your email address and enter the verification code from the email.',
     authRegisterLead: 'Enter your email address and we will send you a registration code.',
@@ -1470,6 +1476,9 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     required: '必填',
     optional: '可选',
     authSocialLead: '输入邮箱地址，我们会向您发送登录链接。',
+    authStartTitle: '使用邮箱开始',
+    authStartSubmit: '发送验证码',
+    authStartNote: '新邮箱将自动注册，已注册的邮箱直接登录。无需密码。',
     authRegisterTitle: '会员注册',
     authRegisterDesc: '只需邮箱地址即可注册。请输入邮件中的验证码。',
     authRegisterLead: '输入邮箱地址，我们会向您发送注册验证码。',
@@ -1652,6 +1661,9 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     required: '필수',
     optional: '선택',
     authSocialLead: '이메일 주소를 입력하면 로그인 링크를 보내드립니다.',
+    authStartTitle: '이메일로 시작하기',
+    authStartSubmit: '인증 코드 보내기',
+    authStartNote: '처음이면 자동으로 가입되고, 이미 등록된 주소는 그대로 로그인됩니다. 비밀번호는 필요 없습니다.',
     authRegisterTitle: '회원가입',
     authRegisterDesc: '이메일 주소만으로 가입할 수 있습니다. 메일의 인증 코드를 입력하세요.',
     authRegisterLead: '이메일 주소를 입력하면 회원가입 코드를 보내드립니다.',
@@ -5054,6 +5066,10 @@ export default function App() {
   const [budgetMax, setBudgetMax] = useState('');
   const [distance, setDistance] = useState('1.5km');
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  // いま持っている候補がどのエリアの検索結果かを覚えておく。
+  // これが無いと、エリアを変えた直後に前の街の候補が残り、
+  // 地図がその街（＝多くの場合は現在地）を指してしまう。
+  const [restaurantsArea, setRestaurantsArea] = useState('');
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [randomHistory, setRandomHistory] = useState<Restaurant[]>([]);
   const [drawHistories, setDrawHistories] = useState<DrawHistoryEntry[]>([]);
@@ -5515,17 +5531,24 @@ export default function App() {
   // 候補一覧(/api/restaurants)と抽選の候補(/api/places/nearby)は別APIなので、
   // そのままだと「一覧0件なのに抽選では店が出る」「一覧の件数と地図のピン数が合わない」が起きる。
   // ここで両方を1つの集合にまとめ、一覧・ピン・抽選プールがすべて同じものを見るようにする。
+  // エリアを切り替えた直後は、前の街の候補をいっさい使わない。
+  // 「江東区を選んでいるのに地図が大阪（＝現在地）」を根本から防ぐ。
+  const areaMatchedRestaurants = useMemo(
+    () => (restaurantsArea === area.trim() ? restaurants : []),
+    [area, restaurants, restaurantsArea],
+  );
+
   const unifiedCandidates = useMemo(() => {
-    const fromSearchList = restaurants
+    const fromSearchList = areaMatchedRestaurants
       .map(restaurantToCandidatePlace)
       .filter((place): place is CandidatePlace => place != null);
     return mergeCandidatePlaces(fromSearchList, mapCandidates).slice(0, MAX_VISIBLE_CANDIDATES);
-  }, [mapCandidates, restaurants]);
+  }, [areaMatchedRestaurants, mapCandidates]);
 
   const visibleRestaurants = useMemo(() => {
     // 一覧側の店舗情報のほうが予算・所要時間などが揃っているので、同じ店なら一覧側を使う。
     const detailedByKey = new Map<string, Restaurant>();
-    for (const restaurant of restaurants) {
+    for (const restaurant of areaMatchedRestaurants) {
       const place = restaurantToCandidatePlace(restaurant);
       if (place) {
         detailedByKey.set(candidatePlaceKey(place), restaurant);
@@ -5542,7 +5565,7 @@ export default function App() {
         : { ...detailed, photoUrl: toAbsoluteApiAssetUrl(place.photoUrl) };
     });
     // 座標が無くて地図に出せない店も、一覧からは落とさない。
-    const withoutCoordinates = restaurants.filter((restaurant) => restaurantToCandidatePlace(restaurant) == null);
+    const withoutCoordinates = areaMatchedRestaurants.filter((restaurant) => restaurantToCandidatePlace(restaurant) == null);
     const all = [...base, ...withoutCoordinates];
     if (!all.length) {
       return all;
@@ -5552,7 +5575,7 @@ export default function App() {
     const withPhoto = all.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
     const withoutPhoto = all.filter((restaurant) => !restaurant.photoUrl?.trim());
     return [...withPhoto, ...withoutPhoto];
-  }, [genre, restaurants, unifiedCandidates]);
+  }, [areaMatchedRestaurants, genre, unifiedCandidates]);
 
   /**
    * 候補が少ない時に「どの条件を広げれば増えるか」を案内する。
@@ -5722,6 +5745,7 @@ export default function App() {
       // サーバーの結果をそのまま使う。（「候補0件なのに抽選では店が出る」不一致を防ぐ）
       const normalized = genreMatched.length ? genreMatched : apiRestaurants;
       setRestaurants(normalized);
+      setRestaurantsArea(areaRef.current.trim());
       if (relaxedByBudget && normalized.length) {
         setMessage(`予算内のお店が見つからなかったので、予算をひろげて${normalized.length}件を表示しています。`);
         return;
@@ -5749,6 +5773,7 @@ export default function App() {
         const normalized = searchLocalRestaurants(previewApiParams)
           .filter((restaurant) => conditionRandom.genre || restaurantMatchesSelectedGenre(restaurant, genre));
         setRestaurants(normalized);
+        setRestaurantsArea(areaRef.current.trim());
         const genreLabel = genre === 'すべて' ? 'すべてのジャンル' : genre;
         const fallbackPrefix = '通信できないため確認用の候補を表示しています。';
         if (hasHiddenPreviewCondition) {
@@ -7812,7 +7837,10 @@ function LoginScreen({
       const callbackUrl = getOAuthRedirectUri();
       await randishApi.requestMagicLink(apiBaseUrlCandidates, {
         email: normalizedEmail,
-        createUser: !isLoginMode,
+        // 会員登録とログインは元々「メール→認証コード」で全く同じ手順で、
+        // 違いはこのフラグだけだった。常に true にすることで、
+        // 未登録なら登録・登録済みならログインと1つの入口で完結する。
+        createUser: true,
         ...(isOAuthBridgeEnabled() ? { appRedirectTo: callbackUrl } : { redirectTo: callbackUrl }),
       });
       onApiConnected();
@@ -7886,21 +7914,15 @@ function LoginScreen({
           <Image source={RANDISH_LOGO} style={styles.registerHeaderLogo} resizeMode="contain" />
         </View>
 
-        <Text style={styles.registerTitle}>
-          {isLoginMode ? uiText.authLoginTitle : uiText.authRegisterTitle}
-        </Text>
-        <Text style={styles.registerDesc}>
-          {isLoginMode ? uiText.authLoginDesc : uiText.authRegisterDesc}
-        </Text>
+        <Text style={styles.registerTitle}>{uiText.authStartTitle}</Text>
+        <Text style={styles.registerDesc}>{uiText.authSocialLead}</Text>
 
         {!!authNotice && (
           <Text style={[styles.registerNotice, authSucceeded && styles.registerNoticeSuccess]}>{authNotice}</Text>
         )}
 
         <View style={styles.registerMagicLinkPanel}>
-          <Text style={styles.registerSocialLead}>
-            {isLoginMode ? uiText.authLoginLead : uiText.authRegisterLead}
-          </Text>
+          <Text style={styles.registerSocialLead}>{uiText.authSocialLead}</Text>
           <Text style={styles.registerMagicLinkLabel}>メールアドレス</Text>
           <View style={styles.registerMagicLinkInputWrap}>
             <Ionicons name="mail-outline" size={19} color="#8a817a" />
@@ -7959,7 +7981,7 @@ function LoginScreen({
             <Text style={styles.registerMagicLinkButtonText}>
               {isSubmitting
                 ? (otpRequested ? '確認中…' : uiText.authSending)
-                : (otpRequested ? (isLoginMode ? 'コードを確認してログイン' : 'コードを確認して会員登録') : isLoginMode ? uiText.authLoginSubmit : uiText.authRegisterSubmit)}
+                : (otpRequested ? 'コードを確認してはじめる' : uiText.authStartSubmit)}
             </Text>
           </Pressable>
           {otpRequested && (
@@ -7967,9 +7989,7 @@ function LoginScreen({
               <Text style={styles.registerForgotPasswordText}>コードを再送する</Text>
             </Pressable>
           )}
-          <Text style={styles.registerMagicLinkNote}>
-            {isLoginMode ? uiText.authLoginNote : uiText.authRegisterNote}
-          </Text>
+          <Text style={styles.registerMagicLinkNote}>{uiText.authStartNote}</Text>
         </View>
 
         <Pressable style={styles.registerGuestButton} onPress={() => onStart()}>
@@ -7978,23 +7998,8 @@ function LoginScreen({
         </Pressable>
         <Text style={styles.registerGuestNote}>{uiText.guestNote}</Text>
 
-        <View style={styles.registerAccountSwitch}>
-          <Text style={styles.registerAccountSwitchText}>
-            {isLoginMode ? uiText.authNewPrompt : uiText.authExistingPrompt}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={isLoginMode ? uiText.authRegisterHere : uiText.authLoginHere}
-            style={[styles.registerAccountSwitchButton, isSubmitting && styles.registerButtonDisabled]}
-            onPress={() => switchAuthMode(isLoginMode ? 'register' : 'login')}
-            disabled={isSubmitting}
-          >
-            <Ionicons name={isLoginMode ? 'person-add-outline' : 'log-in-outline'} size={18} color="#ef552e" />
-            <Text style={styles.registerAccountSwitchButtonText}>
-              {isLoginMode ? uiText.authRegisterHere : uiText.authLoginHere}
-            </Text>
-          </Pressable>
-        </View>
+        {/* 「会員登録」と「ログイン」は手順もAPIも同じだったため、入口を1つに統合した。
+            切り替えリンクは、どちらを選んでも結果が同じで迷わせるだけなので置かない。 */}
 
         {/* ログインできない人でも連絡できるように、ログイン不要の問い合わせ窓口を置く */}
         <Pressable
