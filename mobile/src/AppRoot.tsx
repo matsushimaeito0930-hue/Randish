@@ -772,7 +772,7 @@ const pickNextDrawAnimation = (current: DrawAnimationKey) => {
 
 const DISTANCE_OPTIONS = ['100m', '500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
 const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
-const FREE_MEAL_TICKET_COUNT = 3;
+const FREE_MEAL_TICKET_COUNT = 4;
 
 // Premium を一時的に隠し、全機能をフリー体験にするフラグ。
 // Premium を復活させたいときは false に戻すだけでOK。
@@ -1822,7 +1822,8 @@ const MEAL_TICKET_DEFINITIONS: MealTicketDefinition[] = [
     icon: 'wine-outline',
     accent: MIDNIGHT_PURPLE,
     genreHints: [],
-    proOnly: true,
+    // Premium を隠している間は深夜も無料枠として扱い、朝・昼・夜・深夜の4枚構成にする。
+    proOnly: false,
   },
 ];
 
@@ -2661,7 +2662,14 @@ const getNextTicketStartDate = (now: Date, isProUser: boolean) => {
   return candidates[0] ?? addDays(now, 1);
 };
 
-const buildMealTicketState = (now: Date, drawHistories: DrawHistoryEntry[], isProUser: boolean, disableLimit = false): MealTicketState => {
+const buildMealTicketState = (
+  now: Date,
+  drawHistories: DrawHistoryEntry[],
+  isProUser: boolean,
+  disableLimit = false,
+  // disableLimit（抽選をブロックしない運用）でも、使った食券は見た目として消費済みにするためのキー。
+  displayUsedKeys: ReadonlySet<MealSlotKey> = new Set<MealSlotKey>(),
+): MealTicketState => {
   const dayKey = getLocalDayKey(now);
   const minutes = getMinutesOfDay(now);
   const currentDefinition = getMealTicketDefinitionForDate(now);
@@ -2682,7 +2690,7 @@ const buildMealTicketState = (now: Date, drawHistories: DrawHistoryEntry[], isPr
 
   const tickets = MEAL_TICKET_DEFINITIONS.map((ticket) => {
     const active = currentDefinition.key === ticket.key;
-    const used = usedKeys.has(ticket.key);
+    const used = usedKeys.has(ticket.key) || displayUsedKeys.has(ticket.key);
     const proLocked = Boolean(ticket.proOnly && !effectiveIsProUser);
     const upcomingStart = getUpcomingStartDateForTicket(now, ticket);
     const past = !active && !ticket.proOnly && ticket.endMinute <= minutes;
@@ -5060,9 +5068,12 @@ export default function App() {
     [apiBaseUrl, runtimeApiBaseUrl],
   );
   const subscription = useSubscription(userId, apiBaseUrlCandidates);
+  // 食券を「使った」状態（見た目のみ）。抽選自体はブロックしない。
+  const [usedTicketKeys, setUsedTicketKeys] = useState<Set<MealSlotKey>>(() => new Set<MealSlotKey>());
+  const [ticketConfirm, setTicketConfirm] = useState<{ key: MealSlotKey; label: string } | null>(null);
   const mealTicketState = useMemo(
-    () => buildMealTicketState(now, drawHistories, subscription.isPro, DEV_DISABLE_MEAL_TICKET_LIMIT),
-    [drawHistories, now, subscription.isPro],
+    () => buildMealTicketState(now, drawHistories, subscription.isPro, DEV_DISABLE_MEAL_TICKET_LIMIT, usedTicketKeys),
+    [drawHistories, now, subscription.isPro, usedTicketKeys],
   );
   const isRegisteredUser = userId !== APP_USER_ID;
 
@@ -6421,12 +6432,21 @@ export default function App() {
     mapPinProgress,
   ]);
 
+  const runPreparedDraw = useCallback(async () => {
+    if (drawMode === 'everything') {
+      chooseEverythingRandom();
+      return;
+    }
+    await chooseMapRouletteRestaurant();
+  }, [chooseEverythingRandom, chooseMapRouletteRestaurant, drawMode]);
+
   const startPreparedDraw = useCallback(async () => {
     if (isLoading) {
       return;
     }
     const currentTicket = mealTicketState.current;
-    if (FEATURE_MEAL_TICKETS_ENABLED && !currentTicket.available) {
+    // DEV_DISABLE_MEAL_TICKET_LIMIT が true の間は、食券を「見た目」として運用し抽選はブロックしない。
+    if (FEATURE_MEAL_TICKETS_ENABLED && !DEV_DISABLE_MEAL_TICKET_LIMIT && !currentTicket.available) {
       if (currentTicket.proOnly && !mealTicketState.isProUser) {
         setMessage(`深夜の抽選はPremium限定です。${mealTicketState.nextUnlockLabel}で朝の一回が使えます。`);
       } else if (currentTicket.used) {
@@ -6437,12 +6457,28 @@ export default function App() {
       scrollToContentTop();
       return;
     }
-    if (drawMode === 'everything') {
-      chooseEverythingRandom();
+    // その時間帯の食券をまだ使っていなければ「◯の食券を使いますね？」と確認する。
+    // 一度使ったあとは確認を出さないので、「もう一回引く」は何度でも引ける。
+    if (FEATURE_MEAL_TICKETS_ENABLED && !usedTicketKeys.has(currentTicket.key)) {
+      setTicketConfirm({ key: currentTicket.key, label: currentTicket.label });
       return;
     }
-    await chooseMapRouletteRestaurant();
-  }, [chooseEverythingRandom, chooseMapRouletteRestaurant, drawMode, isLoading, mealTicketState, scrollToContentTop]);
+    await runPreparedDraw();
+  }, [isLoading, mealTicketState, runPreparedDraw, scrollToContentTop, usedTicketKeys]);
+
+  const confirmTicketDraw = useCallback(async () => {
+    if (!ticketConfirm) {
+      return;
+    }
+    const ticketKey = ticketConfirm.key;
+    setUsedTicketKeys((current) => {
+      const next = new Set(current);
+      next.add(ticketKey);
+      return next;
+    });
+    setTicketConfirm(null);
+    await runPreparedDraw();
+  }, [runPreparedDraw, ticketConfirm]);
 
   const saveRestaurantToAlbum = useCallback(async (restaurant: Restaurant) => {
     const localFavorite = toSavedRestaurantFromSelection({
@@ -7186,7 +7222,9 @@ export default function App() {
           style={({ pressed }) => [styles.homeCurrentLocationFab, pressed && styles.homeCurrentLocationFabPressed]}
           onPress={prepareCurrentLocationSearch}
         >
-          <Ionicons name={userLocation ? 'locate' : 'navigate'} size={24} color="#ffffff" />
+          {/* 現在地から探すボタン。的（locate）より進行方向を指す三角の矢印のほうが
+              「現在地から探す」ことが直感的に伝わるため navigate を使う。 */}
+          <Ionicons name={userLocation ? 'navigate' : 'navigate-outline'} size={24} color="#ffffff" />
           {userLocation && (
             <View style={styles.homeCurrentLocationFabBadge}>
               <Ionicons name="checkmark" size={10} color="#ffffff" />
@@ -8124,7 +8162,12 @@ function HomeLocationPanel({
   const accountMenuItems: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }[] = [
     { icon: 'notifications-outline', label: t.notifications, value: t.notificationsValue },
     ...(FEATURE_MEAL_TICKETS_ENABLED
-      ? [{ icon: 'ticket-outline' as keyof typeof Ionicons.glyphMap, label: t.dailyAccess, value: `${mealTicketState.usedFreeCount}/${mealTicketState.totalFreeCount} FREE` }]
+      ? [{
+        icon: 'ticket-outline' as keyof typeof Ionicons.glyphMap,
+        label: t.dailyAccess,
+        // 残り枚数で表示する（未使用なら 4/4）。
+        value: `${Math.max(0, mealTicketState.totalFreeCount - mealTicketState.usedFreeCount)}/${mealTicketState.totalFreeCount} FREE`,
+      }]
       : []),
     { icon: 'shield-checkmark-outline', label: t.creditTerms, value: t.creditTermsValue },
   ];
@@ -8604,6 +8647,39 @@ function HomeLocationPanel({
         </KeyboardAvoidingView>
       </Modal>
       <Modal
+        visible={ticketConfirm != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTicketConfirm(null)}
+        statusBarTranslucent
+      >
+        <View style={styles.logoutModalOverlay}>
+          <View style={styles.logoutSheet}>
+            <View style={styles.logoutSheetIcon}>
+              <Ionicons name="ticket-outline" size={28} color={ORANGE} />
+            </View>
+            <Text style={styles.logoutSheetTitle}>{ticketConfirm?.label}の食券を使いますね？</Text>
+            <Text style={styles.logoutSheetLead}>
+              いまの時間帯は「{ticketConfirm?.label}」の一枚です。使うと今日のこの枠が消費されます。
+            </Text>
+            <View style={styles.logoutSheetNotice}>
+              <Ionicons name="ticket-outline" size={17} color={ORANGE} />
+              <Text style={styles.logoutSheetNoticeText}>
+                今日の食券: {Math.max(0, mealTicketState.totalFreeCount - mealTicketState.usedFreeCount)}/{mealTicketState.totalFreeCount}
+              </Text>
+            </View>
+            <View style={styles.logoutSheetActions}>
+              <Pressable style={styles.logoutSheetCancelButton} onPress={() => setTicketConfirm(null)}>
+                <Text style={styles.logoutSheetCancelText}>やめる</Text>
+              </Pressable>
+              <Pressable style={styles.logoutSheetActionButton} onPress={() => { void confirmTicketDraw(); }}>
+                <Text style={styles.logoutSheetActionText}>この食券で引く</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
         visible={creditSheetOpen}
         transparent
         animationType="fade"
@@ -8675,7 +8751,7 @@ function HomeLocationPanel({
             <View style={styles.logoutSheetNotice}>
               <Ionicons name="ticket-outline" size={17} color={ORANGE} />
               <Text style={styles.logoutSheetNoticeText}>
-                今日のFREE利用枠: {mealTicketState.usedFreeCount}/{mealTicketState.totalFreeCount}
+                今日のFREE利用枠: {Math.max(0, mealTicketState.totalFreeCount - mealTicketState.usedFreeCount)}/{mealTicketState.totalFreeCount}
               </Text>
             </View>
             <View style={styles.logoutSheetActions}>
