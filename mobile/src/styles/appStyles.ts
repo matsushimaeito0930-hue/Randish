@@ -5375,6 +5375,24 @@ export const styles = StyleSheet.create({
     top: 12,
     backgroundColor: ORANGE,
   },
+  creditSheetScroll: {
+    maxHeight: 320,
+    marginTop: 12,
+    alignSelf: 'stretch',
+  },
+  creditSheetSectionTitle: {
+    marginTop: 14,
+    fontSize: 13,
+    fontWeight: '900',
+    color: INK,
+  },
+  creditSheetText: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 19,
+    fontWeight: '700',
+    color: '#6d6258',
+  },
   homeRecommendCard: {
     marginTop: 16,
     marginHorizontal: 16,
@@ -5415,12 +5433,19 @@ export const styles = StyleSheet.create({
     gap: 12,
   },
   homeRecommendItem: {
-    width: 148,
-    padding: 10,
-    borderRadius: 18,
+    width: 168,
+    padding: 12,
+    borderRadius: 20,
     backgroundColor: '#fffdf9',
     borderWidth: 1,
     borderColor: LINE,
+  },
+  homeRecommendPhoto: {
+    width: '100%',
+    height: 108,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#f3ece4',
   },
   homeRecommendName: {
     marginTop: 8,
@@ -8266,7 +8291,7 @@ export const styles = StyleSheet.create({
     color: INK,
   },
   analysisDigestSpendAmount: {
-    maxWidth: 126,
+    flexShrink: 1,
     fontSize: 19,
     lineHeight: 23,
     fontWeight: '900',

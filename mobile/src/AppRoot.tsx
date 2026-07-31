@@ -358,7 +358,7 @@ const LOCATION_INTRO_STORAGE_KEY = 'randish.locationIntro.choice.v2';
 const LOCATION_CACHE_STORAGE_KEY = 'randish.location.cached.v1';
 const PLACES_CACHE_TTL_SECONDS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_TTL_SECONDS ?? 600);
 const PLACES_CACHE_DISTANCE_METERS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_DISTANCE_METERS ?? 300);
-const FEATURE_MEAL_TICKETS_ENABLED = false;
+const FEATURE_MEAL_TICKETS_ENABLED = true;
 const DEV_DISABLE_MEAL_TICKET_LIMIT = true;
 const DEV_LAN_API_BASE_URLS: string[] = [];
 const LOCAL_API_BASE_URLS = Platform.select({
@@ -7780,7 +7780,10 @@ function HomeRecommendationCarousel({
 }) {
   // 候補が入れ替わるたびに並びが飛ばないよう、リストの並びから安定して5件選ぶ。
   const picks = useMemo(() => {
-    const usable = restaurants.filter((restaurant) => Boolean(restaurant?.name?.trim()));
+    // API が落ちている時の確認用ダミー（麺や RANDISH など）はおすすめに出さない。
+    const usable = restaurants.filter((restaurant) =>
+      Boolean(restaurant?.name?.trim())
+      && (restaurant.externalProvider ?? '').toLowerCase() !== 'mock');
     if (usable.length <= RECOMMENDATION_COUNT) {
       return usable;
     }
@@ -7815,7 +7818,9 @@ function HomeRecommendationCarousel({
       >
         {picks.map((restaurant, index) => (
           <View key={`${restaurant.id}-${index}`} style={styles.homeRecommendItem}>
-            <RestaurantVisual restaurant={restaurant} allowExternalPhoto />
+            <View style={styles.homeRecommendPhoto}>
+              <RestaurantVisual restaurant={restaurant} large allowExternalPhoto />
+            </View>
             <Text style={styles.homeRecommendName} numberOfLines={2}>{restaurant.name}</Text>
             <Text style={styles.homeRecommendMeta} numberOfLines={1}>
               {[restaurant.area, restaurant.genre].filter(Boolean).join(' / ') || 'お店'}
@@ -8019,6 +8024,7 @@ function HomeLocationPanel({
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
   const [notificationSheetOpen, setNotificationSheetOpen] = useState(false);
+  const [creditSheetOpen, setCreditSheetOpen] = useState(false);
   const [logoutSheetOpen, setLogoutSheetOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   const [contactName, setContactName] = useState(isRegisteredUser ? profileName : '');
@@ -8575,6 +8581,59 @@ function HomeLocationPanel({
         </KeyboardAvoidingView>
       </Modal>
       <Modal
+        visible={creditSheetOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCreditSheetOpen(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.logoutModalOverlay}>
+          <View style={styles.logoutSheet}>
+            <View style={styles.logoutSheetIcon}>
+              <Ionicons name="shield-checkmark-outline" size={28} color={ORANGE} />
+            </View>
+            <Text style={styles.logoutSheetTitle}>クレジット・規約</Text>
+            <ScrollView style={styles.creditSheetScroll} showsVerticalScrollIndicator={false}>
+              <Text style={styles.creditSheetSectionTitle}>データ提供</Text>
+              <Text style={styles.creditSheetText}>
+                ・店舗情報／写真：ホットペッパー グルメ（リクルート）{'\n'}
+                ・店舗情報：Geoapify（OpenStreetMap © OpenStreetMap contributors）{'\n'}
+                ・地図・一部の店舗情報／写真：Google Maps
+              </Text>
+
+              <Text style={styles.creditSheetSectionTitle}>ご利用にあたって</Text>
+              <Text style={styles.creditSheetText}>
+                本アプリは飲食店を「選ぶ」ことを助けるサービスです。営業時間・価格・住所などの情報は
+                各データ提供元のものをそのまま表示しており、最新の内容と異なる場合があります。
+                実際のご来店前に、店舗の公式情報をご確認ください。
+              </Text>
+
+              <Text style={styles.creditSheetSectionTitle}>位置情報の取り扱い</Text>
+              <Text style={styles.creditSheetText}>
+                現在地は近くのお店を検索するためだけに使用します。正確な位置をサーバーへ保存することはありません。
+                許可はいつでも端末やブラウザの設定から変更できます。
+              </Text>
+
+              <Text style={styles.creditSheetSectionTitle}>免責事項</Text>
+              <Text style={styles.creditSheetText}>
+                抽選結果や推定予算はあくまで目安です。本サービスの利用によって生じた損害について、
+                運営は責任を負いかねます。予告なくサービス内容を変更・停止する場合があります。
+              </Text>
+
+              <Text style={styles.creditSheetSectionTitle}>お問い合わせ</Text>
+              <Text style={styles.creditSheetText}>
+                アプリ内のお問い合わせフォームからご連絡ください。
+              </Text>
+            </ScrollView>
+            <View style={styles.logoutSheetActions}>
+              <Pressable style={styles.logoutSheetCancelButton} onPress={() => setCreditSheetOpen(false)}>
+                <Text style={styles.logoutSheetCancelText}>閉じる</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
         visible={notificationSheetOpen}
         transparent
         animationType="fade"
@@ -8731,7 +8790,13 @@ function HomeLocationPanel({
                 <Pressable
                   key={`${item.label}-${index}`}
                   style={styles.homeAccountMenuItem}
-                  onPress={index === 0 ? () => setNotificationSheetOpen(true) : undefined}
+                  onPress={
+                    index === 0
+                      ? () => setNotificationSheetOpen(true)
+                      : item.label === t.creditTerms
+                        ? () => setCreditSheetOpen(true)
+                        : undefined
+                  }
                 >
                   <View style={styles.homeAccountMenuIcon}>
                     <Ionicons name={item.icon} size={18} color={ORANGE} />
@@ -12441,7 +12506,7 @@ function AnalysisDigestCard({
             </Text>
             <Text
               style={styles.analysisDigestMetricValue}
-              numberOfLines={1}
+              numberOfLines={Platform.OS === 'web' ? undefined : 1}
               adjustsFontSizeToFit
               minimumFontScale={0.68}
             >
@@ -12472,7 +12537,9 @@ function AnalysisDigestCard({
             </View>
             <Text
               style={styles.analysisDigestSpendAmount}
-              numberOfLines={1}
+              // adjustsFontSizeToFit は react-native-web では効かないため、
+              // Web で 1 行固定にすると金額が「18,00…」と省略されてしまう。
+              numberOfLines={Platform.OS === 'web' ? undefined : 1}
               adjustsFontSizeToFit
               minimumFontScale={0.72}
             >
