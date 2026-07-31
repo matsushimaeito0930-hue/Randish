@@ -101,6 +101,9 @@ public class GeoapifyRestaurantMapper {
     if (!isFoodCategory(categories)) {
       return Optional.empty();
     }
+    if (!isPlausibleRestaurantName(name)) {
+      return Optional.empty();
+    }
     if (!matchesRequestedGenre(name, address, categories, context.genre())) {
       return Optional.empty();
     }
@@ -150,6 +153,23 @@ public class GeoapifyRestaurantMapper {
         || normalized.isBlank()
         || ALL_GENRES.equals(normalized)
         || "all".equalsIgnoreCase(normalized);
+  }
+
+  /**
+   * OpenStreetMap には道路や施設そのものが飲食店として登録されている例があり
+   * （例: 「国道156号」がcatering扱い）、店名として不自然なものを弾く。
+   */
+  private boolean isPlausibleRestaurantName(String name) {
+    if (name == null) {
+      return false;
+    }
+    String trimmed = name.trim();
+    if (trimmed.isEmpty()) {
+      return false;
+    }
+    return !trimmed.matches("^(国道|県道|市道|道道|府道)\\s*\\d+\\s*号(線)?$")
+        && !trimmed.matches("^\\d+\\s*号(線)?$")
+        && !trimmed.matches("^[A-Za-z0-9\\-]+(通り|街道)$");
   }
 
   private boolean isFoodCategory(List<String> categories) {
