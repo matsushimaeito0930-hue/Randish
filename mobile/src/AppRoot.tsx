@@ -5455,14 +5455,18 @@ export default function App() {
   // 片方だけ失敗すると「候補0件なのに抽選は20件」というちぐはぐな表示になる。
   // 一覧が空のときは抽選が使っている候補をそのまま見せて、必ず数を一致させる。
   const visibleRestaurants = useMemo(() => {
-    if (restaurants.length) {
-      return restaurants;
+    const base = restaurants.length
+      ? restaurants
+      : mapCandidates.map((candidate) =>
+        candidatePlaceToRestaurant(candidate, areaRef.current, genre));
+    if (!base.length) {
+      return base;
     }
-    if (!mapCandidates.length) {
-      return restaurants;
-    }
-    return mapCandidates.map((candidate) =>
-      candidatePlaceToRestaurant(candidate, areaRef.current, genre));
+    // 写真がある店（ホットペッパー・Googleなど）を先に並べる。
+    // 写真なし（Geoapifyなど）も落とさず後ろに置く。
+    const withPhoto = base.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
+    const withoutPhoto = base.filter((restaurant) => !restaurant.photoUrl?.trim());
+    return [...withPhoto, ...withoutPhoto];
   }, [genre, mapCandidates, restaurants]);
 
   /**
@@ -5727,7 +5731,12 @@ export default function App() {
           distanceMeters: previewApiParams.distanceMeters,
         });
         if (!cancelled) {
-          setRecommendations(data.map(normalizeRestaurant));
+          // おすすめは写真ありきの見せ方なので、写真を持つ店だけを採用する。
+          // （ホットペッパー由来はほぼ写真つき。Geoapifyは写真が無いので自然と除外される）
+          const withPhoto = data
+            .map(normalizeRestaurant)
+            .filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
+          setRecommendations(withPhoto);
         }
       } catch {
         // おすすめは補助的な表示なので、失敗しても何もしない。
@@ -8157,7 +8166,7 @@ function HomeTab({
         onLogout={onLogout}
       />
       <HomeRecommendationCarousel
-        restaurants={recommendations.length ? recommendations : restaurants}
+        restaurants={recommendations}
         isLoading={isLoading}
         onVisit={onVisitRecommendation}
       />
