@@ -5375,6 +5375,26 @@ export const styles = StyleSheet.create({
     top: 12,
     backgroundColor: ORANGE,
   },
+  mapPreparingPanel: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 24,
+    backgroundColor: '#f3ece4',
+  },
+  mapPreparingTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: INK,
+  },
+  mapPreparingText: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+    color: '#8a7f74',
+    textAlign: 'center',
+  },
   supportLinkButton: {
     marginTop: 18,
     alignSelf: 'center',

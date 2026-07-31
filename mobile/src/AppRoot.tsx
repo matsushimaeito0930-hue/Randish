@@ -5058,6 +5058,8 @@ export default function App() {
   }, [restaurants]);
   // ホームの「今日のおすすめ」用。ジャンル・予算を外して取得し、いろいろな店が出るようにする。
   const [recommendations, setRecommendations] = useState<Restaurant[]>([]);
+  // 検索結果から求めたエリアの中心。抽選の座標としても使う。
+  const searchResultOriginRef = useRef<UserLocation | null>(null);
 
   const scrollToContentTop = useCallback((animated = true) => {
     setTimeout(() => {
@@ -6278,7 +6280,11 @@ export default function App() {
         center = await requestCurrentLocation('sync-search');
       }
     } else {
-      center = getSearchOriginForArea(cleanArea, null);
+      // 座標プリセットが無いエリア（交野市など）でも抽選できるように、
+      // 検索で見つかったお店の位置 → 同じ都道府県の代表地点 の順で座標を補う。
+      center = getSearchOriginForArea(cleanArea, null)
+        ?? searchResultOriginRef.current
+        ?? getPrefectureFallbackOrigin(cleanArea);
     }
 
     if (!center) {
@@ -10337,18 +10343,29 @@ function RandomTab({
     return { latitude, longitude, label: cleanArea };
   }, [area, displayAreaBase, restaurants]);
 
+  useEffect(() => {
+    searchResultOriginRef.current = searchResultOrigin;
+  }, [searchResultOrigin]);
+
   const selectedSearchOrigin = useMemo(
     () => {
       if (isEverythingRandom || conditionRandom.area || (isTravelDraw && !canShowTravelArea)) {
         return userLocation;
       }
-      // 優先順位: エリアの座標プリセット → 検索結果の位置 → 同じ都道府県の代表地点 → 現在地
-      return getSearchOriginForArea(displayAreaBase, userLocation)
-        ?? getSearchOriginForArea(area, userLocation)
+      const explicitArea = (displayAreaBase || area || '').trim();
+      const isCurrentLocationArea = !explicitArea || explicitArea === '現在地';
+      // 優先順位: エリアの座標プリセット → 検索結果の位置 → 同じ都道府県の代表地点
+      const resolved = getSearchOriginForArea(displayAreaBase, null)
+        ?? getSearchOriginForArea(area, null)
         ?? searchResultOrigin
         ?? getPrefectureFallbackOrigin(displayAreaBase)
-        ?? getPrefectureFallbackOrigin(area)
-        ?? userLocation;
+        ?? getPrefectureFallbackOrigin(area);
+      if (resolved) {
+        return resolved;
+      }
+      // エリアを指定しているのに座標が分からない場合、現在地を出すと
+      // 「選んだ場所と違う地図」になって紛らわしいので、あえて中心を持たせない。
+      return isCurrentLocationArea ? userLocation : null;
     },
     [area, canShowTravelArea, conditionRandom.area, displayAreaBase, isEverythingRandom, isTravelDraw, searchResultOrigin, userLocation],
   );
@@ -10590,6 +10607,9 @@ function RouletteMapView({
   const rouletteMapRef = useRef<any>(null);
   const genrePulse = useRef(new Animated.Value(0)).current;
   const MapModule = useMemo(getNativeMapModule, []);
+  // 中心が確定していないのに適当な場所（東京や現在地）を映すと誤解を招くため、
+  // 確定できたかどうかを持っておき、未確定なら地図の代わりに準備中を出す。
+  const hasResolvedMapCenter = Boolean(center || target || candidates[0]);
   const mapCenter = useMemo(() => {
     if (center) {
       return center;
@@ -10731,7 +10751,7 @@ function RouletteMapView({
   const MapView = MapModule?.default;
   const Marker = MapModule?.Marker;
   const rendersNativeMap = Boolean(canRenderNativeMap && MapView && Marker);
-  const rendersWebGoogleMap = Platform.OS === 'web';
+  const rendersWebGoogleMap = Platform.OS === 'web' && hasResolvedMapCenter;
   const webGoogleMapUrl = useMemo(() => {
     const query = encodeURIComponent(`${mapCenter.latitude},${mapCenter.longitude}`);
     return `https://www.google.com/maps?q=${query}&z=16&output=embed`;
@@ -10833,6 +10853,15 @@ function RouletteMapView({
             pointerEvents: 'none',
           },
         })
+      ) : !hasResolvedMapCenter ? (
+        // 中心が決まっていない状態。現在地を映すと選んだエリアと食い違うため準備中を出す。
+        <View style={styles.mapPreparingPanel}>
+          <ActivityIndicator color={ORANGE} />
+          <Text style={styles.mapPreparingTitle}>地図を準備しています</Text>
+          <Text style={styles.mapPreparingText} numberOfLines={2}>
+            {fallbackLabel ? `${fallbackLabel}の位置を確認しています。` : 'エリアの位置を確認しています。'}
+          </Text>
+        </View>
       ) : (
         <View style={styles.mapRouletteFallback}>
           <View style={[styles.rouletteMapCanvasPark, styles.rouletteMapCanvasParkOne]} />
