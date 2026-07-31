@@ -7567,8 +7567,42 @@ function LoginScreen({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const handledOAuthUrlRef = useRef<string | null>(null);
   const magicLinkRequestInFlightRef = useRef(false);
+  // ログインできない人が、ログインせずに不具合を知らせられるようにする。
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportEmail, setSupportEmail] = useState('');
+  const [supportContent, setSupportContent] = useState('');
+  const [supportNotice, setSupportNotice] = useState('');
+  const [supportSending, setSupportSending] = useState(false);
   const isLoginMode = authMode === 'login';
   const authCodeLabel = isLoginMode ? uiText.authLoginUrlLabel : uiText.authRegisterUrlLabel;
+
+  const handleSupportSend = async () => {
+    if (supportSending) {
+      return;
+    }
+    const content = supportContent.trim();
+    if (!content) {
+      setSupportNotice('内容を入力してください。');
+      return;
+    }
+    const contactEmail = supportEmail.trim() || email.trim();
+    setSupportSending(true);
+    setSupportNotice('');
+    try {
+      await randishApi.sendContact(apiBaseUrlCandidates, {
+        name: 'RANDISH利用者',
+        email: contactEmail || 'noreply@randish.jp',
+        subject: 'ログインできない・不具合の報告',
+        content: contactEmail ? content : `${content}\n\n（返信先メールの入力なし）`,
+      });
+      setSupportContent('');
+      setSupportNotice('送信しました。ご報告ありがとうございます。');
+    } catch {
+      setSupportNotice('送信できませんでした。時間をおいてもう一度お試しください。');
+    } finally {
+      setSupportSending(false);
+    }
+  };
 
   const switchAuthMode = (nextMode: 'register' | 'login') => {
     onAuthModeChange(nextMode);
@@ -7837,6 +7871,52 @@ function LoginScreen({
             </Text>
           </Pressable>
         </View>
+
+        {/* ログインできない人でも連絡できるように、ログイン不要の問い合わせ窓口を置く */}
+        <Pressable
+          accessibilityRole="link"
+          style={styles.supportLinkButton}
+          onPress={() => setSupportOpen((current) => !current)}
+        >
+          <Text style={styles.supportLinkText}>
+            ログインできない・不具合を報告する
+          </Text>
+        </Pressable>
+
+        {supportOpen && (
+          <View style={styles.supportPanel}>
+            <Text style={styles.supportPanelLead}>
+              うまくいかない内容を送ってください。ログインしていなくても送信できます。
+            </Text>
+            <TextInput
+              style={styles.supportInput}
+              value={supportEmail}
+              onChangeText={setSupportEmail}
+              placeholder="返信先メール（任意）"
+              placeholderTextColor="#a49a90"
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+            <TextInput
+              style={[styles.supportInput, styles.supportTextArea]}
+              value={supportContent}
+              onChangeText={setSupportContent}
+              placeholder="例）コードが届かない／エラーが出る　など"
+              placeholderTextColor="#a49a90"
+              multiline
+            />
+            {supportNotice ? <Text style={styles.supportNotice}>{supportNotice}</Text> : null}
+            <Pressable
+              style={[styles.supportSendButton, supportSending && styles.registerButtonDisabled]}
+              onPress={() => { void handleSupportSend(); }}
+              disabled={supportSending}
+            >
+              {supportSending
+                ? <ActivityIndicator color="#ffffff" />
+                : <Text style={styles.supportSendText}>送信する</Text>}
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
