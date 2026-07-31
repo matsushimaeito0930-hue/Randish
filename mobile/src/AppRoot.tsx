@@ -5816,7 +5816,7 @@ export default function App() {
     resultRevealValue.setValue(0);
     Animated.timing(spinValue, {
       toValue: 1,
-      duration: 800,
+      duration: 500,
       easing: Easing.out(Easing.exp),
       useNativeDriver: true,
     }).start();
@@ -6093,7 +6093,7 @@ export default function App() {
           setMessage(`旅の一店を開きました。${normalized.name}`);
         }, 1500);
       }
-      const resultRevealDelay = isTravelDraw ? 900 : 520;
+      const resultRevealDelay = isTravelDraw ? 600 : 320;
       setTimeout(revealSelectedRestaurant, resultRevealDelay);
       setTimeout(scrollToRandomResult, resultRevealDelay + 320);
     } catch (error) {
@@ -6132,7 +6132,7 @@ export default function App() {
           } else {
             setMessage(relaxedDrawMessage ?? doneMessage);
           }
-          const resultRevealDelay = isTravelDraw ? 220 : 980;
+          const resultRevealDelay = isTravelDraw ? 220 : 320;
           setTimeout(revealSelectedRestaurant, resultRevealDelay);
           setTimeout(scrollToRandomResult, resultRevealDelay + 320);
           return;
@@ -6192,8 +6192,8 @@ export default function App() {
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
       recordDrawForAnalytics(normalized);
       setMessage(recentIds.has(normalized.id) ? 'ぜんぶおまかせの候補が一巡しています。条件を少し変えると広がります。' : `ぜんぶおまかせ。${drawAnimation.doneMessage}`);
-      setTimeout(revealSelectedRestaurant, 520);
-      setTimeout(scrollToRandomResult, 780);
+      setTimeout(revealSelectedRestaurant, 320);
+      setTimeout(scrollToRandomResult, 520);
     } catch (error) {
       if (shouldUseRestaurantDemoFallback(error)) {
         try {
@@ -6204,8 +6204,8 @@ export default function App() {
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
           recordDrawForAnalytics(normalized);
           setMessage(`通信できないため確認用の候補から選びました。${drawAnimation.doneMessage}`);
-          setTimeout(revealSelectedRestaurant, 520);
-          setTimeout(scrollToRandomResult, 780);
+          setTimeout(revealSelectedRestaurant, 320);
+          setTimeout(scrollToRandomResult, 520);
           return;
         } catch {
           // Continue to the regular error message below.
@@ -6495,13 +6495,13 @@ export default function App() {
       Animated.sequence([
         Animated.timing(mapPinProgress, {
           toValue: 1,
-          duration: 1200,
+          duration: 700,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(mapPinBounce, {
           toValue: 1,
-          duration: 260,
+          duration: 180,
           easing: Easing.out(Easing.back(1.6)),
           useNativeDriver: true,
         }),
