@@ -7465,7 +7465,7 @@ function AppHeader({
       <View style={styles.headerText}>
         <View style={styles.headerNameRow}>
           <Text style={styles.headerName}>RANDISH</Text>
-          {isPro && <PremiumHeaderBadge />}
+          {!HIDE_PREMIUM && isPro && <PremiumHeaderBadge />}
         </View>
         <Text style={styles.headerCopy}>{locationStatus}</Text>
       </View>
@@ -8974,7 +8974,7 @@ function HomeLocationPanel({
           <View style={styles.homeLogoButton}>
             <Image source={RANDISH_LOGO} style={styles.homeLogoImage} resizeMode="contain" />
           </View>
-          {isPro && <PremiumHeaderBadge />}
+          {!HIDE_PREMIUM && isPro && <PremiumHeaderBadge />}
         </View>
         <View style={styles.homeAccountWrap}>
           <Pressable style={[styles.homeAccountButton, accountMenuOpen && styles.homeAccountButtonActive]} onPress={() => setAccountMenuOpen((current) => !current)}>
