@@ -1020,7 +1020,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     currentLocationCtaLead: '近くのお店だけを集めて、迷う時間を今日の一店に変えます。',
     currentLocationNoApi: 'ミニマップで表示',
     travelKicker: 'FOOD TRIP',
-    travelCta: '旅を始める',
+    travelCta: '旅行を始める',
     travelVehicleRail: '電車・船・バス・飛行機・車',
     chooseFromRegion: '地方から選ぶ',
     prefectureCount: '都道府県',
