@@ -941,6 +941,11 @@ export const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#ffffff',
   },
+  // 開発者バッジ。Premium（紫）と一目で区別できるよう紺色にする。
+  devHeaderBadge: {
+    backgroundColor: '#1f3a68',
+    shadowColor: '#1f3a68',
+  },
   locationPill: {
     maxWidth: 116,
     minHeight: 42,

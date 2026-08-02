@@ -7448,6 +7448,7 @@ export default function App() {
           area={conditionRandom.area ? '？' : area}
           locationStatus={conditionRandom.area ? '？ 周辺から探します' : locationStatus}
           isPro={subscription.isPro}
+          isDev={subscription.isDev}
           onLocationPress={requestCurrentLocation}
         />
       )}
@@ -7478,6 +7479,7 @@ export default function App() {
             appLanguage={appLanguage}
             isRegisteredUser={isRegisteredUser}
             isPro={subscription.isPro}
+            isDev={subscription.isDev}
             isLoading={isLoading}
             mealTicketState={mealTicketState}
             onProfileNameChange={setProfileName}
@@ -7652,11 +7654,13 @@ function AppHeader({
   area,
   locationStatus,
   isPro,
+  isDev = false,
   onLocationPress,
 }: {
   area: string;
   locationStatus: string;
   isPro: boolean;
+  isDev?: boolean;
   onLocationPress: () => void;
 }) {
   return (
@@ -7665,7 +7669,7 @@ function AppHeader({
       <View style={styles.headerText}>
         <View style={styles.headerNameRow}>
           <Text style={styles.headerName}>RANDISH</Text>
-          {!HIDE_PREMIUM && isPro && <PremiumHeaderBadge />}
+          {!HIDE_PREMIUM && isPro && <PremiumHeaderBadge isDev={isDev} />}
         </View>
         <Text style={styles.headerCopy}>{locationStatus}</Text>
       </View>
@@ -8076,11 +8080,16 @@ function LoginScreen({
   );
 }
 
-function PremiumHeaderBadge() {
+/**
+ * ヘッダーの権限バッジ。
+ * dev は Premium の上位互換なので、両方出さず紺色の DEV だけを見せる。
+ * 色で即座に区別できないと、どちらの権限で動いているか分からなくなる。
+ */
+function PremiumHeaderBadge({ isDev = false }: { isDev?: boolean }) {
   return (
-    <View style={styles.premiumHeaderBadge}>
-      <Ionicons name="sparkles" size={11} color="#ffffff" />
-      <Text style={styles.premiumHeaderBadgeText}>RANDISH Premium</Text>
+    <View style={[styles.premiumHeaderBadge, isDev && styles.devHeaderBadge]}>
+      <Ionicons name={isDev ? 'construct' : 'sparkles'} size={11} color="#ffffff" />
+      <Text style={styles.premiumHeaderBadgeText}>{isDev ? 'RANDISH DEV' : 'RANDISH Premium'}</Text>
     </View>
   );
 }
@@ -8197,6 +8206,7 @@ function HomeTab({
   appLanguage,
   isRegisteredUser,
   isPro,
+  isDev = false,
   isLoading,
   mealTicketState,
   onProfileNameChange,
@@ -8237,6 +8247,7 @@ function HomeTab({
   appLanguage: AppLanguage;
   isRegisteredUser: boolean;
   isPro: boolean;
+  isDev?: boolean;
   isLoading: boolean;
   mealTicketState: MealTicketState;
   onProfileNameChange: (value: string) => void;
@@ -8277,6 +8288,7 @@ function HomeTab({
         appLanguage={appLanguage}
         isRegisteredUser={isRegisteredUser}
         isPro={isPro}
+        isDev={isDev}
         mealTicketState={mealTicketState}
         onProfileNameChange={onProfileNameChange}
         onProfileImageChange={onProfileImageChange}
@@ -8526,6 +8538,7 @@ function HomeLocationPanel({
   apiBaseUrlCandidates,
   isRegisteredUser,
   isPro,
+  isDev = false,
   mealTicketState,
   onProfileNameChange,
   onProfileImageChange,
@@ -8555,6 +8568,7 @@ function HomeLocationPanel({
   apiBaseUrlCandidates: string | readonly string[];
   isRegisteredUser: boolean;
   isPro: boolean;
+  isDev?: boolean;
   mealTicketState: MealTicketState;
   onProfileNameChange: (value: string) => void;
   onProfileImageChange: (value: string | null) => void;
@@ -9234,7 +9248,7 @@ function HomeLocationPanel({
           <View style={styles.homeLogoButton}>
             <Image source={RANDISH_LOGO} style={styles.homeLogoImage} resizeMode="contain" />
           </View>
-          {!HIDE_PREMIUM && isPro && <PremiumHeaderBadge />}
+          {!HIDE_PREMIUM && isPro && <PremiumHeaderBadge isDev={isDev} />}
         </View>
         <View style={styles.homeAccountWrap}>
           <Pressable style={[styles.homeAccountButton, accountMenuOpen && styles.homeAccountButtonActive]} onPress={() => setAccountMenuOpen((current) => !current)}>
