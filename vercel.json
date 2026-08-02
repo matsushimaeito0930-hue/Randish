@@ -21,6 +21,18 @@
           "value": "camera=(self), geolocation=(self), microphone=(), payment=(), usb=()"
         }
       ]
+    },
+    {
+      "source": "/_expo/static/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/((?!_expo/static/).*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
     }
   ],
   "rewrites": [
