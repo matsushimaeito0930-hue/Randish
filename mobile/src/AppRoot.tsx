@@ -359,7 +359,7 @@ const LOCATION_CACHE_STORAGE_KEY = 'randish.location.cached.v1';
 const PLACES_CACHE_TTL_SECONDS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_TTL_SECONDS ?? 600);
 const PLACES_CACHE_DISTANCE_METERS = Number((globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env?.EXPO_PUBLIC_PLACES_CACHE_DISTANCE_METERS ?? 300);
 const FEATURE_MEAL_TICKETS_ENABLED = true;
-const DEV_DISABLE_MEAL_TICKET_LIMIT = true;
+const DEV_DISABLE_MEAL_TICKET_LIMIT = false;
 const DEV_LAN_API_BASE_URLS: string[] = [];
 const LOCAL_API_BASE_URLS = Platform.select({
   android: ['http://10.0.2.2:8080', 'http://localhost:8080', 'http://127.0.0.1:8080'],
@@ -800,11 +800,11 @@ const pickNextDrawAnimation = (current: DrawAnimationKey) => {
 
 const DISTANCE_OPTIONS = ['100m', '500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
 const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
-const FREE_MEAL_TICKET_COUNT = 4;
+const FREE_MEAL_TICKET_COUNT = 3;
 
 // Premium を一時的に隠し、全機能をフリー体験にするフラグ。
 // Premium を復活させたいときは false に戻すだけでOK。
-const HIDE_PREMIUM = true;
+const HIDE_PREMIUM = false;
 
 function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]): SubscriptionState {
   const [serverStatus, setServerStatus] = useState<ApiPremiumStatus | null>(null);
@@ -1862,8 +1862,8 @@ const MEAL_TICKET_DEFINITIONS: MealTicketDefinition[] = [
     icon: 'wine-outline',
     accent: MIDNIGHT_PURPLE,
     genreHints: [],
-    // Premium を隠している間は深夜も無料枠として扱い、朝・昼・夜・深夜の4枚構成にする。
-    proOnly: false,
+    // 深夜は Premium 限定。無料は朝・昼・夜の3枚。
+    proOnly: true,
   },
 ];
 
