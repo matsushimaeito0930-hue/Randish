@@ -991,7 +991,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     areaSetup: 'AREA SETUP',
     homeTitle: 'どの街から探す？',
     homeLead: '現在地、駅名、市町村。今日の一店を決める起点を選びます。',
-    travel: '旅をする',
+    travel: '旅行',
     travelSub: '県・街・距離・ジャンルをおまかせ',
     searchPlaceholder: '梅田・美郷町・駅名で検索',
     close: '閉じる',
@@ -2637,7 +2637,26 @@ const createDemoAlbumSlideItems = (): AlbumDiaryItem[] => {
 
 const isWideGenreLabel = (label: string) => label.length >= 6 || label.includes('・');
 
-const TRAVEL_GENRES = GENRES.filter((item) => item.label !== 'すべて' && item.label !== 'その他').map((item) => item.label);
+/**
+ * 旅行ルーレットで引くジャンル。
+ * 全ジャンルから引くと、韓国料理・餃子・粉もの・郷土料理などが地方の街に当たり、
+ * ほぼ確実に0件になっていた。どの都道府県にも一定数ある定番だけに絞る。
+ */
+const TRAVEL_SAFE_GENRE_LABELS = [
+  'ラーメン', '居酒屋', 'カフェ', '定食', '寿司',
+  'そば', 'うどん', '中華', '焼肉', '洋食', '焼き鳥', 'カレー',
+];
+
+const TRAVEL_GENRES = GENRES
+  .map((item) => item.label)
+  .filter((label) => TRAVEL_SAFE_GENRE_LABELS.includes(label));
+
+/**
+ * 旅行ルーレットで引く距離。
+ * 通常の距離候補には100m・500mが含まれ、旅先で引くと徒歩1分圏の検索になって
+ * 0件になっていた。旅行なのだから広めの範囲だけを使う。
+ */
+const TRAVEL_DISTANCE_OPTIONS = ['3km', '5km', '10km'];
 
 const pickRandomTravelGenre = (currentGenre: string) => pickRandomDifferent(TRAVEL_GENRES, currentGenre);
 
@@ -6035,7 +6054,7 @@ export default function App() {
     const travelDisplay = `${travelPrefectureLabel} / ${travelArea}`;
     const travelSearchArea = getAreaPresetSearchValue(travelPreset);
     const nextGenre = pickRandomTravelGenre(genre);
-    const nextDistance = pickRandomDifferent(DISTANCE_OPTIONS, distance);
+    const nextDistance = pickRandomDifferent(TRAVEL_DISTANCE_OPTIONS, distance);
 
     areaRef.current = travelSearchArea;
     setArea(travelSearchArea);
@@ -10406,7 +10425,7 @@ function RandomTab({
     : isEverythingRandom
       ? '完全ランダム START'
       : isTravelDraw
-        ? '旅ルーレット START'
+        ? '旅行ルーレット START'
       : 'PRESS START';
   const ticketOpacity = spinValue.interpolate({ inputRange: [0, 0.08, 0.9, 1], outputRange: [0, 1, 1, 0.96] });
   const ticketLift = spinValue.interpolate({ inputRange: [0, 0.28, 0.68, 1], outputRange: [46, 22, -10, 0] });
