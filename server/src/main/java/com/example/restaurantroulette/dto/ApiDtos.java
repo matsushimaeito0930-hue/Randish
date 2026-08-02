@@ -213,7 +213,12 @@ public final class ApiDtos {
       String source,
       Instant activeUntil,
       String provider,
-      String environment) {
+      String environment,
+      /**
+       * 開発用の全権限。premium_grants に entitlement_key='dev' を1行入れた利用者だけ true になる。
+       * アプリ側には判定材料を一切置かないため、配布物を読まれても真似できない。
+       */
+      boolean isDev) {
   }
 
   public record FavoriteCreateRequest(

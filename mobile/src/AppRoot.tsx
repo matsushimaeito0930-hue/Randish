@@ -168,6 +168,8 @@ type AlbumDiaryItem = {
 
 type SubscriptionState = {
   isPro: boolean;
+  /** 開発者権限。サーバーの premium_grants に entitlement_key='dev' がある利用者だけ true。 */
+  isDev: boolean;
   source: 'free' | 'server' | 'native' | 'error';
   status: 'idle' | 'loading' | 'ready' | 'error';
   activeUntil: string | null;
@@ -926,10 +928,12 @@ function useSubscription(userId: string, apiBaseUrlCandidates: readonly string[]
     })();
   }, [refresh, userId]);
 
-  const isPro = Boolean(serverStatus?.isPro || (TRUST_NATIVE_REVENUECAT_STATUS && nativeIsPro));
+  const isDev = Boolean(serverStatus?.isDev);
+  const isPro = Boolean(serverStatus?.isPro || isDev || (TRUST_NATIVE_REVENUECAT_STATUS && nativeIsPro));
 
   return {
     isPro,
+    isDev,
     source: isPro ? source === 'free' || source === 'error' ? 'native' : source : source,
     status,
     activeUntil: serverStatus?.activeUntil ?? null,
@@ -5293,8 +5297,9 @@ export default function App() {
   // 食券を「使った」状態（見た目のみ）。抽選自体はブロックしない。
   const [usedTicketKeys, setUsedTicketKeys] = useState<Set<MealSlotKey>>(() => new Set<MealSlotKey>());
   const mealTicketState = useMemo(
-    () => buildMealTicketState(now, drawHistories, subscription.isPro, DEV_DISABLE_MEAL_TICKET_LIMIT, usedTicketKeys),
-    [drawHistories, now, subscription.isPro, usedTicketKeys],
+    // 開発者は食券の上限を受けない（APIが飛ぶかを何度でも確かめられるようにするため）
+    () => buildMealTicketState(now, drawHistories, subscription.isPro, DEV_DISABLE_MEAL_TICKET_LIMIT || subscription.isDev, usedTicketKeys),
+    [drawHistories, now, subscription.isDev, subscription.isPro, usedTicketKeys],
   );
   const isRegisteredUser = userId !== APP_USER_ID;
 
@@ -6857,7 +6862,7 @@ export default function App() {
     }
     const currentTicket = mealTicketState.current;
     // DEV_DISABLE_MEAL_TICKET_LIMIT が true の間は、食券を「見た目」として運用し抽選はブロックしない。
-    if (FEATURE_MEAL_TICKETS_ENABLED && !DEV_DISABLE_MEAL_TICKET_LIMIT && !currentTicket.available) {
+    if (FEATURE_MEAL_TICKETS_ENABLED && !DEV_DISABLE_MEAL_TICKET_LIMIT && !subscription.isDev && !currentTicket.available) {
       if (currentTicket.proOnly && !mealTicketState.isProUser) {
         setMessage(`深夜の抽選はPremium限定です。${mealTicketState.nextUnlockLabel}で朝の一回が使えます。`);
       } else if (currentTicket.used) {
@@ -7614,6 +7619,7 @@ export default function App() {
             drawHistories={drawHistories}
             savedRestaurants={savedRestaurants}
             isPro={subscription.isPro}
+            isDev={subscription.isDev}
             onStartPro={startPremiumPurchase}
             onRestorePro={restorePremiumPurchase}
             onAreaPress={() => setActiveTab('home')}
@@ -13272,6 +13278,134 @@ function AnalysisDigestCard({
   );
 }
 
+/**
+ * 開発者だけに表示する診断パネル。
+ * 「リクエストが本当に飛んでいるか」をアプリを離れずに確かめるためのもの。
+ * 開くだけでは外部APIを叩かず、疎通テストを押したときだけ実際に1回投げる。
+ */
+function DevDiagnosticsPanel({
+  userId,
+  apiBaseUrlCandidates,
+  lastReportSource,
+}: {
+  userId: string;
+  apiBaseUrlCandidates: readonly string[];
+  lastReportSource: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<Awaited<ReturnType<typeof randishApi.getDevDiagnostics>> | null>(null);
+
+  const load = useCallback(async (probe: boolean) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await randishApi.getDevDiagnostics(apiBaseUrlCandidates, userId, probe);
+      setData(result);
+    } catch (fetchError) {
+      setError(fetchError instanceof Error ? fetchError.message : '取得に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  }, [apiBaseUrlCandidates, userId]);
+
+  const rows = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+    const items: { label: string; value: string }[] = [];
+    for (const provider of data.providers ?? []) {
+      const name = String(provider.provider ?? '不明');
+      const available = provider.available ?? provider.apiKeyLoaded;
+      items.push({ label: `${name} 稼働`, value: available ? '有効' : '無効' });
+      if (provider.sessionRequestCount != null) {
+        items.push({
+          label: `${name} 使用回数`,
+          value: `${provider.sessionRequestCount} / ${provider.sessionRequestLimit}（残り${provider.sessionRequestsRemaining}）`,
+        });
+      }
+      if (provider.cacheEntries != null) {
+        items.push({ label: `${name} キャッシュ`, value: `${provider.cacheEntries}件` });
+      }
+    }
+    for (const usage of data.apiUsage ?? []) {
+      const key = String(usage.key ?? usage.provider ?? '不明');
+      if (usage.used != null) {
+        items.push({ label: `${key} 累計`, value: `${usage.used}${usage.limit != null ? ` / ${usage.limit}` : ''}` });
+      }
+    }
+    if (data.probe) {
+      items.push({ label: '疎通テスト', value: String(data.probe.status ?? '不明') });
+      if (data.probe.restaurantCount != null) {
+        items.push({ label: '疎通テストの取得件数', value: `${data.probe.restaurantCount}件` });
+      }
+    }
+    return items;
+  }, [data]);
+
+  return (
+    <View style={styles.devPanel}>
+      <Pressable
+        style={styles.devPanelHeader}
+        onPress={() => {
+          const next = !open;
+          setOpen(next);
+          if (next && !data) {
+            void load(false);
+          }
+        }}
+      >
+        <View style={styles.devPanelBadge}>
+          <Text style={styles.devPanelBadgeText}>DEV</Text>
+        </View>
+        <Text style={styles.devPanelTitle}>API診断</Text>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={INK} />
+      </Pressable>
+
+      {open && (
+        <View style={styles.devPanelBody}>
+          <Text style={styles.devPanelLead}>
+            開いただけでは外部APIを叩きません。「疎通テスト」を押したときだけ実際に1回リクエストします。
+          </Text>
+
+          <View style={styles.devPanelRow}>
+            <Text style={styles.devPanelRowLabel}>直近のAIレポート</Text>
+            <Text style={styles.devPanelRowValue}>
+              {lastReportSource === 'gemini' ? 'Gemini生成' : lastReportSource ? `${lastReportSource}（AI未接続）` : '未生成'}
+            </Text>
+          </View>
+
+          {rows.map((row) => (
+            <View key={row.label} style={styles.devPanelRow}>
+              <Text style={styles.devPanelRowLabel}>{row.label}</Text>
+              <Text style={styles.devPanelRowValue}>{row.value}</Text>
+            </View>
+          ))}
+
+          {!!error && <Text style={styles.devPanelError}>{error}</Text>}
+          {!!data?.generatedAt && (
+            <Text style={styles.devPanelTimestamp}>取得: {formatShortDateTime(data.generatedAt)}</Text>
+          )}
+
+          <View style={styles.devPanelActions}>
+            <Pressable style={styles.devPanelButton} onPress={() => void load(false)} disabled={loading}>
+              <Text style={styles.devPanelButtonText}>{loading ? '取得中…' : '再取得'}</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.devPanelButton, styles.devPanelButtonPrimary]}
+              onPress={() => void load(true)}
+              disabled={loading}
+            >
+              <Text style={[styles.devPanelButtonText, styles.devPanelButtonPrimaryText]}>疎通テスト</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
 function AnalyticsTab({
   uiText,
   userId,
@@ -13283,6 +13417,7 @@ function AnalyticsTab({
   drawHistories,
   savedRestaurants,
   isPro,
+  isDev,
   onStartPro,
   onRestorePro,
   onAreaPress,
@@ -13297,6 +13432,7 @@ function AnalyticsTab({
   drawHistories: DrawHistoryEntry[];
   savedRestaurants: SavedRestaurant[];
   isPro: boolean;
+  isDev: boolean;
   onStartPro: () => void;
   onRestorePro: () => void;
   onAreaPress: () => void;
@@ -13311,7 +13447,9 @@ function AnalyticsTab({
   const [aiReportGraphAnalytics, setAiReportGraphAnalytics] = useState<AiReportGraphAnalytics | null>(null);
   const [yearlyWrappedOpen, setYearlyWrappedOpen] = useState(false);
   const now = useMemo(() => new Date(), []);
-  const aiReportMonthEndUnlocked = HIDE_PREMIUM ? true : isMonthEndReportDay(now);
+  // 開発者は月末を待たずに生成できる。Premium は「月末に届く」体験そのものが商品なので、
+  // そこを緩めると Premium の確認にならない。だから dev だけ別扱いにする。
+  const aiReportMonthEndUnlocked = HIDE_PREMIUM || isDev ? true : isMonthEndReportDay(now);
   const aiReportDeliveryLabel = formatMonthEndDeliveryLabel(now);
   const aiReportCountdownLabel = getMonthEndCountdownLabel(now);
 
@@ -13449,6 +13587,13 @@ function AnalyticsTab({
       );
       return;
     }
+    // 開発者は月1回の制限を受けず、押すたびに作り直せる（プロンプト修正の検証用）
+    if (isDev) {
+      if (aiReportStatus !== 'loading') {
+        void loadAiReport();
+      }
+      return;
+    }
     if (aiReportUsed && aiReport) {
       setAiReportOpen(true);
       return;
@@ -13460,7 +13605,7 @@ function AnalyticsTab({
       void loadAiReport();
       return;
     }
-  }, [aiReport, aiReportMonthEndUnlocked, aiReportStatus, aiReportUsed, isPro, loadAiReport, openPaywall]);
+  }, [aiReport, aiReportMonthEndUnlocked, aiReportStatus, aiReportUsed, isDev, isPro, loadAiReport, openPaywall]);
 
   const aiReportMatchesCurrentAnalytics = aiReportPeriod?.year === reportYear && aiReportPeriod.month === reportMonth;
 
@@ -13476,6 +13621,13 @@ function AnalyticsTab({
             <Ionicons name="sparkles" size={19} color="#ffffff" />
           </View>
         </View>
+      )}
+      {isDev && (
+        <DevDiagnosticsPanel
+          userId={userId}
+          apiBaseUrlCandidates={apiBaseUrlCandidates}
+          lastReportSource={aiReport?.source ?? null}
+        />
       )}
       <AnalysisDigestCard
         analytics={currentAnalytics}

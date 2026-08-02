@@ -107,10 +107,19 @@ export type AuthResponse = {
 export type PremiumStatus = {
   isPro: boolean;
   entitlementKey: string;
-  source: 'FREE' | 'GRANT' | 'SUBSCRIPTION' | string;
+  source: 'FREE' | 'GRANT' | 'SUBSCRIPTION' | 'DEV' | string;
   activeUntil: string | null;
   provider: string | null;
   environment: string | null;
+  /** 開発者権限。サーバー側の premium_grants でのみ付与される。 */
+  isDev?: boolean;
+};
+
+export type DevDiagnostics = {
+  generatedAt: string;
+  providers: Record<string, unknown>[];
+  apiUsage: Record<string, unknown>[];
+  probe?: Record<string, unknown>;
 };
 
 export type AiReportPayload = Record<string, unknown>;
@@ -538,6 +547,12 @@ export const randishApi = {
 
   getPremiumStatus: (baseUrl: ApiBaseUrlInput, userId: string) =>
     request<PremiumStatus>(baseUrl, 'api/premium/status', { userId }),
+
+  getDevDiagnostics: (baseUrl: ApiBaseUrlInput, userId: string, probe = false) =>
+    request<DevDiagnostics>(baseUrl, 'api/premium/dev-diagnostics', {
+      userId,
+      ...(probe ? { probe: 'true' } : {}),
+    }),
 
   generateAiReport: (baseUrl: ApiBaseUrlInput, userId: string, payload: AiReportPayload) =>
     request<AiReportResponse>(baseUrl, 'api/premium/ai-report', { userId }, {

@@ -12455,4 +12455,106 @@ export const styles = StyleSheet.create({
   footerLabelActive: {
     color: ORANGE,
   },
+
+  // --- 開発者向けの診断パネル（dev権限のときだけ表示される） ---
+  devPanel: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#2f3a4a',
+    backgroundColor: '#111820',
+    marginBottom: 14,
+    overflow: 'hidden',
+  },
+  devPanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 15,
+    paddingVertical: 13,
+  },
+  devPanelBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 7,
+    backgroundColor: '#3ddc84',
+  },
+  devPanelBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0b1016',
+    letterSpacing: 0.8,
+  },
+  devPanelTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#e8eef5',
+  },
+  devPanelBody: {
+    paddingHorizontal: 15,
+    paddingBottom: 15,
+    gap: 7,
+  },
+  devPanelLead: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#8fa2b6',
+    marginBottom: 4,
+  },
+  devPanelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e2733',
+  },
+  devPanelRowLabel: {
+    fontSize: 12,
+    color: '#8fa2b6',
+    flexShrink: 1,
+  },
+  devPanelRowValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#e8eef5',
+    textAlign: 'right',
+  },
+  devPanelError: {
+    fontSize: 12,
+    color: '#ff8a7a',
+    marginTop: 6,
+  },
+  devPanelTimestamp: {
+    fontSize: 10,
+    color: '#66788c',
+    marginTop: 6,
+  },
+  devPanelActions: {
+    flexDirection: 'row',
+    gap: 9,
+    marginTop: 10,
+  },
+  devPanelButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#33404f',
+    backgroundColor: '#182230',
+  },
+  devPanelButtonPrimary: {
+    backgroundColor: '#3ddc84',
+    borderColor: '#3ddc84',
+  },
+  devPanelButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#cddae7',
+  },
+  devPanelButtonPrimaryText: {
+    color: '#0b1016',
+  },
 });
