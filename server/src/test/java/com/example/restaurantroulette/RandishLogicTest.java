@@ -1129,7 +1129,7 @@ class RandishLogicTest {
     assertThat(restaurantProvider.searchCallCount).isEqualTo(1);
     assertThat(googleProvider.nearbyCallCount).isEqualTo(1);
     assertThat(googleProvider.lastMaxCandidates).isEqualTo(20);
-    assertThat(response.places()).extracting("id").containsExactly("geoapify-geo-test-1", "nearby-test-1");
+    assertThat(response.places()).extracting("id").containsExactly("nearby-test-1");
   }
 
   @Test
@@ -1326,7 +1326,7 @@ class RandishLogicTest {
           "東京都千代田区丸の内",
           0,
           "https://www.google.com/maps/search/?api=1&query=Nearby%20Test",
-          null,
+          "https://example.com/google-nearby-test-1.jpg",
           List.of()));
     }
   }

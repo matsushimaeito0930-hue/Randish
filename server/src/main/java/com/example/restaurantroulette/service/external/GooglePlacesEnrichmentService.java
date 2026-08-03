@@ -66,6 +66,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "places.currentOpeningHours.openNow");
   private static final String BUSINESS_STATUS_FIELD_MASK = String.join(",",
       "places.id",
+      "places.rating",
+      "places.photos",
       "places.googleMapsUri",
       "places.currentOpeningHours.openNow",
       "places.currentOpeningHours.nextOpenTime",
@@ -696,6 +698,7 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
         return restaurant;
       }
       GoogleOpeningHours hours = place.currentOpeningHours();
+      boolean hasExistingPhoto = restaurant.photoUrl() != null && !restaurant.photoUrl().isBlank();
       return new RestaurantResponse(
           restaurant.id(),
           restaurant.externalProvider(),
@@ -705,20 +708,20 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           restaurant.genre(),
           restaurant.budgetMin(),
           restaurant.budgetMax(),
-          restaurant.rating(),
+          place.rating() == null ? restaurant.rating() : place.rating(),
           restaurant.minutes(),
           restaurant.address(),
-          restaurant.photoUrl(),
+          hasExistingPhoto ? restaurant.photoUrl() : googlePhotoUrl(place),
           restaurant.note(),
           restaurant.latitude(),
           restaurant.longitude(),
-          restaurant.googleRating(),
+          place.rating() == null ? restaurant.googleRating() : place.rating(),
           place.googleMapsUri() == null ? restaurant.googleMapsUri() : place.googleMapsUri(),
           hours == null ? null : hours.openNow(),
           hours == null ? null : hours.nextOpenTime(),
           hours == null ? null : hours.nextCloseTime(),
           place.id(),
-          restaurant.photoAttributions(),
+          hasExistingPhoto ? restaurant.photoAttributions() : googlePhotoAttributions(place),
           toPremiumDetails(place));
     } catch (RuntimeException exception) {
       logger.warn("Google Places business status enrichment failed for restaurant: {}", restaurant.name(), exception);

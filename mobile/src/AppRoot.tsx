@@ -332,6 +332,17 @@ type CandidateQuery = {
   minRating?: number;
 };
 
+const isPremiumPhotoProvider = (provider?: string | null) => {
+  const normalized = (provider ?? '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+  return normalized === 'HOTPEPPER' || normalized === 'GOOGLEPLACES';
+};
+
+const restaurantHasPremiumPhoto = (restaurant: Restaurant) =>
+  isPremiumPhotoProvider(restaurant.externalProvider) && Boolean(restaurant.photoUrl?.trim());
+
+const candidateHasPremiumPhoto = (candidate: CandidatePlace) =>
+  isPremiumPhotoProvider(candidate.provider) && Boolean(candidate.photoUrl?.trim());
+
 type AreaPreset = {
   label: string;
   group: string;
@@ -3098,7 +3109,7 @@ const restaurantToCandidatePlace = (restaurant: Restaurant): CandidatePlace | nu
     categories: restaurant.genre ? [restaurant.genre] : [],
     rating: toOptionalNumber(restaurant.rating) ?? null,
     priceLevel: null,
-    openNow: null,
+    openNow: restaurant.openNow ?? null,
     address: restaurant.address ?? null,
     distanceMeters: null,
     googleMapsUri: restaurant.googleMapsUri ?? null,
@@ -4263,20 +4274,27 @@ const restaurantMatchesPremiumConditions = (restaurant: Restaurant, minRating: n
   return ratingMatches && openMatches;
 };
 
+const restaurantMatchesPremiumResult = (restaurant: Restaurant, minRating: number, openNowOnly: boolean) =>
+  restaurantHasPremiumPhoto(restaurant)
+  && restaurantMatchesPremiumConditions(restaurant, minRating, openNowOnly);
+
 const candidateMatchesPremiumConditions = (candidate: CandidatePlace, minRating: number, openNowOnly: boolean) => {
   const ratingMatches = minRating <= 0 || (candidate.rating != null && candidate.rating >= minRating);
   const openMatches = !openNowOnly || candidate.openNow === true;
   return ratingMatches && openMatches;
 };
 
+const candidateMatchesPremiumResult = (candidate: CandidatePlace, minRating: number, openNowOnly: boolean) =>
+  candidateHasPremiumPhoto(candidate)
+  && candidateMatchesPremiumConditions(candidate, minRating, openNowOnly);
+
 const buildPremiumConditionNoMatchMessage = (area: string, minRating: number, openNowOnly: boolean) => {
   const conditions = [
+    '写真あり',
     minRating > 0 ? `★${minRating.toFixed(1)}以上` : null,
     openNowOnly ? '現在営業中' : null,
   ].filter(Boolean);
-  return conditions.length
-    ? `${area || '選択したエリア'}に、${conditions.join('・')}の条件を満たすお店はありません。評価を下げるか、営業中のみを外してください。`
-    : null;
+  return `${area || '選択したエリア'}に、${conditions.join('・')}の条件を満たすお店はありません。条件や距離を広げてください。`;
 };
 
 const getDistanceKm = (from: UserLocation | null, restaurant: Restaurant) => {
@@ -6522,7 +6540,7 @@ export default function App() {
         data
           .map(normalizeRestaurant)
           .filter((restaurant) => !subscription.isPro
-            || restaurantMatchesPremiumConditions(restaurant, minRating, openNowOnly)),
+            || restaurantMatchesPremiumResult(restaurant, minRating, openNowOnly)),
         subscription.isPro ? situation : 'none',
       );
       return allowGenreMismatchForFilter
@@ -6557,7 +6575,7 @@ export default function App() {
         });
         syncWorkingApiBaseUrl();
         const selected = normalizeRestaurant(data);
-        if (subscription.isPro && !restaurantMatchesPremiumConditions(selected, minRating, openNowOnly)) {
+        if (subscription.isPro && !restaurantMatchesPremiumResult(selected, minRating, openNowOnly)) {
           throw new Error('指定した評価・営業状況に合う候補が見つかりませんでした。');
         }
         return selected;
@@ -6677,6 +6695,23 @@ export default function App() {
         }
       }
       normalized = await enrichPremiumPlaceDetails(normalized);
+      if (subscription.isPro && !restaurantMatchesPremiumResult(normalized, minRating, openNowOnly)) {
+        const alternatives = (await loadAlternatives())
+          .filter((candidate) => candidate.id !== normalized?.id)
+          .slice(0, 6);
+        let replacement: Restaurant | null = null;
+        for (const candidate of alternatives) {
+          const enrichedCandidate = await enrichPremiumPlaceDetails(candidate);
+          if (restaurantMatchesPremiumResult(enrichedCandidate, minRating, openNowOnly)) {
+            replacement = enrichedCandidate;
+            break;
+          }
+        }
+        if (!replacement) {
+          throw new Error(buildPremiumConditionNoMatchMessage(area, minRating, openNowOnly));
+        }
+        normalized = replacement;
+      }
       setDrawFailureDetails([]);
       setSelectedRestaurant(normalized);
       // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
@@ -6698,7 +6733,7 @@ export default function App() {
       if (isTravelDraw) {
         setTravelRevealStep('hidden');
       }
-      if (shouldUseRestaurantDemoFallback(error)) {
+      if (shouldUseRestaurantDemoFallback(error) && !subscription.isPro) {
         try {
           let candidates = searchLocalRestaurants(effectiveDrawApiParams)
             .filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
@@ -6787,6 +6822,25 @@ export default function App() {
         }
       }
       normalized = await enrichPremiumPlaceDetails(normalized);
+      if (subscription.isPro && !restaurantHasPremiumPhoto(normalized)) {
+        const alternatives = (await randishApi.getRestaurants(apiBaseUrlCandidates))
+          .map(normalizeRestaurant)
+          .filter(restaurantHasPremiumPhoto)
+          .filter((candidate) => candidate.id !== normalized.id)
+          .slice(0, 6);
+        let replacement: Restaurant | null = null;
+        for (const candidate of alternatives) {
+          const enrichedCandidate = await enrichPremiumPlaceDetails(candidate);
+          if (restaurantHasPremiumPhoto(enrichedCandidate)) {
+            replacement = enrichedCandidate;
+            break;
+          }
+        }
+        if (!replacement) {
+          throw new Error('写真を表示できるお店がありません。');
+        }
+        normalized = replacement;
+      }
       setDrawFailureDetails([]);
       setSelectedRestaurant(normalized);
       // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
@@ -6796,7 +6850,7 @@ export default function App() {
       setTimeout(revealSelectedRestaurant, 320);
       setTimeout(scrollToRandomResult, 520);
     } catch (error) {
-      if (shouldUseRestaurantDemoFallback(error)) {
+      if (shouldUseRestaurantDemoFallback(error) && !subscription.isPro) {
         try {
           const candidates = searchLocalRestaurants();
           const normalized = pickFreshRestaurant(candidates, recentIds, selectedRestaurant?.id) ?? pickRandomRestaurant(candidates);
@@ -6827,7 +6881,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, area, distance, enrichPremiumPlaceDetails, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, area, distance, enrichPremiumPlaceDetails, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, subscription.isPro, syncWorkingApiBaseUrl, userId]);
 
   const triggerRouletteHaptic = useCallback((final = false) => {
     const Haptics = getOptionalHapticsModule();
@@ -6925,7 +6979,9 @@ export default function App() {
       const cachedSearchCandidates = restaurantsRef.current
         .map(restaurantToCandidatePlace)
         .filter((place): place is CandidatePlace => place != null);
-      const cachedMerged = mergeCandidatePlaces(cached.candidates, cachedSearchCandidates);
+      const cachedMerged = mergeCandidatePlaces(cached.candidates, cachedSearchCandidates)
+        .filter((candidate) => !subscription.isPro
+          || candidateMatchesPremiumResult(candidate, minRating, openNowOnly));
       cached.candidates = cachedMerged;
       setMapCandidates(cachedMerged);
       setMapRouletteStatus(cachedMerged.length ? 'candidatesReady' : 'empty');
@@ -6956,7 +7012,7 @@ export default function App() {
     const mergedCandidates = prioritizeCandidatesForSituation(
       mergeCandidatePlaces(response.places ?? [], searchCandidates)
         .filter((candidate) => !subscription.isPro
-          || candidateMatchesPremiumConditions(candidate, minRating, openNowOnly)),
+          || candidateMatchesPremiumResult(candidate, minRating, openNowOnly)),
       subscription.isPro ? situation : 'none',
     );
     const nextCache: CandidateCacheEntry = {
@@ -7077,15 +7133,42 @@ export default function App() {
         if (mapSpinRunIdRef.current !== runId) {
           return;
         }
-        let normalized = candidatePlaceToRestaurant(selected, areaRef.current, genre);
-        normalized = await enrichPremiumPlaceDetails(normalized);
+        const validationQueue = [
+          selected,
+          ...cacheEntry.candidates.filter((candidate) => candidate.id !== selected.id),
+        ].slice(0, 6);
+        let finalCandidate: CandidatePlace | null = null;
+        let normalized: Restaurant | null = null;
+        for (const candidate of validationQueue) {
+          const enrichedCandidate = await enrichPremiumPlaceDetails(
+            candidatePlaceToRestaurant(candidate, areaRef.current, genre),
+          );
+          if (!subscription.isPro
+            || restaurantMatchesPremiumResult(enrichedCandidate, minRating, openNowOnly)) {
+            finalCandidate = candidate;
+            normalized = enrichedCandidate;
+            break;
+          }
+        }
         if (mapSpinRunIdRef.current !== runId) {
           return;
         }
+        if (!finalCandidate || !normalized) {
+          const noMatchMessage = buildPremiumConditionNoMatchMessage(areaRef.current, minRating, openNowOnly);
+          setMapRouletteStatus('empty');
+          setMapRouletteTarget(null);
+          setMapRouletteError(noMatchMessage);
+          setMessage(noMatchMessage);
+          setIsLoading(false);
+          return;
+        }
+        setMapRouletteTarget(finalCandidate);
         candidateCacheRef.current = {
           ...cacheEntry,
-          usedIds: nextUsedIds,
-          lastSelectedId: selected.id,
+          usedIds: finalCandidate.id === selected.id
+            ? nextUsedIds
+            : [...new Set([...cacheEntry.usedIds, finalCandidate.id])],
+          lastSelectedId: finalCandidate.id,
         };
         setDrawFailureDetails([]);
         setSelectedRestaurant(normalized);

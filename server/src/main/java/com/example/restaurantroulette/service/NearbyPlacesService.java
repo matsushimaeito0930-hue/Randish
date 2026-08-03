@@ -145,13 +145,14 @@ public class NearbyPlacesService {
     List<CandidatePlaceResponse> places = mergeCandidatePlaces(restaurantPlaces, googlePlaces);
     if (premium) {
       places = places.stream()
+          .filter(this::hasPremiumPhoto)
           .filter(candidate -> !Boolean.TRUE.equals(normalized.openNow()) || Boolean.TRUE.equals(candidate.openNow()))
           .filter(candidate -> normalized.minRating() == null
               || (candidate.rating() != null && candidate.rating() >= normalized.minRating()))
           .toList();
     }
     String source = nearbySource(restaurantPlaces, googlePlaces);
-    if (places.isEmpty() && canUseMockPlaces()) {
+    if (places.isEmpty() && canUseMockPlaces() && !premium) {
       logger.info("[RANDISH_PLACES] using development mock places because all live providers returned no candidates");
       places = mockPlaces(normalized);
       source = "MOCK_PLACES";
@@ -208,6 +209,16 @@ public class NearbyPlacesService {
       throw new BadRequestException("minRating must be between 1.0 and 5.0.");
     }
     return Math.round(minRating * 10.0) / 10.0;
+  }
+
+  private boolean hasPremiumPhoto(CandidatePlaceResponse candidate) {
+    if (candidate == null || candidate.photoUrl() == null || candidate.photoUrl().isBlank()) {
+      return false;
+    }
+    String provider = candidate.provider() == null
+        ? ""
+        : candidate.provider().replaceAll("[^A-Za-z]", "").toUpperCase(Locale.ROOT);
+    return "HOTPEPPER".equals(provider) || "GOOGLEPLACES".equals(provider);
   }
 
   private Optional<NearbyCacheEntry> findCacheEntry(NearbyCacheKey key, NearbyPlacesRequest request) {
@@ -304,9 +315,7 @@ public class NearbyPlacesService {
 
   private CandidatePlaceResponse mergeCandidatePhoto(CandidatePlaceResponse primary, CandidatePlaceResponse supplement) {
     boolean needsPhoto = primary.photoUrl() == null || primary.photoUrl().isBlank();
-    if (!needsPhoto || supplement.photoUrl() == null || supplement.photoUrl().isBlank()) {
-      return primary;
-    }
+    boolean canSupplementPhoto = needsPhoto && supplement.photoUrl() != null && !supplement.photoUrl().isBlank();
     return new CandidatePlaceResponse(
         primary.id(),
         primary.provider(),
@@ -315,14 +324,16 @@ public class NearbyPlacesService {
         primary.latitude(),
         primary.longitude(),
         primary.categories(),
-        primary.rating(),
+        primary.rating() == null ? supplement.rating() : primary.rating(),
         primary.priceLevel(),
         primary.openNow() == null ? supplement.openNow() : primary.openNow(),
         primary.address(),
         primary.distanceMeters(),
         supplement.googleMapsUri() == null ? primary.googleMapsUri() : supplement.googleMapsUri(),
-        supplement.photoUrl(),
-        supplement.photoAttributions() == null ? List.of() : supplement.photoAttributions());
+        canSupplementPhoto ? supplement.photoUrl() : primary.photoUrl(),
+        canSupplementPhoto
+            ? (supplement.photoAttributions() == null ? List.of() : supplement.photoAttributions())
+            : primary.photoAttributions());
   }
 
   private String nearbySource(List<CandidatePlaceResponse> restaurantPlaces, List<CandidatePlaceResponse> googlePlaces) {
