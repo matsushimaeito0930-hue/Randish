@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/premium")
@@ -61,6 +63,18 @@ public class PremiumController {
       @RequestBody JsonNode payload) {
     authenticatedUserService.requireSameUser(authorizationHeader, userId);
     return aiReportProxyService.generate(payload);
+  }
+
+  @PostMapping("/food-ai")
+  public JsonNode foodAi(
+      @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+      @RequestParam String userId,
+      @RequestBody JsonNode payload) {
+    authenticatedUserService.requireSameUser(authorizationHeader, userId);
+    if (!premiumService.status(userId).isPro()) {
+      throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "RANDISH Premium is required.");
+    }
+    return aiReportProxyService.generateFoodRecommendation(payload);
   }
 
   /**

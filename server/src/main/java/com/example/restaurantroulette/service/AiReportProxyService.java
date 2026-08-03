@@ -14,6 +14,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -109,7 +111,50 @@ public class AiReportProxyService {
     }
   }
 
+  /**
+   * Selects one of the supplied candidate IDs using only aggregated food-history data.
+   * Restaurant names and addresses are deliberately not required by this endpoint.
+   */
+  public JsonNode generateFoodRecommendation(JsonNode payload) {
+    String requestBody = serializePayload(payload, "Food AI payload");
+    JsonNode candidates = payload.path("candidates");
+    if (!candidates.isArray() || candidates.isEmpty() || candidates.size() > 20) {
+      throw new BadRequestException("Food AI candidates must contain between 1 and 20 items.");
+    }
+    if (geminiApiKey == null) {
+      logger.warn("[RANDISH_FOOD_AI] GEMINI_API_KEY is missing; returning fallback.");
+      return statusReport("fallback");
+    }
+
+    Set<String> allowedCandidateIds = new HashSet<>();
+    candidates.forEach(candidate -> {
+      String candidateId = candidate.path("candidateId").asText("").trim();
+      if (!candidateId.isBlank()) {
+        allowedCandidateIds.add(candidateId);
+      }
+    });
+    if (allowedCandidateIds.isEmpty()) {
+      throw new BadRequestException("Food AI candidate IDs are required.");
+    }
+
+    JsonNode recommendation = generateJsonWithGemini(buildFoodAiPrompt(requestBody), 1200);
+    if (recommendation == null || !hasMinimumFoodRecommendation(recommendation, allowedCandidateIds)) {
+      logger.warn("[RANDISH_FOOD_AI] Gemini recommendation was invalid; returning fallback. model={}", geminiModel);
+      return statusReport("fallback");
+    }
+    return withGenerationMetadata(recommendation);
+  }
+
   private JsonNode generateWithGemini(String requestBody) {
+    JsonNode report = generateJsonWithGemini(buildGeminiPrompt(requestBody), 4096);
+    if (report == null || !hasMinimumReportContent(report)) {
+      logger.warn("[RANDISH_AI] Gemini JSON missing required report fields. model={}", geminiModel);
+      return null;
+    }
+    return withGenerationMetadata(report);
+  }
+
+  private JsonNode generateJsonWithGemini(String prompt, int maxOutputTokens) {
     URI endpointUri;
     try {
       String encodedModel = URLEncoder.encode(geminiModel, StandardCharsets.UTF_8).replace("+", "%20");
@@ -124,7 +169,7 @@ public class AiReportProxyService {
     userContent.put("role", "user");
     userContent.putArray("parts")
         .addObject()
-        .put("text", buildGeminiPrompt(requestBody));
+        .put("text", prompt);
 
     ObjectNode generationConfig = body.putObject("generationConfig");
     generationConfig.put("temperature", 0.55);
@@ -132,7 +177,7 @@ public class AiReportProxyService {
     // 少ない上限のままだと思考だけで枠を使い切り、本文が空 (finishReason=MAX_TOKENS) になって
     // レポートが必ず fallback になるため、thinking を無効化しつつ出力枠を広げる。
     generationConfig.putObject("thinkingConfig").put("thinkingBudget", 0);
-    generationConfig.put("maxOutputTokens", 4096);
+    generationConfig.put("maxOutputTokens", maxOutputTokens);
     generationConfig.put("responseMimeType", "application/json");
 
     String geminiRequestBody;
@@ -156,7 +201,7 @@ public class AiReportProxyService {
             response.statusCode(), geminiModel, abbreviate(response.body()));
         return null;
       }
-      return parseGeminiReport(response.body());
+      return parseGeminiJson(response.body());
     } catch (IOException | InterruptedException error) {
       if (error instanceof InterruptedException) {
         Thread.currentThread().interrupt();
@@ -174,7 +219,7 @@ public class AiReportProxyService {
     return trimmed.length() <= 500 ? trimmed : trimmed.substring(0, 500) + "...";
   }
 
-  private JsonNode parseGeminiReport(String responseBody) {
+  private JsonNode parseGeminiJson(String responseBody) {
     try {
       JsonNode response = objectMapper.readTree(responseBody);
       String finishReason = response.path("candidates").path(0).path("finishReason").asText("");
@@ -197,18 +242,13 @@ public class AiReportProxyService {
             finishReason, response.path("usageMetadata"));
         return null;
       }
-      JsonNode report = objectMapper.readTree(stripJsonFence(text));
-      if (!report.isObject() || !hasMinimumReportContent(report)) {
-        logger.warn("[RANDISH_AI] Gemini JSON missing required fields. finishReason={} text={}",
+      JsonNode result = objectMapper.readTree(stripJsonFence(text));
+      if (!result.isObject()) {
+        logger.warn("[RANDISH_AI] Gemini did not return a JSON object. finishReason={} text={}",
             finishReason, abbreviate(text));
         return null;
       }
-      ObjectNode reportObject = report.deepCopy();
-      reportObject.put("source", "gemini");
-      if (!reportObject.hasNonNull("generatedAt") || reportObject.path("generatedAt").asText().isBlank()) {
-        reportObject.put("generatedAt", Instant.now().toString());
-      }
-      return reportObject;
+      return result;
     } catch (IOException error) {
       logger.warn("[RANDISH_AI] Failed to parse Gemini response as JSON. error={} body={}",
           error.toString(), abbreviate(responseBody));
@@ -222,6 +262,14 @@ public class AiReportProxyService {
         && !report.path("highlights").isEmpty()
         && report.path("recommendations").isArray()
         && !report.path("recommendations").isEmpty();
+  }
+
+  private boolean hasMinimumFoodRecommendation(JsonNode recommendation, Set<String> allowedCandidateIds) {
+    String candidateId = recommendation.path("candidateId").asText("").trim();
+    return allowedCandidateIds.contains(candidateId)
+        && !recommendation.path("headline").asText("").isBlank()
+        && !recommendation.path("reason").asText("").isBlank()
+        && !recommendation.path("comparison").asText("").isBlank();
   }
 
   private String buildGeminiPrompt(String requestBody) {
@@ -246,6 +294,55 @@ public class AiReportProxyService {
         Input analytics JSON:
         %s
         """.formatted(requestBody);
+  }
+
+  private String buildFoodAiPrompt(String requestBody) {
+    return """
+        You are Randish Premium's daily food recommendation assistant.
+        Return only valid JSON and write all user-facing text in natural Japanese.
+        Choose exactly one candidateId from the supplied candidates. Never create or alter an ID.
+        Use currentMonth, previousMonth, preferences, ratings, distance and price information only when present.
+        Spending values are estimates, so always describe them as estimated spending.
+        Do not claim that the user actually visited or paid unless the input explicitly says so.
+        Candidate names and addresses are intentionally omitted. Do not invent a restaurant name, address, menu, facility or opening status.
+        Prefer a useful balance between the user's established tastes, budget, distance and a small amount of discovery.
+        Required JSON fields:
+        {
+          "candidateId": string,
+          "headline": string,
+          "reason": string,
+          "comparison": string
+        }
+        headline: a short invitation such as "今日はこの一店、どうですか？".
+        reason: 1-2 concise sentences explaining why this candidate fits today.
+        comparison: one concise sentence comparing this month with last month. If either month has no data, say that the preference is still being learned without inventing numbers.
+        Input JSON:
+        %s
+        """.formatted(requestBody);
+  }
+
+  private String serializePayload(JsonNode payload, String label) {
+    if (payload == null || !payload.isObject()) {
+      throw new BadRequestException(label + " is required.");
+    }
+    try {
+      String requestBody = objectMapper.writeValueAsString(payload);
+      if (requestBody.getBytes(StandardCharsets.UTF_8).length > MAX_BODY_BYTES) {
+        throw new BadRequestException(label + " is too large.");
+      }
+      return requestBody;
+    } catch (IOException error) {
+      throw new BadRequestException(label + " is invalid.");
+    }
+  }
+
+  private ObjectNode withGenerationMetadata(JsonNode value) {
+    ObjectNode result = value.deepCopy();
+    result.put("source", "gemini");
+    if (!result.hasNonNull("generatedAt") || result.path("generatedAt").asText().isBlank()) {
+      result.put("generatedAt", Instant.now().toString());
+    }
+    return result;
   }
 
   private String stripJsonFence(String text) {

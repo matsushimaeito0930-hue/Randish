@@ -156,6 +156,17 @@ export type AiReportResponse = {
   source?: 'gemini' | 'fallback' | 'demo' | string;
 };
 
+export type FoodAiRecommendationPayload = Record<string, unknown>;
+
+export type FoodAiRecommendationResponse = {
+  candidateId?: string;
+  headline?: string;
+  reason?: string;
+  comparison?: string;
+  generatedAt?: string;
+  source?: 'gemini' | 'fallback' | string;
+};
+
 export type EmailVerificationResponse = {
   email: string;
   expiresAt: string;
@@ -576,6 +587,12 @@ export const randishApi = {
 
   generateAiReport: (baseUrl: ApiBaseUrlInput, userId: string, payload: AiReportPayload) =>
     request<AiReportResponse>(baseUrl, 'api/premium/ai-report', { userId }, {
+      method: 'POST',
+      body: payload,
+    }),
+
+  generateFoodAiRecommendation: (baseUrl: ApiBaseUrlInput, userId: string, payload: FoodAiRecommendationPayload) =>
+    request<FoodAiRecommendationResponse>(baseUrl, 'api/premium/food-ai', { userId }, {
       method: 'POST',
       body: payload,
     }),

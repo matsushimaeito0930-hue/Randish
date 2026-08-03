@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.example.restaurantroulette.dto.ApiDtos.PremiumStatusResponse;
 import com.example.restaurantroulette.exception.UnauthorizedException;
 import com.example.restaurantroulette.service.AiReportProxyService;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class PremiumControllerTest {
@@ -58,6 +60,39 @@ class PremiumControllerTest {
     verify(authenticatedUserService).requireSameUser("Bearer valid-token", "user-123");
     verify(aiReportProxyService).generate(payload);
     verifyNoInteractions(premiumService);
+  }
+
+  @Test
+  void foodAiRequiresPremiumAfterAuthenticatingTheUser() {
+    JsonNode payload = new ObjectMapper().createObjectNode()
+        .putArray("candidates").addObject().put("candidateId", "candidate-1");
+    when(premiumService.status("user-123"))
+        .thenReturn(new PremiumStatusResponse(false, "premium", "FREE", null, null, null, false));
+
+    assertThrows(
+        ResponseStatusException.class,
+        () -> controller.foodAi("Bearer valid-token", "user-123", payload));
+
+    verify(authenticatedUserService).requireSameUser("Bearer valid-token", "user-123");
+    verifyNoInteractions(aiReportProxyService);
+  }
+
+  @Test
+  void foodAiReturnsOnlyForPremiumUsers() {
+    JsonNode payload = new ObjectMapper().createObjectNode()
+        .putArray("candidates").addObject().put("candidateId", "candidate-1");
+    JsonNode generated = new ObjectMapper().createObjectNode()
+        .put("candidateId", "candidate-1")
+        .put("source", "gemini");
+    when(premiumService.status("user-123"))
+        .thenReturn(new PremiumStatusResponse(true, "premium", "GRANT", null, null, null, false));
+    when(aiReportProxyService.generateFoodRecommendation(payload)).thenReturn(generated);
+
+    JsonNode response = controller.foodAi("Bearer valid-token", "user-123", payload);
+
+    assertSame(generated, response);
+    verify(authenticatedUserService).requireSameUser("Bearer valid-token", "user-123");
+    verify(aiReportProxyService).generateFoodRecommendation(payload);
   }
 
   @Test

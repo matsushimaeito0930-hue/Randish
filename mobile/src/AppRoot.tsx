@@ -267,6 +267,16 @@ type StoredAiMonthlyReport = {
 
 type AiReportStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+type FoodAiStatus = 'idle' | 'loading' | 'ready';
+
+type FoodAiSuggestion = {
+  restaurant: Restaurant;
+  headline: string;
+  reason: string;
+  comparison: string;
+  source: 'gemini' | 'local';
+};
+
 type GenreItem = {
   label: string;
   color: string;
@@ -1934,9 +1944,9 @@ const PRO_ANALYSIS_FEATURES: {
     color: '#7161f2', backgroundColor: '#f8f6ff',
   },
   {
-    icon: 'chatbubble-ellipses-outline', title: 'ユーザー専用の食AI', detail: '履歴に寄り添う食の提案',
-    fullText: '一般論ではなく、あなたの食の傾向に合わせた提案を。',
-    expandedText: 'これまでの抽選や選んだ条件をもとに、次の食事を考えるヒントを届けます。自分では気づきにくい好みや偏りを、次のお店選びに生かせます。',
+    icon: 'chatbubble-ellipses-outline', title: 'ユーザー専用の食AI', detail: '今日はこの店、を一店提案',
+    fullText: '先月と今月を読み、今日の一店まで提案。',
+    expandedText: '先月・今月の推定支出、ジャンル、予算、検索範囲を食AIが比較し、現在の店舗候補から「今日はこの店どうですか？」を理由つきで提案します。店名や住所はAIへ送らず、候補IDと集計値だけで判断します。',
     color: '#7161f2', backgroundColor: '#f8f6ff',
   },
   {
@@ -3894,6 +3904,122 @@ const requestAiMonthlyReport = async (
   }
 };
 
+const getAverageHistoryRangeMeters = (entries: DrawHistoryEntry[]) => {
+  const values = entries
+    .map((entry) => entry.rangeMeters)
+    .filter((value): value is number => value != null && value > 0);
+  return values.length
+    ? Math.round(values.reduce((total, value) => total + value, 0) / values.length)
+    : null;
+};
+
+const buildFoodAiRecommendationPayload = (
+  currentAnalytics: MonthlyAnalytics,
+  previousAnalytics: MonthlyAnalytics,
+  candidates: Restaurant[],
+  preferences: { genre: string; budgetMin: string; budgetMax: string; distance: string },
+) => ({
+  currentMonth: {
+    monthLabel: currentAnalytics.monthLabel,
+    drawCount: currentAnalytics.drawCount,
+    estimatedSpend: currentAnalytics.estimatedSpend,
+    budgetSampleCount: currentAnalytics.budgetSampleCount,
+    averageBudget: currentAnalytics.averageBudget,
+    topGenres: currentAnalytics.genreAnalytics.slice(0, 5),
+    topPriceRanges: currentAnalytics.priceRangeAnalytics.slice(0, 4),
+    averageRangeMeters: getAverageHistoryRangeMeters(currentAnalytics.draws),
+  },
+  previousMonth: {
+    monthLabel: previousAnalytics.monthLabel,
+    drawCount: previousAnalytics.drawCount,
+    estimatedSpend: previousAnalytics.estimatedSpend,
+    budgetSampleCount: previousAnalytics.budgetSampleCount,
+    averageBudget: previousAnalytics.averageBudget,
+    topGenres: previousAnalytics.genreAnalytics.slice(0, 5),
+    topPriceRanges: previousAnalytics.priceRangeAnalytics.slice(0, 4),
+    averageRangeMeters: getAverageHistoryRangeMeters(previousAnalytics.draws),
+  },
+  preferences: {
+    selectedGenre: preferences.genre === 'すべて' ? null : preferences.genre,
+    budgetMin: parseBudgetNumber(preferences.budgetMin),
+    budgetMax: parseBudgetNumber(preferences.budgetMax),
+    rangeMeters: parseDistanceMeters(preferences.distance),
+  },
+  // 店名・住所は外部AIへ送らない。返却された candidateId を端末側の店舗情報へ結び直す。
+  candidates: candidates.slice(0, 15).map((restaurant) => ({
+    candidateId: restaurant.id,
+    genre: cleanTextOrNull(restaurant.genre),
+    area: cleanTextOrNull(restaurant.area),
+    budgetMin: toOptionalNumber(restaurant.budgetMin),
+    budgetMax: toOptionalNumber(restaurant.budgetMax),
+    rating: getRatingValue(restaurant),
+    minutes: toOptionalNumber(restaurant.minutes),
+    openNow: restaurant.openNow ?? null,
+  })),
+});
+
+const buildLocalFoodAiSuggestion = (
+  currentAnalytics: MonthlyAnalytics,
+  previousAnalytics: MonthlyAnalytics,
+  candidates: Restaurant[],
+  preferences: { genre: string; budgetMax: string; distance: string },
+): FoodAiSuggestion | null => {
+  if (!candidates.length) {
+    return null;
+  }
+  const recentIds = new Set(currentAnalytics.draws
+    .map((entry) => entry.restaurant?.id)
+    .filter((id): id is string => Boolean(id)));
+  const targetBudget = currentAnalytics.averageBudget
+    || parseBudgetNumber(preferences.budgetMax)
+    || 2000;
+  const preferredGenres = new Set([
+    currentAnalytics.genreAnalytics[0]?.label,
+    previousAnalytics.genreAnalytics[0]?.label,
+    preferences.genre === 'すべて' ? null : preferences.genre,
+  ].filter((value): value is string => Boolean(value)));
+
+  const scored = candidates.map((restaurant, index) => {
+    const estimatedBudget = getEstimatedBudget(restaurant) ?? targetBudget;
+    const budgetDifference = Math.abs(estimatedBudget - targetBudget);
+    const rating = getRatingValue(restaurant) ?? 0;
+    const genreScore = preferredGenres.has(restaurant.genre) ? 6 : 2;
+    const discoveryScore = recentIds.has(restaurant.id) ? -8 : 4;
+    const budgetScore = Math.max(0, 6 - (budgetDifference / Math.max(targetBudget, 1)) * 6);
+    const ratingScore = rating > 0 ? rating : 2.5;
+    const distanceScore = restaurant.minutes && restaurant.minutes <= 20 ? 2 : 0;
+    return { restaurant, score: genreScore + discoveryScore + budgetScore + ratingScore + distanceScore - index * 0.01 };
+  });
+  const restaurant = scored.sort((first, second) => second.score - first.score)[0]?.restaurant;
+  if (!restaurant) {
+    return null;
+  }
+
+  const currentSpendKnown = currentAnalytics.budgetSampleCount > 0;
+  const previousSpendKnown = previousAnalytics.budgetSampleCount > 0;
+  const comparison = currentSpendKnown && previousSpendKnown
+    ? currentAnalytics.estimatedSpend > previousAnalytics.estimatedSpend
+      ? `今月の推定支出は先月より約${formatYen(currentAnalytics.estimatedSpend - previousAnalytics.estimatedSpend)}多めです。今日は平均に近い価格帯を優先しました。`
+      : currentAnalytics.estimatedSpend < previousAnalytics.estimatedSpend
+        ? `今月の推定支出は先月より約${formatYen(previousAnalytics.estimatedSpend - currentAnalytics.estimatedSpend)}抑えられています。無理に節約へ寄せすぎず選びました。`
+        : '今月と先月の推定支出はほぼ同じです。いつもの予算感を崩さない候補です。'
+    : '先月・今月の記録はまだ学習中です。履歴が増えるほど比較が具体的になります。';
+  const topGenre = currentAnalytics.genreAnalytics[0]?.label;
+  const reasonParts = [
+    topGenre ? `今月よく選んでいる${topGenre}の傾向` : '現在選んでいる条件',
+    `目安予算${formatYen(targetBudget)}`,
+    preferences.distance ? `${preferences.distance}の検索範囲` : null,
+  ].filter(Boolean);
+
+  return {
+    restaurant,
+    headline: '今日はこの一店、どうですか？',
+    reason: `${reasonParts.join('・')}をもとに、好みに寄せつつ直近と重なりにくい候補を選びました。`,
+    comparison,
+    source: 'local',
+  };
+};
+
 const getPreviousMonthComparison = (entries: DrawHistoryEntry[], now = new Date()) => {
   const current = getCurrentMonthAnalytics(entries, now);
   const previous = getMonthlyAnalytics(entries, addMonthsToStart(now, -1));
@@ -5230,6 +5356,8 @@ export default function App() {
   }, [restaurants]);
   // ホームの「今日のおすすめ」用。ジャンル・予算を外して取得し、いろいろな店が出るようにする。
   const [recommendations, setRecommendations] = useState<Restaurant[]>([]);
+  const [foodAiStatus, setFoodAiStatus] = useState<FoodAiStatus>('idle');
+  const [foodAiSuggestion, setFoodAiSuggestion] = useState<FoodAiSuggestion | null>(null);
   // 検索結果から求めたエリアの中心。抽選の座標としても使う。
   // 計算は抽選タブ側で行うため、コールバックで受け取ってここに保持する。
   const searchResultOriginRef = useRef<UserLocation | null>(null);
@@ -5958,6 +6086,85 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBaseUrlCandidates, recommendationScopeKey]);
+
+  useEffect(() => {
+    setFoodAiStatus('idle');
+    setFoodAiSuggestion(null);
+  }, [recommendationScopeKey, userId]);
+
+  const askFoodAiRecommendation = useCallback(async () => {
+    if (!subscription.isPro) {
+      subscription.startProPurchase();
+      return;
+    }
+    const usableCandidates = recommendations
+      .filter((restaurant, index, items) =>
+        Boolean(restaurant?.id && restaurant?.name?.trim())
+        && items.findIndex((item) => item.id === restaurant.id) === index)
+      .slice(0, 15);
+    if (!usableCandidates.length) {
+      setMessage('食AIが選べる店舗候補を取得中です。少し待ってからもう一度お試しください。');
+      return;
+    }
+
+    const currentAnalytics = getCurrentMonthAnalytics(drawHistories, now);
+    const previousAnalytics = getMonthlyAnalytics(drawHistories, addMonthsToStart(now, -1));
+    const localSuggestion = buildLocalFoodAiSuggestion(
+      currentAnalytics,
+      previousAnalytics,
+      usableCandidates,
+      { genre, budgetMax, distance },
+    );
+    setFoodAiStatus('loading');
+    if (localSuggestion) {
+      setFoodAiSuggestion(localSuggestion);
+    }
+
+    if (userId === APP_USER_ID) {
+      setFoodAiStatus('ready');
+      return;
+    }
+
+    try {
+      const response = await randishApi.generateFoodAiRecommendation(
+        apiBaseUrlCandidates,
+        userId,
+        buildFoodAiRecommendationPayload(
+          currentAnalytics,
+          previousAnalytics,
+          usableCandidates,
+          { genre, budgetMin, budgetMax, distance },
+        ),
+      );
+      syncWorkingApiBaseUrl();
+      const selected = usableCandidates.find((restaurant) => restaurant.id === response.candidateId);
+      if (response.source === 'gemini' && selected && response.headline && response.reason && response.comparison) {
+        setFoodAiSuggestion({
+          restaurant: selected,
+          headline: response.headline,
+          reason: response.reason,
+          comparison: response.comparison,
+          source: 'gemini',
+        });
+      }
+    } catch (error) {
+      console.warn('[RANDISH FOOD AI] AI提案に失敗したため端末内の提案を表示します。', error);
+    } finally {
+      setFoodAiStatus('ready');
+    }
+  }, [
+    apiBaseUrlCandidates,
+    budgetMax,
+    budgetMin,
+    distance,
+    drawHistories,
+    genre,
+    now,
+    recommendations,
+    subscription,
+    syncWorkingApiBaseUrl,
+    userId,
+  ]);
 
   const requestCurrentLocation = useCallback(async (mode: LocationRequestMode = 'sync-search') => {
     const Location = getOptionalLocationModule();
@@ -7616,6 +7823,9 @@ export default function App() {
             onRequireRegistration={openRegistration}
             onLogout={handleLogout}
             recommendations={recommendations}
+            foodAiStatus={foodAiStatus}
+            foodAiSuggestion={foodAiSuggestion}
+            onAskFoodAi={askFoodAiRecommendation}
             onVisitRecommendation={handleVisitRecommendation}
           />
         )}
@@ -8345,6 +8555,9 @@ function HomeTab({
   onRequireRegistration,
   onLogout,
   recommendations,
+  foodAiStatus,
+  foodAiSuggestion,
+  onAskFoodAi,
   onVisitRecommendation,
 }: {
   apiBaseUrlCandidates: readonly string[];
@@ -8386,6 +8599,9 @@ function HomeTab({
   onRequireRegistration: () => void;
   onLogout: () => void;
   recommendations: Restaurant[];
+  foodAiStatus: FoodAiStatus;
+  foodAiSuggestion: FoodAiSuggestion | null;
+  onAskFoodAi: () => void;
   onVisitRecommendation: (restaurant: Restaurant) => void;
 }) {
   return (
@@ -8421,6 +8637,14 @@ function HomeTab({
         onRequireRegistration={onRequireRegistration}
         onLogout={onLogout}
       />
+      <FoodAiTodayCard
+        isPro={isPro}
+        hasCandidates={recommendations.length > 0}
+        status={foodAiStatus}
+        suggestion={foodAiSuggestion}
+        onAsk={onAskFoodAi}
+        onVisit={onVisitRecommendation}
+      />
       <HomeRecommendationCarousel
         restaurants={recommendations}
         isLoading={isLoading}
@@ -8431,6 +8655,106 @@ function HomeTab({
 }
 
 const RECOMMENDATION_COUNT = 5;
+
+function FoodAiTodayCard({
+  isPro,
+  hasCandidates,
+  status,
+  suggestion,
+  onAsk,
+  onVisit,
+}: {
+  isPro: boolean;
+  hasCandidates: boolean;
+  status: FoodAiStatus;
+  suggestion: FoodAiSuggestion | null;
+  onAsk: () => void;
+  onVisit: (restaurant: Restaurant) => void;
+}) {
+  const loading = status === 'loading';
+  return (
+    <View style={styles.foodAiCard}>
+      <View style={styles.foodAiHeader}>
+        <View style={styles.foodAiHeaderIcon}>
+          <Ionicons name="sparkles" size={18} color="#ffffff" />
+        </View>
+        <View style={styles.foodAiHeaderCopy}>
+          <Text style={styles.foodAiKicker}>RANDISH FOOD AI</Text>
+          <Text style={styles.foodAiTitle}>今日の食AI</Text>
+        </View>
+        <View style={styles.foodAiPlanBadge}>
+          <Text style={styles.foodAiPlanBadgeText}>Premium</Text>
+        </View>
+      </View>
+
+      {!isPro ? (
+        <>
+          <Text style={styles.foodAiLead}>
+            先月と今月の推定支出、ジャンル、予算、検索範囲を読み、今ある候補から今日の一店を提案します。
+          </Text>
+          <Pressable style={styles.foodAiPrimaryButton} onPress={onAsk}>
+            <Ionicons name="lock-open-outline" size={16} color="#ffffff" />
+            <Text style={styles.foodAiPrimaryButtonText}>Premiumで食AIを使う</Text>
+          </Pressable>
+        </>
+      ) : suggestion ? (
+        <>
+          <Text style={styles.foodAiHeadline}>{suggestion.headline}</Text>
+          <View style={styles.foodAiRestaurantRow}>
+            <View style={styles.foodAiRestaurantPhoto}>
+              <RestaurantVisual restaurant={suggestion.restaurant} allowExternalPhoto />
+            </View>
+            <View style={styles.foodAiRestaurantCopy}>
+              <Text style={styles.foodAiRestaurantName} numberOfLines={2}>{suggestion.restaurant.name}</Text>
+              <Text style={styles.foodAiRestaurantMeta} numberOfLines={1}>
+                {[suggestion.restaurant.genre, formatPrice(suggestion.restaurant)].filter(Boolean).join(' / ')}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.foodAiReasonBox}>
+            <Text style={styles.foodAiReasonLabel}>この店を選んだ理由</Text>
+            <Text style={styles.foodAiReasonText}>{suggestion.reason}</Text>
+          </View>
+          <Text style={styles.foodAiComparison}>{suggestion.comparison}</Text>
+          <Text style={styles.foodAiSource}>
+            {suggestion.source === 'gemini' ? 'Geminiが最新の集計から提案' : '端末内の集計から仮提案'}
+          </Text>
+          <View style={styles.foodAiActions}>
+            <Pressable style={styles.foodAiSecondaryButton} onPress={onAsk} disabled={loading}>
+              {loading
+                ? <ActivityIndicator size="small" color="#7161f2" />
+                : <Ionicons name="refresh" size={16} color="#7161f2" />}
+              <Text style={styles.foodAiSecondaryButtonText}>{loading ? '考え中…' : '別の提案'}</Text>
+            </Pressable>
+            <Pressable style={styles.foodAiPrimaryButtonCompact} onPress={() => onVisit(suggestion.restaurant)}>
+              <Ionicons name="navigate-outline" size={16} color="#ffffff" />
+              <Text style={styles.foodAiPrimaryButtonText}>この店にする</Text>
+            </Pressable>
+          </View>
+        </>
+      ) : (
+        <>
+          <Text style={styles.foodAiLead}>
+            先月と今月の推定支出、よく選ぶジャンル、予算、検索範囲をまとめて、今日の候補を一店に絞ります。
+          </Text>
+          <Text style={styles.foodAiPrivacyNote}>店名や住所はAIへ送らず、候補IDと集計値だけで判断します。</Text>
+          <Pressable
+            style={[styles.foodAiPrimaryButton, (!hasCandidates || loading) && styles.foodAiButtonDisabled]}
+            onPress={onAsk}
+            disabled={!hasCandidates || loading}
+          >
+            {loading
+              ? <ActivityIndicator size="small" color="#ffffff" />
+              : <Ionicons name="sparkles-outline" size={16} color="#ffffff" />}
+            <Text style={styles.foodAiPrimaryButtonText}>
+              {loading ? '食AIが考えています…' : hasCandidates ? '今日の一店を聞く' : '店舗候補を取得中'}
+            </Text>
+          </Pressable>
+        </>
+      )}
+    </View>
+  );
+}
 
 function HomeRecommendationCarousel({
   restaurants,
