@@ -803,7 +803,7 @@ const pickNextDrawAnimation = (current: DrawAnimationKey) => {
 
 const DISTANCE_OPTIONS = ['100m', '500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
 const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
-const FREE_MEAL_TICKET_COUNT = 3;
+const FREE_MEAL_TICKET_COUNT = 4;
 
 // Premium を一時的に隠し、全機能をフリー体験にするフラグ。
 // Premium を復活させたいときは false に戻すだけでOK。
@@ -1867,17 +1867,15 @@ const MEAL_TICKET_DEFINITIONS: MealTicketDefinition[] = [
     icon: 'wine-outline',
     accent: MIDNIGHT_PURPLE,
     genreHints: [],
-    // 深夜は Premium 限定。無料は朝・昼・夜の3枚。
-    proOnly: true,
   },
 ];
 
 const PRO_FEATURE_SUMMARY = [
-  '食券・1日の抽選回数の増加',
+  '広告を表示せず、選ぶことに集中',
   '詳細ジャンル・マイナージャンルの解放',
   'シチュエーションモード',
   'AIによる店舗の選出理由',
-  '営業時間・評価・写真など店舗情報の拡張',
+  '子ども向け・予約・支払い・駐車場など店舗情報の拡張',
   '距離・予算・営業時間などの詳細条件',
   'お気に入り・除外店舗・食事履歴',
   'ユーザー専用の食AI',
@@ -1889,18 +1887,64 @@ const PRO_ANALYSIS_FEATURES: {
   title: string;
   detail: string;
   fullText: string;
+  expandedText: string;
   color: string;
   backgroundColor: string;
 }[] = [
-  { icon: 'ticket-outline', title: '食券・抽選回数', detail: '1日の回数を増加', fullText: '食券・1日の抽選回数の増加', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'restaurant-outline', title: '詳細ジャンル', detail: 'マイナージャンルも解放', fullText: '詳細ジャンル・マイナージャンルの解放', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'people-outline', title: 'シチュエーション', detail: 'モードを解放', fullText: 'シチュエーションモード', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'sparkles-outline', title: 'AIによる選出理由', detail: '店舗を選んだ理由を表示', fullText: 'AIによる店舗の選出理由', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'storefront-outline', title: '店舗情報の拡張', detail: '営業時間・評価・写真', fullText: '営業時間・評価・写真など店舗情報の拡張', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'options-outline', title: '詳細条件', detail: '距離・予算・営業時間', fullText: '距離・予算・営業時間などの詳細条件', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'heart-outline', title: '店舗・履歴管理', detail: 'お気に入り・除外・食事履歴', fullText: 'お気に入り・除外店舗・食事履歴', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'chatbubble-ellipses-outline', title: 'ユーザー専用の食AI', detail: 'あなた専用の食提案', fullText: 'ユーザー専用の食AI', color: '#7161f2', backgroundColor: '#f8f6ff' },
-  { icon: 'document-text-outline', title: '食生活AIレポート', detail: '月1回の振り返り', fullText: '月1回の食生活AIレポート', color: '#7161f2', backgroundColor: '#f8f6ff' },
+  {
+    icon: 'eye-off-outline', title: '広告なし', detail: '食べたい気持ちを邪魔しない',
+    fullText: 'お店選びの時間を、もっと心地よく。',
+    expandedText: 'Premiumでは広告を表示せず、条件選びから抽選結果まで料理とお店だけに集中できます。急いで決めたい日も、余計な表示に迷わされません。',
+    color: '#7161f2', backgroundColor: '#f8f6ff',
+  },
+  {
+    icon: 'restaurant-outline', title: '詳細ジャンル', detail: '食べたいものを、より細かく',
+    fullText: '「何となく和食」から、今ほしい一皿へ。',
+    expandedText: '定番ジャンルだけでなく、より細かな料理やマイナージャンルまで選択できます。気分が決まっている日も、いつもと違う店を開拓したい日も候補を絞りやすくなります。',
+    color: '#7161f2', backgroundColor: '#f8f6ff',
+  },
+  {
+    icon: 'people-outline', title: 'シチュエーション', detail: '誰と、どんな日に行くかで選ぶ',
+    fullText: '料理だけでなく、その日の過ごし方にも合うお店を。',
+    expandedText: 'ひとり、デート、友達、家族、仕事帰りなど、その日の場面を条件に加えられます。「料理は良いけれど今日は入りづらい」というミスマッチを減らします。',
+    color: '#7161f2', backgroundColor: '#f8f6ff',
+  },
+  {
+    icon: 'sparkles-outline', title: 'AIによる選出理由', detail: 'なぜこの店なのかが分かる',
+    fullText: '抽選結果に、納得できるひと押しを。',
+    expandedText: '選んだジャンル・予算・距離などをもとに、そのお店が候補になった理由を分かりやすく表示します。ランダムで終わらず、「今日はここにしよう」と決めやすくなります。',
+    color: '#7161f2', backgroundColor: '#f8f6ff',
+  },
+  {
+    icon: 'storefront-outline', title: '店舗情報の拡張', detail: '行く前に知りたい情報をまとめて',
+    fullText: '到着してから困らないための、詳しい店舗情報。',
+    expandedText: '営業時間、評価、写真に加えて、子ども向け、予約、店内飲食、テイクアウト、支払い方法、駐車場、バリアフリーなど、Googleマップ由来の詳細を確認できます。',
+    color: '#7161f2', backgroundColor: '#f8f6ff',
+  },
+  {
+    icon: 'options-outline', title: '詳細条件', detail: '距離・予算・営業中まで指定',
+    fullText: '譲れない条件を守って、候補だけを残す。',
+    expandedText: '現在地からの距離、予算、営業状況などを細かく指定できます。遠すぎる店や予算外の店を避け、今から本当に行ける候補に近づけます。',
+    color: '#7161f2', backgroundColor: '#f8f6ff',
+  },
+  {
+    icon: 'heart-outline', title: '店舗・履歴管理', detail: '好き・苦手・行った店を整理',
+    fullText: 'あなたの「また行きたい」と「次は別の店」を忘れない。',
+    expandedText: 'お気に入り、除外店舗、抽選履歴、食事後の評価をまとめて管理できます。気に入った店へ戻りやすくしながら、同じ候補ばかりになることも防げます。',
+    color: '#7161f2', backgroundColor: '#f8f6ff',
+  },
+  {
+    icon: 'chatbubble-ellipses-outline', title: 'ユーザー専用の食AI', detail: '履歴に寄り添う食の提案',
+    fullText: '一般論ではなく、あなたの食の傾向に合わせた提案を。',
+    expandedText: 'これまでの抽選や選んだ条件をもとに、次の食事を考えるヒントを届けます。自分では気づきにくい好みや偏りを、次のお店選びに生かせます。',
+    color: '#7161f2', backgroundColor: '#f8f6ff',
+  },
+  {
+    icon: 'document-text-outline', title: '食生活AIレポート', detail: '月に一度、食生活を振り返る',
+    fullText: '一か月の外食を、次の一か月に役立つレポートへ。',
+    expandedText: '抽選履歴、ジャンル、予算などをAIが月ごとに整理し、傾向や次に試したい選択肢を読みやすくまとめます。過去月も残るので、食生活の変化をあとから振り返れます。',
+    color: '#7161f2', backgroundColor: '#f8f6ff',
+  },
 ];
 
 const PRO_SITUATION_FEATURE_LINES = [
@@ -3906,6 +3950,7 @@ const getSavedRestaurantAnalytics = (savedRestaurants: SavedRestaurant[]): Saved
       budgetMin: favorite.savedBudgetMin,
       budgetMax: favorite.savedBudgetMax,
       rangeMeters: favorite.savedRangeMeters,
+      userRating: null,
       createdAt: favorite.createdAt,
     };
   });
@@ -3924,6 +3969,34 @@ const getRatingValue = (restaurant: Restaurant) => {
 const getRatingLabel = (restaurant: Restaurant) => {
   const rating = getRatingValue(restaurant);
   return rating == null ? '評価取得中' : `★ ${rating.toFixed(1)}`;
+};
+
+const getPremiumDetailGroups = (restaurant: Restaurant) => {
+  const details = restaurant.premiumDetails;
+  if (!details) {
+    return [];
+  }
+
+  const features = [
+    details.goodForChildren && '子ども連れ向け',
+    details.menuForChildren && 'キッズメニュー',
+    details.goodForGroups && 'グループ向け',
+    details.reservable && '予約可',
+    details.dineIn && '店内飲食',
+    details.takeout && 'テイクアウト',
+    details.delivery && 'デリバリー',
+    details.outdoorSeating && 'テラス席',
+    details.allowsDogs && 'ペット同伴可',
+    details.restroom && 'トイレあり',
+    details.servesVegetarianFood && 'ベジタリアン対応',
+  ].filter((label): label is string => Boolean(label));
+
+  return [
+    { title: '利用しやすさ', items: features },
+    { title: '支払い', items: details.paymentOptions ?? [] },
+    { title: '駐車場', items: details.parkingOptions ?? [] },
+    { title: 'バリアフリー', items: details.accessibilityOptions ?? [] },
+  ].filter((group) => group.items.length > 0);
 };
 
 const getStoredMinutesLabel = (restaurant: Restaurant, uiText = UI_TEXT.ja) =>
@@ -6089,6 +6162,20 @@ export default function App() {
     scrollToContentTop();
   }, [distance, genre, resultRevealValue, scrollToContentTop, spinValue]);
 
+  const enrichPremiumPlaceDetails = useCallback(async (restaurant: Restaurant) => {
+    if (!subscription.isPro) {
+      return restaurant;
+    }
+    try {
+      const enriched = await randishApi.enrichPremiumBusinessStatus(apiBaseUrlCandidates, restaurant);
+      syncWorkingApiBaseUrl();
+      return normalizeRestaurant(enriched);
+    } catch (error) {
+      console.warn('[RANDISH PREMIUM] 店舗詳細の補完に失敗しました。店舗結果はそのまま表示します。', error);
+      return restaurant;
+    }
+  }, [apiBaseUrlCandidates, subscription.isPro, syncWorkingApiBaseUrl]);
+
   const chooseRandomRestaurant = useCallback(async () => {
     const isTravelDraw = drawMode === 'travel';
     setActiveTab('random');
@@ -6267,6 +6354,7 @@ export default function App() {
             ?? pickRandomRestaurant(otherCandidates);
         }
       }
+      normalized = await enrichPremiumPlaceDetails(normalized);
       setDrawFailureDetails([]);
       setSelectedRestaurant(normalized);
       // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
@@ -6351,7 +6439,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, area, budgetMax, conditionRandom, distance, drawApiParams, drawMode, genre, loadDrawNoMatchDiagnosis, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
+  }, [apiBaseUrlCandidates, area, budgetMax, conditionRandom, distance, drawApiParams, drawMode, enrichPremiumPlaceDetails, genre, loadDrawNoMatchDiagnosis, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
@@ -6373,6 +6461,7 @@ export default function App() {
           normalized = freshAlternative;
         }
       }
+      normalized = await enrichPremiumPlaceDetails(normalized);
       setDrawFailureDetails([]);
       setSelectedRestaurant(normalized);
       // 直近に出た店を避ける範囲。狭いとすぐ同じ店に戻るため、候補数に見合う長さにする。
@@ -6413,7 +6502,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, area, distance, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
+  }, [apiBaseUrlCandidates, area, distance, enrichPremiumPlaceDetails, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, userId]);
 
   const triggerRouletteHaptic = useCallback((final = false) => {
     const Haptics = getOptionalHapticsModule();
@@ -6651,16 +6740,7 @@ export default function App() {
           return;
         }
         let normalized = candidatePlaceToRestaurant(selected, areaRef.current, genre);
-        if (subscription.isPro) {
-          try {
-            normalized = normalizeRestaurant(
-              await randishApi.enrichPremiumBusinessStatus(apiBaseUrlCandidates, normalized),
-            );
-            syncWorkingApiBaseUrl();
-          } catch (error) {
-            console.warn('[RANDISH PREMIUM] 営業時間の補完に失敗しました。店舗結果はそのまま表示します。', error);
-          }
-        }
+        normalized = await enrichPremiumPlaceDetails(normalized);
         if (mapSpinRunIdRef.current !== runId) {
           return;
         }
@@ -6743,6 +6823,7 @@ export default function App() {
     distance,
     drawApiParams,
     drawMode,
+    enrichPremiumPlaceDetails,
     genre,
     loadCandidatePool,
     loadDrawNoMatchDiagnosis,
@@ -8158,7 +8239,7 @@ function MealTicketPanel({ state, compact = false, uiText = UI_TEXT.ja }: { stat
         {state.tickets.map((ticket) => {
           const iconColor = ticket.available ? '#ffffff' : ticket.accent;
           const ticketDisplay = getMealTicketDisplay(ticket, state, uiText);
-          const midnightUnlocked = ticket.key === 'midnight' && state.isProUser;
+          const midnightUnlocked = !ticket.proOnly || state.isProUser;
           const ticketFrameStyle = ticket.available
             ? { borderColor: ticket.accent, borderWidth: 2, backgroundColor: hexToRgba(ticket.accent, 0.09) }
             : { borderColor: hexToRgba(ticket.accent, 0.36), borderWidth: 1 };
@@ -11916,8 +11997,8 @@ function ProTeaserCard({ isPro, onPress }: { isPro: boolean; onPress: () => void
       <Text style={styles.proTeaserTitle}>{isPro ? '過去の傾向を、残して見る。' : '今月だけで終わらせない。'}</Text>
       <Text style={styles.proTeaserLead}>
         {isPro
-          ? 'Premium機能が有効です。追加の食券と分析で食の記録を深く見返せます。'
-          : '追加の食券、詳細条件、食生活AIレポートまで。月額400円で使えるPremium機能です。'}
+          ? 'Premium機能が有効です。広告なしの画面と詳しい店舗情報で、次の一食を選べます。'
+          : '広告なし、詳しい店舗情報、食生活AIレポートまで。月額400円で使えるPremium機能です。'}
       </Text>
       <View style={styles.proTeaserFeatureList}>
         {PRO_FEATURE_SUMMARY.map((feature) => (
@@ -12837,7 +12918,7 @@ function ProPaywall({
                 </View>
                 <View>
                   <Text style={styles.proPaywallKicker}>RANDISH Premium</Text>
-                  <Text style={styles.proPaywallBrandSub}>食券・抽選回数を含む9つのPremium機能</Text>
+                  <Text style={styles.proPaywallBrandSub}>広告なし・店舗情報を含む9つのPremium機能</Text>
                 </View>
               </View>
               <Pressable style={styles.proPaywallClose} onPress={onClose}>
@@ -12858,12 +12939,12 @@ function ProPaywall({
               </View>
               <Text style={styles.proPaywallTitle}>次の一食まで導くPremium。</Text>
               <Text style={styles.proPaywallLead}>
-                {message ?? '追加の食券、詳細条件、食生活AIレポートなど9つの機能を利用できます。'}
+                {message ?? '広告なし、詳しい店舗情報、食生活AIレポートなど9つの機能を利用できます。'}
               </Text>
               <View style={styles.proPaywallMiniStatRow}>
                 <View style={styles.proPaywallMiniStat}>
-                  <Ionicons name="compass-outline" size={15} color="#9f4654" />
-                  <Text style={styles.proPaywallMiniStatText}>追加食券</Text>
+                  <Ionicons name="eye-off-outline" size={15} color="#9f4654" />
+                  <Text style={styles.proPaywallMiniStatText}>広告なし</Text>
                 </View>
                 <View style={styles.proPaywallMiniStat}>
                   <Ionicons name="mail-unread-outline" size={15} color="#7161f2" />
@@ -13254,7 +13335,7 @@ function AnalysisDigestCard({
             </View>
             <View style={styles.analysisDigestProTitleTextBox}>
               <Text style={styles.analysisDigestProTitle}>{isPro ? 'Premium有効' : 'Premium Plan'}</Text>
-              <Text style={styles.analysisDigestProSubtitle} numberOfLines={1}>食券・抽選回数を含む9つの機能</Text>
+              <Text style={styles.analysisDigestProSubtitle} numberOfLines={1}>広告なし・店舗情報を含む9つの機能</Text>
             </View>
           </View>
           <View style={styles.analysisDigestProHeaderActions}>
@@ -13316,7 +13397,7 @@ function AnalysisDigestCard({
                 </View>
                 <View style={styles.analysisDigestProFeatureExpandedCopy}>
                   <Text style={styles.analysisDigestProFeatureExpandedTitle}>{selectedPremiumFeature.fullText}</Text>
-                  <Text style={styles.analysisDigestProFeatureExpandedDetail}>{selectedPremiumFeature.detail}</Text>
+                  <Text style={styles.analysisDigestProFeatureExpandedDetail}>{selectedPremiumFeature.expandedText}</Text>
                 </View>
                 <Ionicons name="chevron-up" size={17} color="#7161f2" />
               </Pressable>
@@ -13338,7 +13419,8 @@ function AnalysisDigestCard({
 /**
  * 開発者だけに表示する診断パネル。
  * 「リクエストが本当に飛んでいるか」をアプリを離れずに確かめるためのもの。
- * 開くだけでは外部APIを叩かず、疎通テストを押したときだけ実際に1回投げる。
+ * 開くだけでは外部APIを叩かず、疎通テストを押したときだけテスト検索を行う。
+ * 検索計画によっては、1回のテスト検索から複数の外部リクエストが発生する。
  */
 function DevDiagnosticsPanel({
   userId,
@@ -13378,7 +13460,7 @@ function DevDiagnosticsPanel({
       items.push({ label: `${name} 稼働`, value: available ? '有効' : '無効' });
       if (provider.sessionRequestCount != null) {
         items.push({
-          label: `${name} 使用回数`,
+          label: `${name} 安全停止カウンター（起動後）`,
           value: `${provider.sessionRequestCount} / ${provider.sessionRequestLimit}（残り${provider.sessionRequestsRemaining}）`,
         });
       }
@@ -13387,9 +13469,9 @@ function DevDiagnosticsPanel({
       }
     }
     for (const usage of data.apiUsage ?? []) {
-      const key = String(usage.key ?? usage.provider ?? '不明');
+      const name = String(usage.name ?? usage.key ?? usage.provider ?? '不明');
       if (usage.used != null) {
-        items.push({ label: `${key} 累計`, value: `${usage.used}${usage.limit != null ? ` / ${usage.limit}` : ''}` });
+        items.push({ label: `${name} 外部リクエスト（起動後）`, value: `${usage.used}${usage.limit != null ? ` / ${usage.limit}` : ''}` });
       }
     }
     if (data.probe) {
@@ -13423,7 +13505,7 @@ function DevDiagnosticsPanel({
       {open && (
         <View style={styles.devPanelBody}>
           <Text style={styles.devPanelLead}>
-            開いただけでは外部APIを叩きません。「疎通テスト」を押したときだけ実際に1回リクエストします。
+            表示するのは抽選回数ではなく、このサーバーを起動してから外部APIへの送信を試みた回数です。1回の抽選で複数増える場合や、キャッシュ利用で増えない場合があります。上限は監視用の目安で、請求の確定値は各APIの管理画面で確認してください。
           </Text>
 
           <View style={styles.devPanelRow}>
@@ -13526,6 +13608,7 @@ function AnalyticsTab({
       budgetMin: toOptionalNumber(restaurant.budgetMin) ?? null,
       budgetMax: toOptionalNumber(restaurant.budgetMax) ?? null,
       rangeMeters: null,
+      userRating: null,
       createdAt,
     }));
   }, [drawHistories, history]);
@@ -13949,10 +14032,47 @@ function ResultCard({
           )}
           <Text style={styles.addressText} numberOfLines={1}>{restaurant.area} / {restaurant.address}</Text>
         </View>
+        {isPro && <PremiumPlaceDetailsPanel restaurant={restaurant} />}
         <MiniGoogleMap restaurant={restaurant} distanceLabel={miniMapDistanceLabel} onPress={onMapPress} />
         {!!restaurant.note && <Text style={styles.restaurantNote}>{restaurant.note}</Text>}
         {allowExternalPhoto && restaurant.externalProvider === 'HOTPEPPER' && <HotPepperCredit compact />}
       </View>
+    </View>
+  );
+}
+
+function PremiumPlaceDetailsPanel({ restaurant }: { restaurant: Restaurant }) {
+  const groups = getPremiumDetailGroups(restaurant);
+  const ratingCount = restaurant.premiumDetails?.googleUserRatingCount;
+  if (!groups.length && !ratingCount) {
+    return null;
+  }
+
+  return (
+    <View style={styles.premiumPlaceDetailsPanel}>
+      <View style={styles.premiumPlaceDetailsHeader}>
+        <View style={styles.premiumPlaceDetailsTitleRow}>
+          <Ionicons name="diamond" size={15} color="#a7651b" />
+          <Text style={styles.premiumPlaceDetailsTitle}>Premium 店舗情報</Text>
+        </View>
+        <Text style={styles.premiumPlaceDetailsSource}>Googleマップ</Text>
+      </View>
+      {!!ratingCount && ratingCount > 0 && (
+        <Text style={styles.premiumPlaceDetailsRatingCount}>評価投稿 {ratingCount.toLocaleString()}件</Text>
+      )}
+      {groups.map((group) => (
+        <View key={group.title} style={styles.premiumPlaceDetailsGroup}>
+          <Text style={styles.premiumPlaceDetailsGroupTitle}>{group.title}</Text>
+          <View style={styles.premiumPlaceDetailsChips}>
+            {group.items.map((item) => (
+              <View key={`${group.title}-${item}`} style={styles.premiumPlaceDetailsChip}>
+                <Ionicons name="checkmark-circle" size={14} color="#9a5b17" />
+                <Text style={styles.premiumPlaceDetailsChipText}>{item}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ))}
     </View>
   );
 }

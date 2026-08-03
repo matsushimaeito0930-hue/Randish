@@ -31,7 +31,26 @@ public final class ApiDtos {
       String nextOpenTime,
       String nextCloseTime,
       String googlePlaceId,
-      List<PhotoAttributionResponse> photoAttributions) {
+      List<PhotoAttributionResponse> photoAttributions,
+      PremiumPlaceDetailsResponse premiumDetails) {
+  }
+
+  public record PremiumPlaceDetailsResponse(
+      Boolean goodForChildren,
+      Boolean goodForGroups,
+      Boolean menuForChildren,
+      Boolean reservable,
+      Boolean dineIn,
+      Boolean takeout,
+      Boolean delivery,
+      Boolean outdoorSeating,
+      Boolean allowsDogs,
+      Boolean restroom,
+      Boolean servesVegetarianFood,
+      Integer googleUserRatingCount,
+      List<String> paymentOptions,
+      List<String> parkingOptions,
+      List<String> accessibilityOptions) {
   }
 
   public record RestaurantSearchRequest(

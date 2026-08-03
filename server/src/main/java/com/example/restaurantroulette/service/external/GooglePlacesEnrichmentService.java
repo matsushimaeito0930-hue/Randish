@@ -3,6 +3,7 @@ package com.example.restaurantroulette.service.external;
 import com.example.restaurantroulette.dto.ApiDtos.CandidatePlaceResponse;
 import com.example.restaurantroulette.dto.ApiDtos.NearbyPlacesRequest;
 import com.example.restaurantroulette.dto.ApiDtos.PhotoAttributionResponse;
+import com.example.restaurantroulette.dto.ApiDtos.PremiumPlaceDetailsResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.entity.Restaurant;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -68,7 +69,22 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       "places.googleMapsUri",
       "places.currentOpeningHours.openNow",
       "places.currentOpeningHours.nextOpenTime",
-      "places.currentOpeningHours.nextCloseTime");
+      "places.currentOpeningHours.nextCloseTime",
+      "places.goodForChildren",
+      "places.goodForGroups",
+      "places.menuForChildren",
+      "places.reservable",
+      "places.dineIn",
+      "places.takeout",
+      "places.delivery",
+      "places.outdoorSeating",
+      "places.allowsDogs",
+      "places.restroom",
+      "places.servesVegetarianFood",
+      "places.userRatingCount",
+      "places.paymentOptions",
+      "places.parkingOptions",
+      "places.accessibilityOptions");
   private static final String DETAIL_FIELD_MASK = String.join(",",
       "id",
       "displayName",
@@ -472,7 +488,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           place.currentOpeningHours() == null ? null : place.currentOpeningHours().nextOpenTime(),
           place.currentOpeningHours() == null ? null : place.currentOpeningHours().nextCloseTime(),
           place.id(),
-          hasExistingPhoto ? restaurant.photoAttributions() : googlePhotoAttributions(place));
+          hasExistingPhoto ? restaurant.photoAttributions() : googlePhotoAttributions(place),
+          restaurant.premiumDetails());
     } catch (RuntimeException exception) {
       logger.warn("Google Places enrichment failed for restaurant: {}", restaurant.name(), exception);
       return restaurant;
@@ -701,7 +718,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           hours == null ? null : hours.nextOpenTime(),
           hours == null ? null : hours.nextCloseTime(),
           place.id(),
-          restaurant.photoAttributions());
+          restaurant.photoAttributions(),
+          toPremiumDetails(place));
     } catch (RuntimeException exception) {
       logger.warn("Google Places business status enrichment failed for restaurant: {}", restaurant.name(), exception);
       return restaurant;
@@ -721,6 +739,70 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           .forEach(categories::add);
     }
     return categories.stream().distinct().toList();
+  }
+
+  private PremiumPlaceDetailsResponse toPremiumDetails(GooglePlace place) {
+    return new PremiumPlaceDetailsResponse(
+        place.goodForChildren(),
+        place.goodForGroups(),
+        place.menuForChildren(),
+        place.reservable(),
+        place.dineIn(),
+        place.takeout(),
+        place.delivery(),
+        place.outdoorSeating(),
+        place.allowsDogs(),
+        place.restroom(),
+        place.servesVegetarianFood(),
+        place.userRatingCount(),
+        paymentOptionLabels(place.paymentOptions()),
+        parkingOptionLabels(place.parkingOptions()),
+        accessibilityOptionLabels(place.accessibilityOptions()));
+  }
+
+  private List<String> paymentOptionLabels(GooglePaymentOptions options) {
+    if (options == null) {
+      return List.of();
+    }
+    List<String> labels = new ArrayList<>();
+    addWhenTrue(labels, options.acceptsCreditCards(), "クレジットカード");
+    addWhenTrue(labels, options.acceptsDebitCards(), "デビットカード");
+    addWhenTrue(labels, options.acceptsNfc(), "タッチ決済");
+    addWhenTrue(labels, options.acceptsCashOnly(), "現金のみ");
+    return List.copyOf(labels);
+  }
+
+  private List<String> parkingOptionLabels(GoogleParkingOptions options) {
+    if (options == null) {
+      return List.of();
+    }
+    List<String> labels = new ArrayList<>();
+    addWhenTrue(labels, options.freeParkingLot(), "無料駐車場");
+    addWhenTrue(labels, options.paidParkingLot(), "有料駐車場");
+    addWhenTrue(labels, options.freeStreetParking(), "無料路上駐車");
+    addWhenTrue(labels, options.paidStreetParking(), "有料路上駐車");
+    addWhenTrue(labels, options.freeGarageParking(), "無料屋内駐車場");
+    addWhenTrue(labels, options.paidGarageParking(), "有料屋内駐車場");
+    addWhenTrue(labels, options.valetParking(), "バレーパーキング");
+    return List.copyOf(labels);
+  }
+
+  private List<String> accessibilityOptionLabels(GoogleAccessibilityOptions options) {
+    if (options == null) {
+      return List.of();
+    }
+    List<String> labels = new ArrayList<>();
+    addWhenTrue(labels, options.wheelchairAccessibleEntrance(), "車いす対応入口");
+    addWhenTrue(labels, options.wheelchairAccessibleSeating(), "車いす対応席");
+    addWhenTrue(labels, options.wheelchairAccessibleRestroom(), "車いす対応トイレ");
+    addWhenTrue(labels, options.wheelchairAccessibleParking(), "車いす対応駐車場");
+    return List.copyOf(labels);
+  }
+
+  private void addWhenTrue(List<String> labels, Boolean enabled, String label) {
+    if (Boolean.TRUE.equals(enabled)) {
+      labels.add(label);
+    }
   }
 
   private boolean matchesNearbyOpenNow(CandidatePlaceResponse candidate, Boolean openNow) {
@@ -1184,7 +1266,22 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
       String priceLevel,
       List<GooglePhoto> photos,
       String googleMapsUri,
-      GoogleOpeningHours currentOpeningHours) {
+      GoogleOpeningHours currentOpeningHours,
+      Boolean goodForChildren,
+      Boolean goodForGroups,
+      Boolean menuForChildren,
+      Boolean reservable,
+      Boolean dineIn,
+      Boolean takeout,
+      Boolean delivery,
+      Boolean outdoorSeating,
+      Boolean allowsDogs,
+      Boolean restroom,
+      Boolean servesVegetarianFood,
+      Integer userRatingCount,
+      GooglePaymentOptions paymentOptions,
+      GoogleParkingOptions parkingOptions,
+      GoogleAccessibilityOptions accessibilityOptions) {
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)
@@ -1197,6 +1294,33 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
 
   @JsonIgnoreProperties(ignoreUnknown = true)
   private record GoogleOpeningHours(Boolean openNow, String nextOpenTime, String nextCloseTime) {
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  private record GooglePaymentOptions(
+      Boolean acceptsCreditCards,
+      Boolean acceptsDebitCards,
+      Boolean acceptsCashOnly,
+      Boolean acceptsNfc) {
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  private record GoogleParkingOptions(
+      Boolean freeParkingLot,
+      Boolean paidParkingLot,
+      Boolean freeStreetParking,
+      Boolean paidStreetParking,
+      Boolean valetParking,
+      Boolean freeGarageParking,
+      Boolean paidGarageParking) {
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  private record GoogleAccessibilityOptions(
+      Boolean wheelchairAccessibleParking,
+      Boolean wheelchairAccessibleEntrance,
+      Boolean wheelchairAccessibleRestroom,
+      Boolean wheelchairAccessibleSeating) {
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)

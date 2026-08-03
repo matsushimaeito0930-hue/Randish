@@ -21,6 +21,25 @@ export type Restaurant = {
   nextCloseTime?: string | null;
   googlePlaceId?: string | null;
   photoAttributions?: PhotoAttribution[];
+  premiumDetails?: PremiumPlaceDetails | null;
+};
+
+export type PremiumPlaceDetails = {
+  goodForChildren?: boolean | null;
+  goodForGroups?: boolean | null;
+  menuForChildren?: boolean | null;
+  reservable?: boolean | null;
+  dineIn?: boolean | null;
+  takeout?: boolean | null;
+  delivery?: boolean | null;
+  outdoorSeating?: boolean | null;
+  allowsDogs?: boolean | null;
+  restroom?: boolean | null;
+  servesVegetarianFood?: boolean | null;
+  googleUserRatingCount?: number | null;
+  paymentOptions?: string[];
+  parkingOptions?: string[];
+  accessibilityOptions?: string[];
 };
 
 export type PhotoAttribution = {

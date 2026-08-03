@@ -38,7 +38,8 @@ public class DtoMapper {
         null,
         null,
         null,
-        List.of());
+        List.of(),
+        null);
   }
 
   public RandomHistoryResponse toRandomHistoryResponse(RandomHistory history, Restaurant restaurant) {
