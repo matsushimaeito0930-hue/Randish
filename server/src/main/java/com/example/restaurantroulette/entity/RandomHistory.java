@@ -13,5 +13,6 @@ public record RandomHistory(
     Integer budgetMin,
     Integer budgetMax,
     Integer rangeMeters,
+    Integer userRating,
     Instant createdAt) {
 }

@@ -197,6 +197,7 @@ export type RandomHistory = {
   budgetMin: number | null;
   budgetMax: number | null;
   rangeMeters: number | null;
+  userRating: number | null;
   createdAt: string;
 };
 
@@ -281,7 +282,7 @@ export type ApiUsageResponse = {
 };
 
 type RequestOptions = {
-  method?: 'GET' | 'POST' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
   headers?: Record<string, string>;
   skipAuth?: boolean;
@@ -585,6 +586,12 @@ export const randishApi = {
     request<RandomHistory>(baseUrl, 'api/random-histories', undefined, {
       method: 'POST',
       body: history,
+    }),
+
+  updateRandomHistoryRating: (baseUrl: ApiBaseUrlInput, historyId: string, rating: number) =>
+    request<RandomHistory>(baseUrl, `api/random-histories/${historyId}/rating`, undefined, {
+      method: 'PATCH',
+      body: { rating },
     }),
 
   addFavorite: (baseUrl: ApiBaseUrlInput, favorite: FavoriteCreateParams) =>

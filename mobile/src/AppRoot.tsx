@@ -116,6 +116,7 @@ type DrawHistoryEntry = {
   budgetMin: number | null;
   budgetMax: number | null;
   rangeMeters: number | null;
+  userRating: number | null;
   createdAt: string;
 };
 
@@ -3158,6 +3159,7 @@ const toDrawHistoryEntry = (history: ApiRandomHistory): DrawHistoryEntry => ({
   budgetMin: history.budgetMin,
   budgetMax: history.budgetMax,
   rangeMeters: history.rangeMeters,
+  userRating: history.userRating ?? null,
   createdAt: history.createdAt,
 });
 
@@ -5102,6 +5104,7 @@ export default function App() {
   const [savedDetailLoadingId, setSavedDetailLoadingId] = useState<string | null>(null);
   const [savedDetailError, setSavedDetailError] = useState<string | null>(null);
   const [historyDetailLoadingId, setHistoryDetailLoadingId] = useState<string | null>(null);
+  const [historyRatingLoadingId, setHistoryRatingLoadingId] = useState<string | null>(null);
   const [historyDetailError, setHistoryDetailError] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const [locationIntroState, setLocationIntroState] = useState<LocationIntroState>('loading');
@@ -5366,6 +5369,7 @@ export default function App() {
       budgetMin: parseBudgetNumber(budgetMin),
       budgetMax: parseBudgetNumber(budgetMax),
       rangeMeters: parseDistanceMeters(distance),
+      userRating: null,
       createdAt,
     };
     setDrawHistories((current) => [
@@ -7157,6 +7161,36 @@ export default function App() {
     }
   }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl]);
 
+  const updateHistoryRating = useCallback(async (entry: DrawHistoryEntry, rating: number) => {
+    if (entry.id.startsWith('local-')) {
+      setHistoryDetailError('履歴をサーバーへ同期しています。少し待ってから星を付けてください。');
+      return;
+    }
+    const previousRating = entry.userRating;
+    const nextRating = rating === previousRating ? 0 : rating;
+    setHistoryDetailError(null);
+    setHistoryRatingLoadingId(entry.id);
+    setDrawHistories((current) => current.map((item) => (
+      item.id === entry.id ? { ...item, userRating: nextRating || null } : item
+    )));
+    try {
+      const updated = await randishApi.updateRandomHistoryRating(apiBaseUrlCandidates, entry.id, nextRating);
+      syncWorkingApiBaseUrl();
+      const syncedEntry = toDrawHistoryEntry(updated);
+      setDrawHistories((current) => current.map((item) => (
+        item.id === entry.id ? { ...item, ...syncedEntry, restaurant: item.restaurant ?? syncedEntry.restaurant } : item
+      )));
+      setMessage(nextRating ? `この履歴を★${nextRating}で評価しました。` : '履歴の評価を外しました。');
+    } catch {
+      setDrawHistories((current) => current.map((item) => (
+        item.id === entry.id ? { ...item, userRating: previousRating } : item
+      )));
+      setHistoryDetailError('評価を保存できませんでした。通信状態を確認して、もう一度押してください。');
+    } finally {
+      setHistoryRatingLoadingId(null);
+    }
+  }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl]);
+
   const openHistoryRestaurant = useCallback(async (entry: DrawHistoryEntry) => {
     if (entry.restaurant) {
       setSelectedRestaurant(entry.restaurant);
@@ -7596,12 +7630,14 @@ export default function App() {
             savedDetailLoadingId={savedDetailLoadingId}
             savedDetailError={savedDetailError}
             historyDetailLoadingId={historyDetailLoadingId}
+            historyRatingLoadingId={historyRatingLoadingId}
             historyDetailError={historyDetailError}
             userLocation={userLocation}
             isRegisteredUser={isRegisteredUser}
             isPro={subscription.isPro}
             onSavedPress={openSavedRestaurant}
             onHistoryPress={openHistoryRestaurant}
+            onHistoryRatingChange={updateHistoryRating}
             onSavedMapPress={openSavedMap}
             onAttachPhoto={attachSavedFoodPhoto}
             onUploadAlbumPhoto={uploadAlbumPhoto}
@@ -11148,12 +11184,14 @@ function SaveTab({
   savedDetailLoadingId,
   savedDetailError,
   historyDetailLoadingId,
+  historyRatingLoadingId,
   historyDetailError,
   userLocation,
   isRegisteredUser,
   isPro,
   onSavedPress,
   onHistoryPress,
+  onHistoryRatingChange,
   onSavedMapPress,
   onAttachPhoto,
   onUploadAlbumPhoto,
@@ -11169,12 +11207,14 @@ function SaveTab({
   savedDetailLoadingId: string | null;
   savedDetailError: string | null;
   historyDetailLoadingId: string | null;
+  historyRatingLoadingId: string | null;
   historyDetailError: string | null;
   userLocation: UserLocation | null;
   isRegisteredUser: boolean;
   isPro: boolean;
   onSavedPress: (favorite: SavedRestaurant) => void;
   onHistoryPress: (entry: DrawHistoryEntry) => void;
+  onHistoryRatingChange: (entry: DrawHistoryEntry, rating: number) => void;
   onSavedMapPress: (restaurant: Restaurant) => void;
   onAttachPhoto: (favoriteId: string) => void;
   onUploadAlbumPhoto: () => void;
@@ -11274,6 +11314,7 @@ function SaveTab({
   const albumViews = [
     { key: 'photos', label: '写真', count: `${diaryCount}枚`, icon: 'images-outline' },
     { key: 'favorites', label: 'お気に入り', count: `${savedRestaurants.length}件`, icon: 'heart-outline' },
+    { key: 'history', label: '履歴評価', count: `${drawHistories.filter((entry) => entry.userRating).length}/${drawHistories.length}件`, icon: 'star-outline' },
   ] as const;
 
   useEffect(() => {
@@ -11706,8 +11747,10 @@ function SaveTab({
             fallbackHistory={history}
             uiText={uiText}
             loadingId={historyDetailLoadingId}
+            ratingLoadingId={historyRatingLoadingId}
             error={historyDetailError}
             onEntryPress={onHistoryPress}
+            onRatingChange={onHistoryRatingChange}
           />
         </View>
       )}
@@ -14172,31 +14215,107 @@ function HistoryEntrySection({
   fallbackHistory,
   uiText,
   loadingId,
+  ratingLoadingId,
   error,
   onEntryPress,
+  onRatingChange,
 }: {
   entries: DrawHistoryEntry[];
   fallbackHistory: Restaurant[];
   uiText: Record<string, string>;
   loadingId: string | null;
+  ratingLoadingId: string | null;
   error: string | null;
   onEntryPress: (entry: DrawHistoryEntry) => void;
+  onRatingChange: (entry: DrawHistoryEntry, rating: number) => void;
 }) {
+  const [ratingFilter, setRatingFilter] = useState<'all' | 'rated' | '4plus'>('all');
+
   if (entries.length === 0) {
     return <HistorySection history={fallbackHistory} uiText={uiText} showAll />;
   }
 
+  const ratedEntries = entries.filter((entry) => (entry.userRating ?? 0) > 0);
+  const visibleEntries = entries
+    .filter((entry) => ratingFilter === 'all'
+      || (ratingFilter === 'rated' && (entry.userRating ?? 0) > 0)
+      || (ratingFilter === '4plus' && (entry.userRating ?? 0) >= 4))
+    .sort((a, b) => {
+      const ratingDifference = (b.userRating ?? 0) - (a.userRating ?? 0);
+      if (ratingDifference !== 0) {
+        return ratingDifference;
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  const chooseFromRatings = () => {
+    if (ratedEntries.length === 0) {
+      return;
+    }
+    const totalWeight = ratedEntries.reduce((total, entry) => total + Math.pow(entry.userRating ?? 1, 2), 0);
+    let cursor = Math.random() * totalWeight;
+    const selected = ratedEntries.find((entry) => {
+      cursor -= Math.pow(entry.userRating ?? 1, 2);
+      return cursor <= 0;
+    }) ?? ratedEntries[0];
+    onEntryPress(selected);
+  };
+
   return (
     <View>
-      <SectionHeader title={uiText.recentHistory} action={`${entries.length}件`} />
+      <View style={styles.historyRatingHero}>
+        <View style={styles.historyRatingHeroIcon}>
+          <Ionicons name="sparkles" size={22} color="#ffffff" />
+        </View>
+        <View style={styles.historyRatingHeroBody}>
+          <Text style={styles.historyRatingHeroKicker}>YOUR TASTE</Text>
+          <Text style={styles.historyRatingHeroTitle}>星から、もう一度行きたい店を選ぶ</Text>
+          <Text style={styles.historyRatingHeroText}>評価が高い履歴ほど選ばれやすくなります。店名は保存せず、店舗IDから必要な時だけ最新情報を取得します。</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="星評価から一店選ぶ"
+          style={[styles.historyRatingPickButton, ratedEntries.length === 0 && styles.historyRatingPickButtonDisabled]}
+          disabled={ratedEntries.length === 0}
+          onPress={chooseFromRatings}
+        >
+          <Ionicons name="shuffle" size={18} color="#ffffff" />
+          <Text style={styles.historyRatingPickButtonText}>評価から1店</Text>
+        </Pressable>
+      </View>
+      <SectionHeader title={uiText.recentHistory} action={`${ratedEntries.length}/${entries.length}件を評価`} />
+      <View style={styles.historyRatingFilters}>
+        {([
+          { key: 'all', label: 'すべて' },
+          { key: 'rated', label: '評価済み' },
+          { key: '4plus', label: '★4以上' },
+        ] as const).map((filter) => {
+          const active = ratingFilter === filter.key;
+          return (
+            <Pressable
+              key={filter.key}
+              style={[styles.historyRatingFilter, active && styles.historyRatingFilterActive]}
+              onPress={() => setRatingFilter(filter.key)}
+            >
+              <Text style={[styles.historyRatingFilterText, active && styles.historyRatingFilterTextActive]}>{filter.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
       {!!error && (
         <View style={styles.savedErrorNotice}>
           <Ionicons name="alert-circle-outline" size={18} color={ORANGE} />
           <Text style={styles.savedErrorText}>{error}</Text>
         </View>
       )}
-      {entries.map((entry, index) => {
+      {visibleEntries.length === 0 && (
+        <View style={styles.emptyPanel}>
+          <Text style={styles.emptyTitle}>この評価の履歴はまだありません</Text>
+          <Text style={styles.emptyText}>履歴の星を押すと、評価順に整理して選べるようになります。</Text>
+        </View>
+      )}
+      {visibleEntries.map((entry) => {
         const loading = loadingId === entry.id;
+        const ratingLoading = ratingLoadingId === entry.id;
         const displayEntry = {
           ...entry,
           area: entry.area ?? entry.restaurant?.area ?? null,
@@ -14205,7 +14324,7 @@ function HistoryEntrySection({
           budgetMax: entry.budgetMax ?? toOptionalNumber(entry.restaurant?.budgetMax) ?? null,
         };
         return (
-          <View key={`${entry.id}-history-lookup-${index}`} style={styles.historyLookupCard}>
+          <View key={`${entry.id}-history-lookup`} style={styles.historyLookupCard}>
             <View style={styles.historyLookupTopRow}>
               <View style={styles.historyLookupIcon}>
                 <GenreIconVisual genre={displayEntry.genre} />
@@ -14218,6 +14337,25 @@ function HistoryEntrySection({
                 <Text style={styles.historyLookupId} numberOfLines={1}>
                   {formatShortDateTime(entry.createdAt) || '保存した履歴'}
                 </Text>
+                <View style={styles.historyRatingRow} accessibilityLabel={`現在の評価は${entry.userRating ?? 0}です`}>
+                  {[1, 2, 3, 4, 5].map((rating) => (
+                    <Pressable
+                      key={`${entry.id}-rating-${rating}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${rating}つ星で評価`}
+                      style={styles.historyRatingStarButton}
+                      disabled={ratingLoading || entry.id.startsWith('local-')}
+                      onPress={() => onRatingChange(entry, rating)}
+                    >
+                      <Ionicons
+                        name={(entry.userRating ?? 0) >= rating ? 'star' : 'star-outline'}
+                        size={22}
+                        color={(entry.userRating ?? 0) >= rating ? '#f4a623' : '#c9bdb1'}
+                      />
+                    </Pressable>
+                  ))}
+                  {ratingLoading && <ActivityIndicator size="small" color={ORANGE} />}
+                </View>
               </View>
             </View>
             <Pressable
@@ -14229,7 +14367,7 @@ function HistoryEntrySection({
                 <ActivityIndicator color="#ffffff" size="small" />
               ) : (
                 <>
-                  <Ionicons name="cloud-download-outline" size={16} color="#ffffff" />
+                  <Ionicons name="restaurant-outline" size={16} color="#ffffff" />
                   <Text style={styles.historyLookupButtonText}>{entry.restaurant ? '詳細画面で見る' : '最新情報を取得'}</Text>
                 </>
               )}
@@ -14270,6 +14408,7 @@ function HistorySection({
             budgetMin: toOptionalNumber(restaurant.budgetMin) ?? null,
             budgetMax: toOptionalNumber(restaurant.budgetMax) ?? null,
             rangeMeters: null,
+            userRating: null,
             createdAt: new Date().toISOString(),
           };
           return (

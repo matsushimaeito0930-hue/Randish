@@ -38,7 +38,7 @@ public class RandishWebConfig implements WebMvcConfigurer {
 
     registry.addMapping("/api/**")
         .allowedOriginPatterns(originPatterns)
-        .allowedMethods("GET", "POST", "DELETE", "OPTIONS")
+        .allowedMethods("GET", "POST", "PATCH", "DELETE", "OPTIONS")
         .allowedHeaders("Authorization", "Content-Type", "X-Randish-Admin-Password")
         .maxAge(3600);
   }

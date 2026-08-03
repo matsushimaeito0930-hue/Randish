@@ -1,6 +1,7 @@
 package com.example.restaurantroulette.service;
 
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryCreateRequest;
+import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryRatingRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.entity.RandomHistory;
@@ -69,6 +70,7 @@ public class RandomHistoryService {
         request.budgetMin(),
         request.budgetMax(),
         rangeMeters,
+        null,
         Instant.now());
     return mapper.toRandomHistoryResponse(randomHistoryRepository.save(history), persistRestaurantId ? restaurant : null);
   }
@@ -89,6 +91,20 @@ public class RandomHistoryService {
     return randomHistoryRepository.findById(id)
         .orElseThrow(() -> new NotFoundException("Random history not found: " + id))
         .userId();
+  }
+
+  public RandomHistoryResponse updateRating(String id, RandomHistoryRatingRequest request) {
+    RandomHistory history = randomHistoryRepository.findById(id)
+        .orElseThrow(() -> new NotFoundException("Random history not found: " + id));
+    Integer rating = request == null ? null : request.rating();
+    Integer normalizedRating = rating == null || rating == 0 ? null : rating;
+    if (normalizedRating != null && (normalizedRating < 1 || normalizedRating > 5)) {
+      throw new BadRequestException("rating must be between 1 and 5, or 0 to clear.");
+    }
+    randomHistoryRepository.updateUserRating(id, normalizedRating);
+    RandomHistory updated = randomHistoryRepository.findById(id)
+        .orElseThrow(() -> new NotFoundException("Random history not found: " + id));
+    return mapper.toRandomHistoryResponse(updated, findLocalRestaurantForList(updated));
   }
 
   public RestaurantResponse findRestaurant(String id) {

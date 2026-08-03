@@ -21,11 +21,11 @@ public class RandomHistoryRepository {
     jdbcClient.sql("""
         INSERT INTO random_histories (
           id, user_id, restaurant_id, provider, provider_place_id,
-          area, genre, budget_min, budget_max, range_meters, created_at
+          area, genre, budget_min, budget_max, range_meters, user_rating, created_at
         )
         VALUES (
           :id, :userId, :restaurantId, :provider, :providerPlaceId,
-          :area, :genre, :budgetMin, :budgetMax, :rangeMeters, :createdAt
+          :area, :genre, :budgetMin, :budgetMax, :rangeMeters, :userRating, :createdAt
         )
         """)
         .param("id", history.id())
@@ -38,6 +38,7 @@ public class RandomHistoryRepository {
         .param("budgetMin", history.budgetMin())
         .param("budgetMax", history.budgetMax())
         .param("rangeMeters", history.rangeMeters())
+        .param("userRating", history.userRating())
         .param("createdAt", Timestamp.from(history.createdAt()))
         .update();
     return history;
@@ -46,7 +47,7 @@ public class RandomHistoryRepository {
   public List<RandomHistory> findByUserId(String userId) {
     return jdbcClient.sql("""
         SELECT id, user_id, restaurant_id, provider, provider_place_id,
-               area, genre, budget_min, budget_max, range_meters, created_at
+               area, genre, budget_min, budget_max, range_meters, user_rating, created_at
         FROM random_histories
         WHERE user_id = :userId
         ORDER BY created_at DESC
@@ -59,13 +60,20 @@ public class RandomHistoryRepository {
   public Optional<RandomHistory> findById(String id) {
     return jdbcClient.sql("""
         SELECT id, user_id, restaurant_id, provider, provider_place_id,
-               area, genre, budget_min, budget_max, range_meters, created_at
+               area, genre, budget_min, budget_max, range_meters, user_rating, created_at
         FROM random_histories
         WHERE id = :id
         """)
         .param("id", id)
         .query(this::mapHistory)
         .optional();
+  }
+
+  public void updateUserRating(String id, Integer userRating) {
+    jdbcClient.sql("UPDATE random_histories SET user_rating = :userRating WHERE id = :id")
+        .param("id", id)
+        .param("userRating", userRating)
+        .update();
   }
 
   private RandomHistory mapHistory(ResultSet resultSet, int rowNumber) throws SQLException {
@@ -80,6 +88,7 @@ public class RandomHistoryRepository {
         getNullableInteger(resultSet, "budget_min"),
         getNullableInteger(resultSet, "budget_max"),
         getNullableInteger(resultSet, "range_meters"),
+        getNullableInteger(resultSet, "user_rating"),
         resultSet.getTimestamp("created_at").toInstant());
   }
 

@@ -1,6 +1,7 @@
 package com.example.restaurantroulette.controller;
 
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryCreateRequest;
+import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryRatingRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
@@ -8,6 +9,7 @@ import com.example.restaurantroulette.service.RandomHistoryService;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -39,6 +41,15 @@ public class RandomHistoryController {
       @PathVariable String userId) {
     authenticatedUserService.requireSameUser(authorizationHeader, userId);
     return randomHistoryService.findByUserId(userId);
+  }
+
+  @PatchMapping("/{id}/rating")
+  public RandomHistoryResponse updateRating(
+      @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+      @PathVariable String id,
+      @RequestBody RandomHistoryRatingRequest request) {
+    authenticatedUserService.requireSameUser(authorizationHeader, randomHistoryService.findOwnerUserId(id));
+    return randomHistoryService.updateRating(id, request);
   }
 
   @GetMapping("/{id}/restaurant")

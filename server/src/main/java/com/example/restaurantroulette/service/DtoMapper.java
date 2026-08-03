@@ -54,6 +54,7 @@ public class DtoMapper {
         history.budgetMin(),
         history.budgetMax(),
         history.rangeMeters(),
+        history.userRating(),
         history.createdAt());
   }
 

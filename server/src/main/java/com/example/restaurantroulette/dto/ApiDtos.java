@@ -121,7 +121,11 @@ public final class ApiDtos {
       Integer budgetMin,
       Integer budgetMax,
       Integer rangeMeters,
+      Integer userRating,
       Instant createdAt) {
+  }
+
+  public record RandomHistoryRatingRequest(Integer rating) {
   }
 
   public record UserCreateRequest(

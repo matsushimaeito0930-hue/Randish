@@ -295,13 +295,15 @@ CREATE TABLE IF NOT EXISTS random_histories (
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
   range_meters INT,
+  user_rating INT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL,
   CONSTRAINT fk_random_histories_restaurant
     FOREIGN KEY (restaurant_id) REFERENCES restaurants(id),
   CONSTRAINT ck_random_histories_budget CHECK (
     budget_min IS NULL OR budget_max IS NULL OR budget_min <= budget_max
   ),
-  CONSTRAINT ck_random_histories_range CHECK (range_meters IS NULL OR range_meters > 0)
+  CONSTRAINT ck_random_histories_range CHECK (range_meters IS NULL OR range_meters > 0),
+  CONSTRAINT ck_random_histories_user_rating CHECK (user_rating IS NULL OR (user_rating >= 1 AND user_rating <= 5))
 );
 
 CREATE TABLE IF NOT EXISTS favorite_restaurants (
@@ -372,6 +374,7 @@ ALTER TABLE app_users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(40) NOT NUL
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS range_meters INT;
+ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS user_rating INT;
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS provider VARCHAR(80) NOT NULL DEFAULT 'RANDISH_SEED';
 ALTER TABLE random_histories ADD COLUMN IF NOT EXISTS provider_place_id VARCHAR(255) NOT NULL DEFAULT '';
 UPDATE random_histories

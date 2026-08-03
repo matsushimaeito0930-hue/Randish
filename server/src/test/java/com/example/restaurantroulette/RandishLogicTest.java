@@ -9,6 +9,7 @@ import com.example.restaurantroulette.dto.ApiDtos.FavoriteCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.NearbyPlacesRequest;
 import com.example.restaurantroulette.dto.ApiDtos.PhotoAttributionResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryCreateRequest;
+import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryRatingRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomRestaurantRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.dto.ApiDtos.UserCreateRequest;
@@ -613,6 +614,45 @@ class RandishLogicTest {
     assertThat(history.restaurant()).isNull();
     assertThat(externalFavoriteService.findRestaurant(favorite.id()).name()).isEqualTo("APIから再取得した店舗");
     assertThat(externalHistoryService.findRestaurant(history.id()).name()).isEqualTo("APIから再取得した店舗");
+  }
+
+  @Test
+  void randomHistoryRatingCanBeSavedChangedAndCleared() {
+    var history = randomHistoryService.create(new RandomHistoryCreateRequest(
+        "user-history-rating",
+        "seed-umeda-ramen",
+        null,
+        null,
+        "梅田",
+        "ラーメン",
+        1000,
+        1500,
+        1500));
+
+    var rated = randomHistoryService.updateRating(history.id(), new RandomHistoryRatingRequest(5));
+    assertThat(rated.userRating()).isEqualTo(5);
+    assertThat(randomHistoryService.findByUserId("user-history-rating").get(0).userRating()).isEqualTo(5);
+
+    var cleared = randomHistoryService.updateRating(history.id(), new RandomHistoryRatingRequest(0));
+    assertThat(cleared.userRating()).isNull();
+  }
+
+  @Test
+  void randomHistoryRatingRejectsValuesOutsideFiveStars() {
+    var history = randomHistoryService.create(new RandomHistoryCreateRequest(
+        "user-history-invalid-rating",
+        "seed-umeda-ramen",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null));
+
+    assertThatThrownBy(() -> randomHistoryService.updateRating(history.id(), new RandomHistoryRatingRequest(6)))
+        .isInstanceOf(BadRequestException.class)
+        .hasMessageContaining("between 1 and 5");
   }
 
   @Test
