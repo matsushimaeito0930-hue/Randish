@@ -59,6 +59,7 @@ type TabKey = 'home' | 'search' | 'random' | 'save' | 'analytics';
 type DrawAnimationKey = 'roulette' | 'lottery' | 'shuffle' | 'radar';
 type DrawMode = 'condition' | 'everything' | 'travel';
 type ConditionRandomField = 'area' | 'budget' | 'distance' | 'genre';
+type SituationMode = 'none' | 'solo' | 'date' | 'friends' | 'family' | 'afterWork';
 type MealSlotKey = 'morning' | 'lunch' | 'dinner' | 'midnight';
 type TravelRevealStep = 'hidden' | 'genre' | 'area' | 'restaurant';
 type AppLanguage = 'ja' | 'en' | 'zh' | 'ko';
@@ -328,6 +329,7 @@ type CandidateQuery = {
   category?: string;
   priceRange?: string;
   openNow?: boolean;
+  minRating?: number;
 };
 
 type AreaPreset = {
@@ -1886,7 +1888,7 @@ const PRO_FEATURE_SUMMARY = [
   'シチュエーションモード',
   'AIによる店舗の選出理由',
   '子ども向け・予約・支払い・駐車場など店舗情報の拡張',
-  '距離・予算・営業時間などの詳細条件',
+  '距離・予算・評価・営業状況などの詳細条件',
   'お気に入り・除外店舗・食事履歴',
   'ユーザー専用の食AI',
   '月1回の食生活AIレポート',
@@ -1932,9 +1934,9 @@ const PRO_ANALYSIS_FEATURES: {
     color: '#7161f2', backgroundColor: '#f8f6ff',
   },
   {
-    icon: 'options-outline', title: '詳細条件', detail: '距離・予算・営業中まで指定',
+    icon: 'options-outline', title: '詳細条件', detail: '距離・予算・評価・営業中',
     fullText: '譲れない条件を守って、候補だけを残す。',
-    expandedText: '現在地からの距離、予算、営業状況などを細かく指定できます。遠すぎる店や予算外の店を避け、今から本当に行ける候補に近づけます。',
+    expandedText: '現在地からの距離、予算、最低評価、現在営業中などを細かく指定できます。評価や営業時間を確認できない店舗は除外し、今から本当に行ける候補だけに絞ります。',
     color: '#7161f2', backgroundColor: '#f8f6ff',
   },
   {
@@ -1962,6 +1964,22 @@ const PRO_SITUATION_FEATURE_LINES = [
   'デート・友達・家族向け',
   '仕事帰り・深夜・雨の日向け',
 ];
+
+const SITUATION_OPTIONS: Array<{
+  key: SituationMode;
+  label: string;
+  description: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}> = [
+  { key: 'none', label: '指定なし', description: '料理と条件を優先', icon: 'options-outline' },
+  { key: 'solo', label: 'ひとり', description: '入りやすい店を優先', icon: 'person-outline' },
+  { key: 'date', label: 'デート', description: '落ち着く店を優先', icon: 'heart-outline' },
+  { key: 'friends', label: '友達', description: 'みんなで楽しめる店', icon: 'people-outline' },
+  { key: 'family', label: '家族', description: '子ども連れ情報を優先', icon: 'home-outline' },
+  { key: 'afterWork', label: '仕事帰り', description: '手早く寄れる店を優先', icon: 'briefcase-outline' },
+];
+
+const MIN_RATING_OPTIONS = [0, 3.5, 4.0, 4.5];
 
 const PREFECTURE_IMAGES: Record<string, ImageSourcePropType> = {
   北海道: require('../assets/prefecture-clean/hokkaido.png'),
@@ -4189,6 +4207,78 @@ const getOpenStatus = (restaurant: Restaurant) => {
   };
 };
 
+const SITUATION_KEYWORDS: Record<Exclude<SituationMode, 'none'>, string[]> = {
+  solo: ['ラーメン', 'カレー', '定食', 'そば', 'うどん', 'カフェ', '丼', 'ファストフード'],
+  date: ['イタリアン', 'フレンチ', 'カフェ', '寿司', '洋食', 'ワイン', 'ダイニング'],
+  friends: ['居酒屋', '焼肉', '韓国', '中華', 'お好み焼き', '焼き鳥', 'バル'],
+  family: ['ファミリー', 'レストラン', '寿司', '焼肉', '和食', '洋食', '中華', 'うどん'],
+  afterWork: ['居酒屋', '焼き鳥', '定食', 'ラーメン', 'そば', 'バル', '丼'],
+};
+
+const getSituationTextScore = (source: string, situation: SituationMode) => {
+  if (situation === 'none') {
+    return 0;
+  }
+  const normalizedSource = normalizeSearchText(source);
+  return SITUATION_KEYWORDS[situation].some((keyword) => normalizedSource.includes(normalizeSearchText(keyword))) ? 4 : 0;
+};
+
+const getRestaurantSituationScore = (restaurant: Restaurant, situation: SituationMode) => {
+  if (situation === 'none') {
+    return 0;
+  }
+  const details = restaurant.premiumDetails;
+  const detailBonus = situation === 'family' && (details?.goodForChildren || details?.menuForChildren)
+    ? 8
+    : (situation === 'friends' || situation === 'family') && details?.goodForGroups
+      ? 6
+      : 0;
+  return getSituationTextScore(`${restaurant.genre} ${restaurant.note}`, situation) + detailBonus;
+};
+
+const prioritizeRestaurantsForSituation = (restaurants: Restaurant[], situation: SituationMode) =>
+  situation === 'none'
+    ? restaurants
+    : restaurants
+      .map((restaurant, index) => ({ restaurant, index, score: getRestaurantSituationScore(restaurant, situation) }))
+      .sort((first, second) => second.score - first.score || first.index - second.index)
+      .map((item) => item.restaurant);
+
+const prioritizeCandidatesForSituation = (candidates: CandidatePlace[], situation: SituationMode) =>
+  situation === 'none'
+    ? candidates
+    : candidates
+      .map((candidate, index) => ({
+        candidate,
+        index,
+        score: getSituationTextScore((candidate.categories ?? []).join(' '), situation),
+      }))
+      .sort((first, second) => second.score - first.score || first.index - second.index)
+      .map((item) => item.candidate);
+
+const restaurantMatchesPremiumConditions = (restaurant: Restaurant, minRating: number, openNowOnly: boolean) => {
+  const rating = getRatingValue(restaurant);
+  const ratingMatches = minRating <= 0 || (rating != null && rating >= minRating);
+  const openMatches = !openNowOnly || restaurant.openNow === true;
+  return ratingMatches && openMatches;
+};
+
+const candidateMatchesPremiumConditions = (candidate: CandidatePlace, minRating: number, openNowOnly: boolean) => {
+  const ratingMatches = minRating <= 0 || (candidate.rating != null && candidate.rating >= minRating);
+  const openMatches = !openNowOnly || candidate.openNow === true;
+  return ratingMatches && openMatches;
+};
+
+const buildPremiumConditionNoMatchMessage = (area: string, minRating: number, openNowOnly: boolean) => {
+  const conditions = [
+    minRating > 0 ? `★${minRating.toFixed(1)}以上` : null,
+    openNowOnly ? '現在営業中' : null,
+  ].filter(Boolean);
+  return conditions.length
+    ? `${area || '選択したエリア'}に、${conditions.join('・')}の条件を満たすお店はありません。評価を下げるか、営業中のみを外してください。`
+    : null;
+};
+
 const getDistanceKm = (from: UserLocation | null, restaurant: Restaurant) => {
   if (!from || restaurant.latitude == null || restaurant.longitude == null) {
     return null;
@@ -5289,6 +5379,9 @@ export default function App() {
   // 「0件」になってしまうため、既定は予算指定なしにする（ユーザーが選んだ時だけ絞る）。
   const [budgetMax, setBudgetMax] = useState('');
   const [distance, setDistance] = useState('1.5km');
+  const [situation, setSituation] = useState<SituationMode>('none');
+  const [minRating, setMinRating] = useState(0);
+  const [openNowOnly, setOpenNowOnly] = useState(false);
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   // いま持っている候補がどのエリアの検索結果かを覚えておく。
   // これが無いと、エリアを変えた直後に前の街の候補が残り、
@@ -5795,7 +5888,9 @@ export default function App() {
     });
     // 座標が無くて地図に出せない店も、一覧からは落とさない。
     const withoutCoordinates = areaMatchedRestaurants.filter((restaurant) => restaurantToCandidatePlace(restaurant) == null);
-    const all = [...base, ...withoutCoordinates];
+    const all = [...base, ...withoutCoordinates]
+      .filter((restaurant) => !subscription.isPro
+        || restaurantMatchesPremiumConditions(restaurant, minRating, openNowOnly));
     if (!all.length) {
       return all;
     }
@@ -5803,8 +5898,8 @@ export default function App() {
     // 写真なし（OpenStreetMapなど）も落とさず後ろに置く。
     const withPhoto = all.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
     const withoutPhoto = all.filter((restaurant) => !restaurant.photoUrl?.trim());
-    return [...withPhoto, ...withoutPhoto];
-  }, [areaMatchedRestaurants, genre, unifiedCandidates]);
+    return prioritizeRestaurantsForSituation([...withPhoto, ...withoutPhoto], subscription.isPro ? situation : 'none');
+  }, [areaMatchedRestaurants, genre, minRating, openNowOnly, situation, subscription.isPro, unifiedCandidates]);
 
   /**
    * 候補が少ない時に「どの条件を広げれば増えるか」を案内する。
@@ -6423,7 +6518,13 @@ export default function App() {
     const fetchCandidatesWithParams = async (params: typeof drawApiParams, allowGenreMismatchForFilter = false) => {
       const data = await randishApi.getRestaurants(apiBaseUrlCandidates, params);
       syncWorkingApiBaseUrl();
-      const normalizedCandidates = data.map(normalizeRestaurant);
+      const normalizedCandidates = prioritizeRestaurantsForSituation(
+        data
+          .map(normalizeRestaurant)
+          .filter((restaurant) => !subscription.isPro
+            || restaurantMatchesPremiumConditions(restaurant, minRating, openNowOnly)),
+        subscription.isPro ? situation : 'none',
+      );
       return allowGenreMismatchForFilter
         ? normalizedCandidates
         : normalizedCandidates.filter((restaurant) => restaurantMatchesSelectedGenre(restaurant, genre));
@@ -6432,6 +6533,11 @@ export default function App() {
       const candidates = await fetchCandidatesWithParams(params, allowGenreMismatchForFilter);
       if (!candidates.length) {
         return null;
+      }
+      if (subscription.isPro && situation !== 'none') {
+        return candidates.find((restaurant) => !recentIds.has(restaurant.id) && restaurant.id !== currentId)
+          ?? candidates.find((restaurant) => restaurant.id !== currentId)
+          ?? candidates[0];
       }
       return pickFreshRestaurant(candidates, recentIds, currentId) ?? pickRandomRestaurant(candidates);
     };
@@ -6450,13 +6556,22 @@ export default function App() {
           ...params,
         });
         syncWorkingApiBaseUrl();
-        return normalizeRestaurant(data);
+        const selected = normalizeRestaurant(data);
+        if (subscription.isPro && !restaurantMatchesPremiumConditions(selected, minRating, openNowOnly)) {
+          throw new Error('指定した評価・営業状況に合う候補が見つかりませんでした。');
+        }
+        return selected;
       };
       let normalized: Restaurant | null = null;
       let relaxedDrawMessage: string | null = null;
       let allowGenreMismatch = false;
       try {
-        normalized = await chooseWithParams(effectiveDrawApiParams);
+        normalized = subscription.isPro && situation !== 'none'
+          ? await chooseFromListWithParams(effectiveDrawApiParams, false)
+          : await chooseWithParams(effectiveDrawApiParams);
+        if (!normalized) {
+          throw new Error('シチュエーションに合う候補が見つかりませんでした。');
+        }
       } catch (error) {
         if (!isNoRestaurantMatchError(error)) {
           throw error;
@@ -6631,7 +6746,10 @@ export default function App() {
       const diagnosticMessage = !noMatchError && !isApiConnectivityError(error)
         ? await loadGenreDiagnosticMessage()
         : null;
-      const messageText = noMatchDiagnosis?.message ?? diagnosticMessage ?? API_DRAW_MESSAGE;
+      const premiumConditionMessage = subscription.isPro
+        ? buildPremiumConditionNoMatchMessage(area, minRating, openNowOnly)
+        : null;
+      const messageText = premiumConditionMessage ?? noMatchDiagnosis?.message ?? diagnosticMessage ?? API_DRAW_MESSAGE;
       setDrawFailureDetails(noMatchDiagnosis?.details ?? buildDrawFailureDetails({
         area,
         genre,
@@ -6646,7 +6764,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrlCandidates, area, budgetMax, conditionRandom, distance, drawApiParams, drawMode, enrichPremiumPlaceDetails, genre, loadDrawNoMatchDiagnosis, loadGenreDiagnosticMessage, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, startDrawAnimation, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
+  }, [apiBaseUrlCandidates, area, budgetMax, conditionRandom, distance, drawApiParams, drawMode, enrichPremiumPlaceDetails, genre, loadDrawNoMatchDiagnosis, loadGenreDiagnosticMessage, minRating, openNowOnly, randomHistory, recordDrawForAnalytics, revealSelectedRestaurant, scrollToRandomResult, selectedRestaurant, situation, startDrawAnimation, subscription.isPro, syncWorkingApiBaseUrl, travelDisplayArea, userId]);
 
   const chooseEverythingRandom = useCallback(async () => {
     setActiveTab('random');
@@ -6759,17 +6877,21 @@ export default function App() {
     const radius = parseDistanceMeters(distance) ?? 1500;
     const category = genre === 'すべて' || conditionRandom.genre ? undefined : genre;
     const priceRange = conditionRandom.budget ? undefined : budgetMax || undefined;
+    const effectiveOpenNow = subscription.isPro && openNowOnly ? true : undefined;
+    const effectiveMinRating = subscription.isPro && minRating > 0 ? minRating : undefined;
     const centerKey = `${center.label}:${center.latitude.toFixed(5)},${center.longitude.toFixed(5)}`;
     const key = [
       radius,
       category ?? 'all',
       priceRange ?? 'any',
-      'open:any',
+      effectiveOpenNow ? 'open:now' : 'open:any',
+      effectiveMinRating ? `rating:${effectiveMinRating}` : 'rating:any',
+      subscription.isPro ? `situation:${situation}` : 'situation:none',
       centerKey,
       cleanArea || '現在地',
     ].join('|');
-    return { key, center, radius, category, priceRange };
-  }, [budgetMax, conditionRandom.budget, conditionRandom.genre, distance, genre, requestCurrentLocation]);
+    return { key, center, radius, category, priceRange, openNow: effectiveOpenNow, minRating: effectiveMinRating };
+  }, [budgetMax, conditionRandom.budget, conditionRandom.genre, distance, genre, minRating, openNowOnly, requestCurrentLocation, situation, subscription.isPro]);
 
   const getUsableCandidateCache = useCallback((query: CandidateQuery) => {
     const cached = candidateCacheRef.current;
@@ -6823,6 +6945,7 @@ export default function App() {
       category: query.category,
       priceRange: query.priceRange,
       openNow: query.openNow,
+      minRating: query.minRating,
     });
     syncWorkingApiBaseUrl();
     // 地図のピン＝抽選対象。候補一覧に出ている店（座標があるもの）も混ぜて、
@@ -6830,7 +6953,12 @@ export default function App() {
     const searchCandidates = restaurantsRef.current
       .map(restaurantToCandidatePlace)
       .filter((place): place is CandidatePlace => place != null);
-    const mergedCandidates = mergeCandidatePlaces(response.places ?? [], searchCandidates);
+    const mergedCandidates = prioritizeCandidatesForSituation(
+      mergeCandidatePlaces(response.places ?? [], searchCandidates)
+        .filter((candidate) => !subscription.isPro
+          || candidateMatchesPremiumConditions(candidate, minRating, openNowOnly)),
+      subscription.isPro ? situation : 'none',
+    );
     const nextCache: CandidateCacheEntry = {
       key: query.key,
       center: query.center,
@@ -6844,7 +6972,7 @@ export default function App() {
     setMapCandidates(nextCache.candidates);
     setMapRouletteStatus(nextCache.candidates.length ? 'candidatesReady' : 'empty');
     return nextCache;
-  }, [apiBaseUrlCandidates, getUsableCandidateCache, syncWorkingApiBaseUrl]);
+  }, [apiBaseUrlCandidates, getUsableCandidateCache, minRating, openNowOnly, situation, subscription.isPro, syncWorkingApiBaseUrl]);
 
   const chooseMapRouletteRestaurant = useCallback(async () => {
     if (mapRouletteStatus === 'searching' || mapRouletteStatus === 'spinning') {
@@ -6885,6 +7013,9 @@ export default function App() {
 
       const cacheEntry = await loadCandidatePool(query);
       if (cacheEntry.candidates.length === 0) {
+        const premiumConditionMessage = subscription.isPro
+          ? buildPremiumConditionNoMatchMessage(areaRef.current, minRating, openNowOnly)
+          : null;
         const diagnosis = await loadDrawNoMatchDiagnosis({
           ...drawApiParams,
           latitude: query.center.latitude,
@@ -6892,9 +7023,9 @@ export default function App() {
           distanceMeters: query.radius,
         });
         setMapRouletteStatus('empty');
-        setMapRouletteError(diagnosis.message);
+        setMapRouletteError(premiumConditionMessage ?? diagnosis.message);
         setDrawFailureDetails(diagnosis.details);
-        setMessage(diagnosis.message);
+        setMessage(premiumConditionMessage ?? diagnosis.message);
         setIsLoading(false);
         return;
       }
@@ -7034,6 +7165,8 @@ export default function App() {
     genre,
     loadCandidatePool,
     loadDrawNoMatchDiagnosis,
+    minRating,
+    openNowOnly,
     mapPinBounce,
     mapPinProgress,
     mapRouletteStatus,
@@ -7837,6 +7970,10 @@ export default function App() {
             budgetMin={budgetMin}
             budgetMax={budgetMax}
             distance={distance}
+            situation={situation}
+            minRating={minRating}
+            openNowOnly={openNowOnly}
+            isPro={subscription.isPro}
             drawMode={drawMode}
             conditionRandom={conditionRandom}
             restaurants={visibleRestaurants}
@@ -7846,6 +7983,10 @@ export default function App() {
             onBudgetMinChange={updateBudgetMin}
             onBudgetMaxChange={updateBudgetMax}
             onDistanceChange={updateDistance}
+            onSituationChange={setSituation}
+            onMinRatingChange={setMinRating}
+            onOpenNowOnlyChange={setOpenNowOnly}
+            onRequirePremium={subscription.startProPurchase}
             onConditionRandomize={markConditionRandom}
             onRequestCurrentLocation={requestCurrentLocation}
             onSearch={loadRestaurants}
@@ -10120,6 +10261,10 @@ function FilterPanel({
   budgetMin,
   budgetMax,
   distance,
+  situation,
+  minRating,
+  openNowOnly,
+  isPro,
   genres,
   areaPresets,
   conditionRandom,
@@ -10131,6 +10276,10 @@ function FilterPanel({
   onBudgetMinChange,
   onBudgetMaxChange,
   onDistanceChange,
+  onSituationChange,
+  onMinRatingChange,
+  onOpenNowOnlyChange,
+  onRequirePremium,
   onRandomized,
   onUseCurrentLocation,
   onSubmit,
@@ -10140,6 +10289,10 @@ function FilterPanel({
   budgetMin: string;
   budgetMax: string;
   distance: string;
+  situation: SituationMode;
+  minRating: number;
+  openNowOnly: boolean;
+  isPro: boolean;
   genres: GenreItem[];
   areaPresets: AreaPreset[];
   conditionRandom?: ConditionRandomState;
@@ -10151,6 +10304,10 @@ function FilterPanel({
   onBudgetMinChange: (value: string) => void;
   onBudgetMaxChange: (value: string) => void;
   onDistanceChange: (value: string) => void;
+  onSituationChange: (value: SituationMode) => void;
+  onMinRatingChange: (value: number) => void;
+  onOpenNowOnlyChange: (value: boolean) => void;
+  onRequirePremium: () => void;
   onRandomized?: (field: ConditionRandomField) => void;
   onUseCurrentLocation?: () => void | Promise<unknown>;
   onSubmit: () => void;
@@ -10268,6 +10425,73 @@ function FilterPanel({
       <View style={styles.filterGrid}>
         <SmallField label={uiText.budget} value={budgetMax} suffix={uiText.budgetWithin} onChangeText={onBudgetMaxChange} onRandom={randomizeBudget} randomActive={randomState.budget} randomLabel={uiText.random} />
         <SegmentedValue label={uiText.distanceLabel} value={distance} values={DISTANCE_OPTIONS} onChange={onDistanceChange} onRandom={randomizeDistance} randomActive={randomState.distance} randomLabel={uiText.random} helperText={distanceOriginHelp} />
+      </View>
+      <View style={styles.premiumConditionSection}>
+        <View style={styles.premiumConditionHeader}>
+          <View>
+            <Text style={styles.premiumConditionTitle}>シチュエーションで選ぶ</Text>
+            <Text style={styles.premiumConditionLead}>誰と、どんな日に行くかに合うお店を優先します</Text>
+          </View>
+          <ProBadge label="Premium" />
+        </View>
+        <View style={styles.situationOptionGrid}>
+          {SITUATION_OPTIONS.map((option) => {
+            const selected = situation === option.key;
+            return (
+              <Pressable
+                key={option.key}
+                style={[styles.situationOption, selected && styles.situationOptionActive]}
+                onPress={() => isPro ? onSituationChange(option.key) : onRequirePremium()}
+              >
+                <Ionicons name={option.icon} size={17} color={selected ? '#ffffff' : '#7161f2'} />
+                <View style={styles.situationOptionCopy}>
+                  <Text style={[styles.situationOptionLabel, selected && styles.situationOptionLabelActive]}>{option.label}</Text>
+                  <Text style={[styles.situationOptionDescription, selected && styles.situationOptionDescriptionActive]} numberOfLines={1}>{option.description}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+      <View style={styles.premiumConditionSection}>
+        <View style={styles.premiumConditionHeader}>
+          <View>
+            <Text style={styles.premiumConditionTitle}>詳細条件</Text>
+            <Text style={styles.premiumConditionLead}>評価と現在の営業状況で候補を絞ります</Text>
+          </View>
+          <ProBadge label="Premium" />
+        </View>
+        <Text style={styles.premiumConditionFieldLabel}>最低評価</Text>
+        <View style={styles.ratingConditionRow}>
+          {MIN_RATING_OPTIONS.map((rating) => {
+            const selected = minRating === rating;
+            return (
+              <Pressable
+                key={rating}
+                style={[styles.ratingConditionChip, selected && styles.ratingConditionChipActive]}
+                onPress={() => isPro ? onMinRatingChange(rating) : onRequirePremium()}
+              >
+                <Ionicons name={rating > 0 ? 'star' : 'remove-circle-outline'} size={14} color={selected ? '#ffffff' : '#c88116'} />
+                <Text style={[styles.ratingConditionChipText, selected && styles.ratingConditionChipTextActive]}>
+                  {rating > 0 ? `★${rating.toFixed(1)}以上` : '指定なし'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Pressable
+          style={[styles.openNowCondition, openNowOnly && styles.openNowConditionActive]}
+          onPress={() => isPro ? onOpenNowOnlyChange(!openNowOnly) : onRequirePremium()}
+        >
+          <View style={[styles.openNowConditionIcon, openNowOnly && styles.openNowConditionIconActive]}>
+            <Ionicons name="time-outline" size={18} color={openNowOnly ? '#ffffff' : '#23885d'} />
+          </View>
+          <View style={styles.openNowConditionCopy}>
+            <Text style={[styles.openNowConditionTitle, openNowOnly && styles.openNowConditionTitleActive]}>現在営業中のお店だけ</Text>
+            <Text style={[styles.openNowConditionLead, openNowOnly && styles.openNowConditionLeadActive]}>営業時間を確認できた店舗だけを抽選対象にします</Text>
+          </View>
+          <Ionicons name={openNowOnly ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={openNowOnly ? '#23885d' : '#aaa198'} />
+        </Pressable>
       </View>
       <View style={styles.genreSectionHeader}>
         <Text style={styles.genreSectionTitle}>{uiText.genreLabel}</Text>
@@ -10664,6 +10888,10 @@ function SearchTab({
   budgetMin,
   budgetMax,
   distance,
+  situation,
+  minRating,
+  openNowOnly,
+  isPro,
   drawMode,
   conditionRandom,
   restaurants,
@@ -10673,6 +10901,10 @@ function SearchTab({
   onBudgetMinChange,
   onBudgetMaxChange,
   onDistanceChange,
+  onSituationChange,
+  onMinRatingChange,
+  onOpenNowOnlyChange,
+  onRequirePremium,
   onConditionRandomize,
   onRequestCurrentLocation,
   onSearch,
@@ -10687,6 +10919,10 @@ function SearchTab({
   budgetMin: string;
   budgetMax: string;
   distance: string;
+  situation: SituationMode;
+  minRating: number;
+  openNowOnly: boolean;
+  isPro: boolean;
   drawMode: DrawMode;
   conditionRandom: ConditionRandomState;
   restaurants: Restaurant[];
@@ -10696,6 +10932,10 @@ function SearchTab({
   onBudgetMinChange: (value: string) => void;
   onBudgetMaxChange: (value: string) => void;
   onDistanceChange: (value: string) => void;
+  onSituationChange: (value: SituationMode) => void;
+  onMinRatingChange: (value: number) => void;
+  onOpenNowOnlyChange: (value: boolean) => void;
+  onRequirePremium: () => void;
   onConditionRandomize: (field: ConditionRandomField) => void;
   onRequestCurrentLocation: () => void | Promise<unknown>;
   onSearch: () => void;
@@ -10708,6 +10948,8 @@ function SearchTab({
   const summaryBudget = isEverythingRandom || conditionRandom.budget ? '？' : formatBudgetLimit(budgetMax, uiText);
   const summaryDistance = isEverythingRandom || conditionRandom.distance ? '？' : distance;
   const summaryGenre = isEverythingRandom || conditionRandom.genre ? '？' : genre;
+  const summarySituation = SITUATION_OPTIONS.find((option) => option.key === situation)?.label ?? '指定なし';
+  const summaryRating = minRating > 0 ? `★${minRating.toFixed(1)}以上` : '指定なし';
 
   return (
     <View>
@@ -10718,6 +10960,10 @@ function SearchTab({
         budgetMin={budgetMin}
         budgetMax={budgetMax}
         distance={distance}
+        situation={situation}
+        minRating={minRating}
+        openNowOnly={openNowOnly}
+        isPro={isPro}
         genres={GENRES}
         areaPresets={ALL_AREA_PRESETS}
         conditionRandom={conditionRandom}
@@ -10728,6 +10974,10 @@ function SearchTab({
         onBudgetMinChange={onBudgetMinChange}
         onBudgetMaxChange={onBudgetMaxChange}
         onDistanceChange={onDistanceChange}
+        onSituationChange={onSituationChange}
+        onMinRatingChange={onMinRatingChange}
+        onOpenNowOnlyChange={onOpenNowOnlyChange}
+        onRequirePremium={onRequirePremium}
         onRandomized={onConditionRandomize}
         onSubmit={onSearch}
       />
@@ -10744,6 +10994,24 @@ function SearchTab({
           <Text style={styles.decisionSummaryLabel}>{uiText.genreLabel}</Text>
           <Text style={styles.decisionSummaryValue} numberOfLines={1}>{summaryGenre}</Text>
         </View>
+        {isPro && situation !== 'none' && (
+          <View style={styles.decisionSummaryChip}>
+            <Text style={styles.decisionSummaryLabel}>シーン</Text>
+            <Text style={styles.decisionSummaryValue} numberOfLines={1}>{summarySituation}</Text>
+          </View>
+        )}
+        {isPro && minRating > 0 && (
+          <View style={styles.decisionSummaryChip}>
+            <Text style={styles.decisionSummaryLabel}>評価</Text>
+            <Text style={styles.decisionSummaryValue}>{summaryRating}</Text>
+          </View>
+        )}
+        {isPro && openNowOnly && (
+          <View style={styles.decisionSummaryChip}>
+            <Text style={styles.decisionSummaryLabel}>営業状況</Text>
+            <Text style={styles.decisionSummaryValue}>営業中のみ</Text>
+          </View>
+        )}
       </View>
       <View style={styles.decisionActionRow}>
         <Pressable style={[styles.bigDecisionButton, styles.bigDecisionButtonPrimary]} onPress={onRandomPress}>

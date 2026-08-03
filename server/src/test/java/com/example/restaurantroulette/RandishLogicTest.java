@@ -1214,6 +1214,29 @@ class RandishLogicTest {
   }
 
   @Test
+  void nearbyPlacesAppliesMinimumRatingOnlyForPremiumUsers() {
+    var googleProvider = new CountingNearbyPlacesProvider();
+    var restaurantService = new RestaurantQueryService(
+        restaurantRepository,
+        List.of(),
+        mapper,
+        validationService);
+    var service = new NearbyPlacesService(
+        googleProvider,
+        restaurantService,
+        validationService,
+        600,
+        300,
+        false,
+        false,
+        20);
+    var request = new NearbyPlacesRequest(34.699826, 135.49311, 500, "ramen", "1500", false, 4.5);
+
+    assertThat(service.search(request, true).places()).isEmpty();
+    assertThat(service.search(request, false).places()).extracting("id").containsExactly("nearby-test-1");
+  }
+
+  @Test
   void nearbyPlacesReturnsEmptyListWhenGoogleAndRestaurantProvidersHaveNoCandidates() {
     var restaurantService = new RestaurantQueryService(
         restaurantRepository,

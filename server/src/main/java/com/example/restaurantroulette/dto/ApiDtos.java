@@ -82,7 +82,17 @@ public final class ApiDtos {
       Integer radius,
       String category,
       String priceRange,
-      Boolean openNow) {
+      Boolean openNow,
+      Double minRating) {
+    public NearbyPlacesRequest(
+        Double latitude,
+        Double longitude,
+        Integer radius,
+        String category,
+        String priceRange,
+        Boolean openNow) {
+      this(latitude, longitude, radius, category, priceRange, openNow, null);
+    }
   }
 
   public record CandidatePlaceResponse(

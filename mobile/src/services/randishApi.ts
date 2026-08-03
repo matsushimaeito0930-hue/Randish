@@ -87,6 +87,7 @@ export type NearbyPlacesParams = {
   category?: string;
   priceRange?: string;
   openNow?: boolean;
+  minRating?: number;
 };
 
 export type NearbyPlacesResponse = {

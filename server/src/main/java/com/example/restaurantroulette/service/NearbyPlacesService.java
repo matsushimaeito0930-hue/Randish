@@ -143,6 +143,13 @@ public class NearbyPlacesService {
     }
 
     List<CandidatePlaceResponse> places = mergeCandidatePlaces(restaurantPlaces, googlePlaces);
+    if (premium) {
+      places = places.stream()
+          .filter(candidate -> !Boolean.TRUE.equals(normalized.openNow()) || Boolean.TRUE.equals(candidate.openNow()))
+          .filter(candidate -> normalized.minRating() == null
+              || (candidate.rating() != null && candidate.rating() >= normalized.minRating()))
+          .toList();
+    }
     String source = nearbySource(restaurantPlaces, googlePlaces);
     if (places.isEmpty() && canUseMockPlaces()) {
       logger.info("[RANDISH_PLACES] using development mock places because all live providers returned no candidates");
@@ -189,7 +196,18 @@ public class NearbyPlacesService {
         radius,
         cleanText(request.category()),
         cleanText(request.priceRange()),
-        premium ? request.openNow() : null);
+        premium ? request.openNow() : null,
+        premium ? normalizeMinRating(request.minRating()) : null);
+  }
+
+  private Double normalizeMinRating(Double minRating) {
+    if (minRating == null || minRating <= 0) {
+      return null;
+    }
+    if (minRating < 1.0 || minRating > 5.0) {
+      throw new BadRequestException("minRating must be between 1.0 and 5.0.");
+    }
+    return Math.round(minRating * 10.0) / 10.0;
   }
 
   private Optional<NearbyCacheEntry> findCacheEntry(NearbyCacheKey key, NearbyPlacesRequest request) {
@@ -594,6 +612,7 @@ public class NearbyPlacesService {
       String category,
       String priceRange,
       boolean openNow,
+      Double minRating,
       boolean premium) {
     private static NearbyCacheKey from(NearbyPlacesRequest request, boolean premium) {
       return new NearbyCacheKey(
@@ -601,6 +620,7 @@ public class NearbyPlacesService {
           normalizeKeyPart(request.category()),
           normalizeKeyPart(request.priceRange()),
           Boolean.TRUE.equals(request.openNow()),
+          request.minRating(),
           premium);
     }
 
