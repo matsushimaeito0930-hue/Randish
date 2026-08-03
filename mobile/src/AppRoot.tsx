@@ -2837,7 +2837,9 @@ const buildMealTicketState = (
 
   const tickets = MEAL_TICKET_DEFINITIONS.map((ticket) => {
     const active = currentDefinition.key === ticket.key;
-    const used = usedKeys.has(ticket.key) || displayUsedKeys.has(ticket.key);
+    // Devは抽選・表示とも完全無制限。押下時の演出用キーが残っていても
+    // 「使用済み」「次の抽選を待つ」に戻さない。
+    const used = disableLimit ? false : usedKeys.has(ticket.key) || displayUsedKeys.has(ticket.key);
     const proLocked = Boolean(ticket.proOnly && !effectiveIsProUser);
     const upcomingStart = getUpcomingStartDateForTicket(now, ticket);
     const past = !active && !ticket.proOnly && ticket.endMinute <= minutes;
@@ -7383,7 +7385,7 @@ export default function App() {
     }
     // その時間帯の食券は「使った」ことにして表示を減らすが、抽選は絶対に止めない。
     // （確認ダイアログで止める方式は、押しても何も起きないように見えるため採用しない）
-    if (FEATURE_MEAL_TICKETS_ENABLED && !usedTicketKeys.has(currentTicket.key)) {
+    if (FEATURE_MEAL_TICKETS_ENABLED && !subscription.isDev && !usedTicketKeys.has(currentTicket.key)) {
       const ticketKey = currentTicket.key;
       setUsedTicketKeys((current) => {
         const next = new Set(current);
@@ -7393,7 +7395,7 @@ export default function App() {
       setMessage(`${currentTicket.label}の食券を使いました。`);
     }
     await runPreparedDraw();
-  }, [isLoading, mealTicketState, runPreparedDraw, scrollToContentTop, usedTicketKeys]);
+  }, [isLoading, mealTicketState, runPreparedDraw, scrollToContentTop, subscription.isDev, usedTicketKeys]);
 
   const saveRestaurantToAlbum = useCallback(async (restaurant: Restaurant) => {
     const localFavorite = toSavedRestaurantFromSelection({
