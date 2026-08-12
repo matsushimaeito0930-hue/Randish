@@ -12974,6 +12974,34 @@ export const styles = StyleSheet.create({
     color: ORANGE,
   },
 
+  // 食AIの1日の回数を使い切ったときの案内。いつ戻るかを必ず添える。
+  foodAiLimitNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#f4f2ff',
+    borderWidth: 1,
+    borderColor: '#ded8ff',
+    marginTop: 10,
+  },
+  foodAiLimitNoticeText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#5b52a8',
+  },
+  foodAiRemainingText: {
+    fontSize: 11,
+    color: '#8b8398',
+    marginTop: 10,
+  },
+  foodAiSecondaryButtonDisabled: {
+    opacity: 0.45,
+  },
+
   // 候補一覧が0件のときに、理由と広げ方をその場に出すためのパネル。
   candidateEmptyPanel: {
     alignItems: 'center',

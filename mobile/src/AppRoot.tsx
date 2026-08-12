@@ -4912,6 +4912,33 @@ const getOptionalHapticsModule = () => {
   }
 };
 
+/**
+ * 「今日の食AI」は1日4回まで。
+ * 1回ごとにGeminiを呼ぶため、無制限だと原価が利用者ごとに青天井になる。
+ * 日付が変わったら自動でリセットされる。
+ */
+const FOOD_AI_DAILY_LIMIT = 4;
+const FOOD_AI_USAGE_STORAGE_KEY_PREFIX = 'randish.foodAi.usage.v1';
+
+const buildFoodAiUsageStorageKey = (userId: string) =>
+  `${FOOD_AI_USAGE_STORAGE_KEY_PREFIX}:${encodeURIComponent(userId.trim() || APP_USER_ID)}`;
+
+/** 端末のローカル日付。日付が変わった時点で回数が戻る。 */
+const toLocalDateKey = (date: Date) =>
+  `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+
+/** 次に使えるようになるまでの残り時間。「あと○時間○分」の表示に使う。 */
+const formatTimeUntilNextDay = (now: Date) => {
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+  const totalMinutes = Math.max(1, Math.ceil((nextMidnight.getTime() - now.getTime()) / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) {
+    return `${hours}時間${minutes > 0 ? `${minutes}分` : ''}`;
+  }
+  return `${minutes}分`;
+};
+
 const readLocalValue = async (key: string) => {
   const storage = getOptionalAsyncStorageModule();
   if (storage) {
@@ -5475,6 +5502,8 @@ export default function App() {
   const [recommendations, setRecommendations] = useState<Restaurant[]>([]);
   const [foodAiStatus, setFoodAiStatus] = useState<FoodAiStatus>('idle');
   const [foodAiSuggestion, setFoodAiSuggestion] = useState<FoodAiSuggestion | null>(null);
+  // 今日の食AIの利用回数。日付が変わると自動で戻る。
+  const [foodAiUsedToday, setFoodAiUsedToday] = useState(0);
   // 検索結果から求めたエリアの中心。抽選の座標としても使う。
   // 計算は抽選タブ側で行うため、コールバックで受け取ってここに保持する。
   const searchResultOriginRef = useRef<UserLocation | null>(null);
@@ -5623,6 +5652,11 @@ export default function App() {
     [apiBaseUrl, runtimeApiBaseUrl],
   );
   const subscription = useSubscription(userId, apiBaseUrlCandidates);
+
+  // 残り回数。開発者は制限を受けないので null（無制限）を渡す。
+  const foodAiRemainingToday = subscription.isDev
+    ? null
+    : Math.max(0, FOOD_AI_DAILY_LIMIT - foodAiUsedToday);
   // 食券を「使った」状態（見た目のみ）。抽選自体はブロックしない。
   const [usedTicketKeys, setUsedTicketKeys] = useState<Set<MealSlotKey>>(() => new Set<MealSlotKey>());
   const mealTicketState = useMemo(
@@ -6293,6 +6327,12 @@ export default function App() {
       subscription.startProPurchase();
       return;
     }
+    // 1回ごとにGeminiを呼ぶため、回数を絞らないと利用者ごとの原価が青天井になる。
+    // 開発者は検証のため対象外。
+    if (!subscription.isDev && foodAiUsedToday >= FOOD_AI_DAILY_LIMIT) {
+      setMessage(`今日の食AIは${FOOD_AI_DAILY_LIMIT}回まで使えます。あと${formatTimeUntilNextDay(new Date())}で戻ります。`);
+      return;
+    }
     const usableCandidates = recommendations
       .filter((restaurant, index, items) =>
         Boolean(restaurant?.id && restaurant?.name?.trim())
@@ -6319,6 +6359,17 @@ export default function App() {
     if (userId === APP_USER_ID) {
       setFoodAiStatus('ready');
       return;
+    }
+
+    // 実際にサーバーへ問い合わせる直前に消費する。
+    // 候補が揃っていない等でここまで来なかった場合に減らさないため。
+    if (!subscription.isDev) {
+      const nextUsed = foodAiUsedToday + 1;
+      setFoodAiUsedToday(nextUsed);
+      void writeLocalValue(
+        buildFoodAiUsageStorageKey(userId),
+        JSON.stringify({ date: toLocalDateKey(new Date()), count: nextUsed }),
+      );
     }
 
     try {
@@ -6354,6 +6405,7 @@ export default function App() {
     budgetMin,
     distance,
     drawHistories,
+    foodAiUsedToday,
     genre,
     now,
     recommendations,
@@ -6361,6 +6413,30 @@ export default function App() {
     syncWorkingApiBaseUrl,
     userId,
   ]);
+
+  // 保存してある今日の利用回数を読み込む。日付が変わっていれば0に戻す。
+  useEffect(() => {
+    let cancelled = false;
+    void readLocalValue(buildFoodAiUsageStorageKey(userId)).then((stored) => {
+      if (cancelled) {
+        return;
+      }
+      if (!stored) {
+        setFoodAiUsedToday(0);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stored) as { date?: string; count?: number };
+        const isToday = parsed.date === toLocalDateKey(new Date());
+        setFoodAiUsedToday(isToday && typeof parsed.count === 'number' ? parsed.count : 0);
+      } catch {
+        setFoodAiUsedToday(0);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const requestCurrentLocation = useCallback(async (mode: LocationRequestMode = 'sync-search') => {
     const Location = getOptionalLocationModule();
@@ -8164,6 +8240,7 @@ export default function App() {
             recommendations={recommendations}
             foodAiStatus={foodAiStatus}
             foodAiSuggestion={foodAiSuggestion}
+            foodAiRemainingToday={foodAiRemainingToday}
             onAskFoodAi={askFoodAiRecommendation}
             onVisitRecommendation={handleVisitRecommendation}
           />
@@ -8914,6 +8991,7 @@ function HomeTab({
   recommendations,
   foodAiStatus,
   foodAiSuggestion,
+  foodAiRemainingToday,
   onAskFoodAi,
   onVisitRecommendation,
 }: {
@@ -8958,6 +9036,7 @@ function HomeTab({
   recommendations: Restaurant[];
   foodAiStatus: FoodAiStatus;
   foodAiSuggestion: FoodAiSuggestion | null;
+  foodAiRemainingToday: number | null;
   onAskFoodAi: () => void;
   onVisitRecommendation: (restaurant: Restaurant) => void;
 }) {
@@ -8999,6 +9078,7 @@ function HomeTab({
         hasCandidates={recommendations.length > 0}
         status={foodAiStatus}
         suggestion={foodAiSuggestion}
+        remainingToday={foodAiRemainingToday}
         onAsk={onAskFoodAi}
         onVisit={onVisitRecommendation}
       />
@@ -9018,6 +9098,7 @@ function FoodAiTodayCard({
   hasCandidates,
   status,
   suggestion,
+  remainingToday,
   onAsk,
   onVisit,
 }: {
@@ -9025,6 +9106,8 @@ function FoodAiTodayCard({
   hasCandidates: boolean;
   status: FoodAiStatus;
   suggestion: FoodAiSuggestion | null;
+  /** 今日あと何回使えるか。null は無制限（開発者）。 */
+  remainingToday: number | null;
   onAsk: () => void;
   onVisit: (restaurant: Restaurant) => void;
 }) {
@@ -9076,12 +9159,32 @@ function FoodAiTodayCard({
           <Text style={styles.foodAiSource}>
             {suggestion.source === 'gemini' ? 'Geminiが最新の集計から提案' : '端末内の集計から仮提案'}
           </Text>
+          {/* 1日の回数を使い切ったら、いつ戻るかを必ず示す。
+              「使えない」だけだと不具合と区別がつかない。 */}
+          {remainingToday === 0 ? (
+            <View style={styles.foodAiLimitNotice}>
+              <Ionicons name="time-outline" size={14} color="#7161f2" />
+              <Text style={styles.foodAiLimitNoticeText}>
+                今日の分は使い切りました。あと{formatTimeUntilNextDay(new Date())}で{FOOD_AI_DAILY_LIMIT}回ぶん戻ります。
+              </Text>
+            </View>
+          ) : remainingToday != null ? (
+            <Text style={styles.foodAiRemainingText}>
+              今日はあと{remainingToday}回（1日{FOOD_AI_DAILY_LIMIT}回まで）
+            </Text>
+          ) : null}
           <View style={styles.foodAiActions}>
-            <Pressable style={styles.foodAiSecondaryButton} onPress={onAsk} disabled={loading}>
+            <Pressable
+              style={[styles.foodAiSecondaryButton, remainingToday === 0 && styles.foodAiSecondaryButtonDisabled]}
+              onPress={onAsk}
+              disabled={loading || remainingToday === 0}
+            >
               {loading
                 ? <ActivityIndicator size="small" color="#7161f2" />
-                : <Ionicons name="refresh" size={16} color="#7161f2" />}
-              <Text style={styles.foodAiSecondaryButtonText}>{loading ? '考え中…' : '別の提案'}</Text>
+                : <Ionicons name={remainingToday === 0 ? 'lock-closed-outline' : 'refresh'} size={16} color="#7161f2" />}
+              <Text style={styles.foodAiSecondaryButtonText}>
+                {loading ? '考え中…' : remainingToday === 0 ? '明日また' : '別の提案'}
+              </Text>
             </Pressable>
             <Pressable style={styles.foodAiPrimaryButtonCompact} onPress={() => onVisit(suggestion.restaurant)}>
               <Ionicons name="navigate-outline" size={16} color="#ffffff" />
