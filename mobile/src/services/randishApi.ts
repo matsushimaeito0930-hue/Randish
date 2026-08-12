@@ -135,6 +135,15 @@ export type PremiumStatus = {
   isDev?: boolean;
 };
 
+export type AreaCenter = {
+  area: string;
+  latitude: number;
+  longitude: number;
+  sampleCount: number;
+  spreadMeters: number;
+  source: string;
+};
+
 export type DevDiagnostics = {
   generatedAt: string;
   providers: Record<string, unknown>[];
@@ -600,6 +609,10 @@ export const randishApi = {
 
   chooseRandom: (baseUrl: ApiBaseUrlInput, params: RandomRestaurantParams) =>
     request<Restaurant>(baseUrl, 'api/restaurants/random', params),
+
+  /** エリア名から検索の中心座標を取得する。解決できない場合は 204 が返るので null になる。 */
+  getAreaCenter: (baseUrl: ApiBaseUrlInput, area: string) =>
+    request<AreaCenter | null>(baseUrl, 'api/places/area-center', { area }),
 
   getNearbyPlaces: (baseUrl: ApiBaseUrlInput, params: NearbyPlacesParams) =>
     request<NearbyPlacesResponse>(baseUrl, 'api/places/nearby', undefined, {

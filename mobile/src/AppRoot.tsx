@@ -5474,9 +5474,17 @@ export default function App() {
   // 検索結果から求めたエリアの中心。抽選の座標としても使う。
   // 計算は抽選タブ側で行うため、コールバックで受け取ってここに保持する。
   const searchResultOriginRef = useRef<UserLocation | null>(null);
+
+  // 端末側に座標を持たないエリア（市区町村のほぼ全部）を、サーバーに問い合わせて解決した結果。
+  // これが無いと「都道府県の代表地点」に落ち、東京都のどこを選んでも東京駅が中心になっていた。
+  const [serverAreaCenter, setServerAreaCenter] = useState<{ area: string; center: UserLocation } | null>(null);
+  const serverAreaCenterRef = useRef<{ area: string; center: UserLocation } | null>(null);
+  const areaCenterCacheRef = useRef(new Map<string, UserLocation | null>());
+  const areaCenterInFlightRef = useRef(new Map<string, Promise<UserLocation | null>>());
   const handleSearchOriginResolved = useCallback((origin: UserLocation | null) => {
     searchResultOriginRef.current = origin;
   }, []);
+
 
   const scrollToContentTop = useCallback((animated = true) => {
     setTimeout(() => {
@@ -5626,6 +5634,52 @@ export default function App() {
       setApiBaseUrl((current) => current === workingBaseUrl ? current : workingBaseUrl);
     }
   }, []);
+
+  /**
+   * エリア名の中心座標をサーバーに解決してもらう。
+   * 同じエリアを何度も問い合わせないよう結果をキャッシュし、
+   * 同時に複数回呼ばれても1回にまとめる。
+   */
+  const resolveAreaCenter = useCallback(async (area: string): Promise<UserLocation | null> => {
+    const cleanArea = area.trim();
+    if (!cleanArea || cleanArea === '現在地') {
+      return null;
+    }
+    if (areaCenterCacheRef.current.has(cleanArea)) {
+      return areaCenterCacheRef.current.get(cleanArea) ?? null;
+    }
+    const inFlight = areaCenterInFlightRef.current.get(cleanArea);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const task = (async () => {
+      try {
+        const result = await randishApi.getAreaCenter(apiBaseUrlCandidates, cleanArea);
+        syncWorkingApiBaseUrl();
+        const center = result
+          ? { latitude: result.latitude, longitude: result.longitude, label: cleanArea }
+          : null;
+        areaCenterCacheRef.current.set(cleanArea, center);
+        if (center) {
+          console.info('[RANDISH AREA] エリア中心を解決', {
+            area: cleanArea,
+            sampleCount: result?.sampleCount,
+            spreadMeters: result?.spreadMeters,
+          });
+        }
+        return center;
+      } catch (error) {
+        // 失敗はキャッシュしない（通信が戻れば次に解決できる可能性があるため）
+        console.warn('[RANDISH AREA] エリア中心の解決に失敗', error);
+        return null;
+      } finally {
+        areaCenterInFlightRef.current.delete(cleanArea);
+      }
+    })();
+    areaCenterInFlightRef.current.set(cleanArea, task);
+    return task;
+  }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl]);
 
   const loadDrawHistories = useCallback(async () => {
     const requestedUserId = userId;
@@ -6148,6 +6202,29 @@ export default function App() {
   useEffect(() => {
     loadRestaurants();
   }, [loadRestaurants]);
+
+  // エリアを選んだ時点で中心座標を解決しておく。
+  // 抽選ボタンを押してから解決すると、その分だけ待たせることになるため先回りする。
+  useEffect(() => {
+    const cleanArea = area.trim();
+    if (!cleanArea || cleanArea === '現在地' || getSearchOriginForArea(cleanArea, null)) {
+      setServerAreaCenter(null);
+      serverAreaCenterRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    void resolveAreaCenter(cleanArea).then((center) => {
+      if (cancelled || !center) {
+        return;
+      }
+      const resolved = { area: cleanArea, center };
+      serverAreaCenterRef.current = resolved;
+      setServerAreaCenter(resolved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [area, resolveAreaCenter]);
 
   // サーバー起動待ちなどで候補が取れなかったときは、自動でもう一度取りにいく。
   // （利用者に「0件」と見せたまま放置しない）
@@ -6910,10 +6987,13 @@ export default function App() {
         center = await requestCurrentLocation('sync-search');
       }
     } else {
-      // 座標プリセットが無いエリア（交野市など）でも抽選できるように、
-      // 検索で見つかったお店の位置 → 同じ都道府県の代表地点 の順で座標を補う。
+      // 座標プリセットが無いエリア（市区町村のほぼ全部）でも正しい場所で抽選できるようにする。
+      // 都道府県の代表地点は「東京都ならどこを選んでも東京駅」になってしまうので、
+      // サーバーにそのエリアの中心を解決させたあとの、最後の手段として置く。
       center = getSearchOriginForArea(cleanArea, null)
         ?? searchResultOriginRef.current
+        ?? (serverAreaCenterRef.current?.area === cleanArea ? serverAreaCenterRef.current.center : null)
+        ?? await resolveAreaCenter(cleanArea)
         ?? getPrefectureFallbackOrigin(cleanArea);
     }
 
@@ -6947,7 +7027,7 @@ export default function App() {
       cleanArea || '現在地',
     ].join('|');
     return { key, center, radius, category, priceRange, openNow: effectiveOpenNow, minRating: effectiveMinRating };
-  }, [budgetMax, conditionRandom.budget, conditionRandom.genre, distance, genre, minRating, openNowOnly, requestCurrentLocation, situation, subscription.isPro]);
+  }, [budgetMax, conditionRandom.budget, conditionRandom.genre, distance, genre, minRating, openNowOnly, requestCurrentLocation, resolveAreaCenter, situation, subscription.isPro]);
 
   const getUsableCandidateCache = useCallback((query: CandidateQuery) => {
     const cached = candidateCacheRef.current;
@@ -8101,6 +8181,7 @@ export default function App() {
             drawFailureDetails={drawFailureDetails}
             restaurants={visibleRestaurants}
             onSearchOriginResolved={handleSearchOriginResolved}
+            serverAreaCenter={serverAreaCenter}
             history={randomHistory}
             conditionRandom={conditionRandom}
             travelRevealStep={travelRevealStep}
@@ -11151,6 +11232,7 @@ function RandomTab({
   drawFailureDetails,
   restaurants,
   onSearchOriginResolved,
+  serverAreaCenter,
   history,
   conditionRandom,
   travelRevealStep,
@@ -11190,6 +11272,7 @@ function RandomTab({
   drawFailureDetails: string[];
   restaurants: Restaurant[];
   onSearchOriginResolved: (origin: UserLocation | null) => void;
+  serverAreaCenter: { area: string; center: UserLocation } | null;
   history: Restaurant[];
   conditionRandom: ConditionRandomState;
   travelRevealStep: TravelRevealStep;
@@ -11315,13 +11398,19 @@ function RandomTab({
       const explicitArea = (displayAreaBase || area || '').trim();
       const isCurrentLocationArea = !explicitArea || explicitArea === '現在地';
       // 優先順位: エリアの座標プリセット → 検索結果の位置 → 同じ都道府県の代表地点
+      // サーバーが解決したエリア中心を、都道府県の代表地点より先に使う。
+      // 代表地点は「東京都ならどこを選んでも東京駅」なので、最後の手段に置く。
+      const serverCenter = serverAreaCenter && serverAreaCenter.area === explicitArea
+        ? serverAreaCenter.center
+        : null;
       const resolved = getSearchOriginForArea(displayAreaBase, null)
         ?? getSearchOriginForArea(area, null)
         ?? searchResultOrigin
-        ?? getPrefectureFallbackOrigin(displayAreaBase)
-        ?? getPrefectureFallbackOrigin(area)
+        ?? serverCenter
         // 抽選に出ているピンの位置も使う（抽選できるのに地図だけ出ない、を防ぐ）
-        ?? getOriginFromCandidatePlaces(mapCandidates, explicitArea);
+        ?? getOriginFromCandidatePlaces(mapCandidates, explicitArea)
+        ?? getPrefectureFallbackOrigin(displayAreaBase)
+        ?? getPrefectureFallbackOrigin(area);
       if (resolved) {
         return resolved;
       }
@@ -11329,7 +11418,7 @@ function RandomTab({
       // 「選んだ場所と違う地図」になって紛らわしいので、あえて中心を持たせない。
       return isCurrentLocationArea ? userLocation : null;
     },
-    [area, canShowTravelArea, conditionRandom.area, displayAreaBase, isEverythingRandom, isTravelDraw, mapCandidates, searchResultOrigin, userLocation],
+    [area, canShowTravelArea, conditionRandom.area, displayAreaBase, isEverythingRandom, isTravelDraw, mapCandidates, searchResultOrigin, serverAreaCenter, userLocation],
   );
   const rouletteConditionItems = [
     { label: uiText.genreLabel, value: displayGenre, icon: 'restaurant-outline', active: true },
