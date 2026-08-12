@@ -61,6 +61,12 @@ const metaBlock = `    <!-- ${MARKER}: scripts/inject-web-meta.mjs が生成。�
     <meta name="twitter:title" content="${TITLE}" />
     <meta name="twitter:description" content="${SHORT_DESCRIPTION}" />
     <script type="application/ld+json">${JSON.stringify(structuredData)}</script>
+    <!--
+      Vercel Web Analytics。同一オリジンから配信・送信されるため、
+      CSP の script-src 'self' / connect-src 'self' のままで動く。
+      Cookie を使わないので同意バナーも不要。
+    -->
+    <script defer src="/_vercel/insights/script.js"></script>
 `;
 
 /**
@@ -190,6 +196,7 @@ const checks = [
   ['起動画面を消すCSS', html.includes('#root:not(:empty) ~ #randish-boot')],
   // 起動画面は #root より後ろに無いと兄弟セレクタで消せず、画面を覆ったままになる
   ['起動画面がrootの後ろにある', html.indexOf('id="randish-boot"') > html.indexOf('id="root"')],
+  ['計測スクリプト', html.includes('/_vercel/insights/script.js')],
 ];
 const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
 if (failed.length) {

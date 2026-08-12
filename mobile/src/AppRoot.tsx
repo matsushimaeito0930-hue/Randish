@@ -42,6 +42,7 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { FAVORITE_PINK, INK, ORANGE } from './constants/theme';
 import { styles } from './styles/appStyles';
+import { toCountBucket, trackEvent } from './services/analytics';
 
 const consumedOAuthCallbackUrls = new Set<string>();
 const MIDNIGHT_PURPLE = '#6c63ff';
@@ -7548,6 +7549,14 @@ export default function App() {
           distanceMeters: query.radius,
         });
         setMapRouletteStatus('empty');
+        // どの条件のときに0件になったかを残す。改善の優先順位を決める材料にする。
+        trackEvent('draw_no_candidates', {
+          genre: conditionRandom.genre ? 'random' : genre,
+          areaSpecified: Boolean(areaRef.current.trim()) && areaRef.current.trim() !== '現在地',
+          distance,
+          budgetSet: Boolean(budgetMax),
+          situation,
+        });
         setMapRouletteError(premiumConditionMessage ?? diagnosis.message);
         setDrawFailureDetails(diagnosis.details);
         setMessage(premiumConditionMessage ?? diagnosis.message);
@@ -7651,6 +7660,15 @@ export default function App() {
       setRandomHistory((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)].slice(0, 24));
         recordDrawForAnalytics(normalized);
         setMapRouletteStatus('result');
+        // 店名や座標は送らない。どの条件で何件から引かれたかだけを記録する。
+        trackEvent('draw_completed', {
+          mode: drawMode,
+          genre: conditionRandom.genre ? 'random' : genre,
+          areaSpecified: Boolean(areaRef.current.trim()) && areaRef.current.trim() !== '現在地',
+          situation,
+          candidates: toCountBucket(cacheEntry.candidates.length),
+          isPro: subscription.isPro,
+        });
         setMessage(cacheEntry.candidates.length === 1
           ? '候補が1件だけだったため、このお店に決まりました。'
           : '今日の一店が決まりました。');
@@ -8370,6 +8388,8 @@ export default function App() {
   }, [locationIntroState, requestCurrentLocation, scrollToContentTop]);
 
   const handleFooterPress = useCallback((tab: TabKey) => {
+    // どこまで進んで離脱したかを見るため、タブ移動だけ記録する（滞在内容は送らない）
+    trackEvent('tab_opened', { tab });
     if (tab === 'random') {
       openRandomTab();
       return;
@@ -8945,6 +8965,8 @@ function LoginScreen({
       setAuthSucceeded(true);
       setOtpCode('');
       setOtpRequested(true);
+      // メールアドレスは送らない。到達したかどうかだけ。
+      trackEvent('signup_code_sent');
       setAuthNotice(`${normalizedEmail} に${authCodeLabel}を送信しました。メール内のコードを入力してください。`);
     } catch (error) {
       const reason = toAuthErrorMessage(error, `${authCodeLabel}を送信できませんでした。`);
@@ -8985,6 +9007,7 @@ function LoginScreen({
       }
       randishApi.setAuthToken(accessToken);
       onApiConnected();
+      trackEvent('signup_completed');
       await onAuthenticated(auth, accessToken, auth.refreshToken ?? null);
     } catch (error) {
       randishApi.setAuthToken(null);
