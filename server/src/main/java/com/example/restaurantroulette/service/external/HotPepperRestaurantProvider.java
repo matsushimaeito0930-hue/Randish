@@ -1,6 +1,7 @@
 package com.example.restaurantroulette.service.external;
 
 import com.example.restaurantroulette.entity.Restaurant;
+import com.example.restaurantroulette.entity.RestaurantFacilities;
 import com.example.restaurantroulette.service.ApiUsageCounter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -376,7 +377,60 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
         extractPhotoUrl(shop.photo()),
         shop.catchText(),
         shop.lat(),
-        shop.lng());
+        shop.lng(),
+        toFacilities(shop));
+  }
+
+  /**
+   * 検索結果にもともと含まれている席・設備の項目を取り出す。
+   * 追加のリクエストは発生しない（これまで読み捨てていただけ）。
+   */
+  private RestaurantFacilities toFacilities(HotPepperShop shop) {
+    return new RestaurantFacilities(
+        hasFacility(shop.privateRoom()),
+        hasFacility(shop.tatami()),
+        hasFacility(shop.horigotatsu()),
+        // 「お子様連れ歓迎」のように文言が入るため、否定語でなければありとみなす
+        hasFacility(shop.child()),
+        hasFacility(shop.charter()),
+        hasFacility(shop.freeDrink()),
+        hasFacility(shop.freeFood()),
+        hasFacility(shop.course()),
+        hasFacility(shop.lunch()),
+        hasFacility(shop.midnight()),
+        hasFacility(shop.parking()),
+        hasFacility(shop.barrierFree()),
+        hasFacility(shop.nonSmoking()),
+        hasFacility(shop.english()),
+        toPositiveInt(shop.capacity()),
+        toPositiveInt(shop.partyCapacity()),
+        blankToNull(shop.stationName()),
+        blankToNull(shop.open()));
+  }
+
+  /**
+   * ホットペッパーの設備欄は「あり」「なし」「未確認」「貸切不可」など表記がまちまちなので、
+   * 否定語を含まず中身があるものだけを true とする。
+   * 「未確認」を true にすると、無い設備を理由に挙げてしまう。
+   */
+  private Boolean hasFacility(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    String clean = value.trim();
+    if (clean.contains("なし") || clean.contains("不可") || clean.contains("未確認")
+        || "－".equals(clean) || "-".equals(clean)) {
+      return false;
+    }
+    return true;
+  }
+
+  private Integer toPositiveInt(Integer value) {
+    return value != null && value > 0 ? value : null;
+  }
+
+  private String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value.trim();
   }
 
   private String extractPhotoUrl(HotPepperPhoto photo) {
@@ -583,7 +637,27 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
       HotPepperName genre,
       HotPepperName budget,
       HotPepperPhoto photo,
-      @JsonProperty("catch") String catchText) {
+      @JsonProperty("catch") String catchText,
+      // 以下は検索結果に元から含まれている席・設備の項目。
+      // 追加リクエストは不要で、これまで読み捨てていただけ。
+      @JsonProperty("private_room") String privateRoom,
+      String tatami,
+      String horigotatsu,
+      String child,
+      String charter,
+      @JsonProperty("free_drink") String freeDrink,
+      @JsonProperty("free_food") String freeFood,
+      String course,
+      String lunch,
+      String midnight,
+      String parking,
+      @JsonProperty("barrier_free") String barrierFree,
+      @JsonProperty("non_smoking") String nonSmoking,
+      String english,
+      Integer capacity,
+      @JsonProperty("party_capacity") Integer partyCapacity,
+      @JsonProperty("station_name") String stationName,
+      String open) {
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)

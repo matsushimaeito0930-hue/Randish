@@ -32,7 +32,60 @@ public final class ApiDtos {
       String nextCloseTime,
       String googlePlaceId,
       List<PhotoAttributionResponse> photoAttributions,
-      PremiumPlaceDetailsResponse premiumDetails) {
+      PremiumPlaceDetailsResponse premiumDetails,
+      /** 席・設備。ホットペッパー由来の店だけ入る。 */
+      RestaurantFacilitiesResponse facilities) {
+
+    /** facilities を持たない呼び出しのための短い形。既存コードをそのまま動かすために残している。 */
+    public RestaurantResponse(
+        String id,
+        String externalProvider,
+        String externalId,
+        String name,
+        String area,
+        String genre,
+        int budgetMin,
+        int budgetMax,
+        double rating,
+        int minutes,
+        String address,
+        String photoUrl,
+        String note,
+        Double latitude,
+        Double longitude,
+        Double googleRating,
+        String googleMapsUri,
+        Boolean openNow,
+        String nextOpenTime,
+        String nextCloseTime,
+        String googlePlaceId,
+        List<PhotoAttributionResponse> photoAttributions,
+        PremiumPlaceDetailsResponse premiumDetails) {
+      this(id, externalProvider, externalId, name, area, genre, budgetMin, budgetMax, rating,
+          minutes, address, photoUrl, note, latitude, longitude, googleRating, googleMapsUri,
+          openNow, nextOpenTime, nextCloseTime, googlePlaceId, photoAttributions, premiumDetails, null);
+    }
+  }
+
+  public record RestaurantFacilitiesResponse(
+      Boolean privateRoom,
+      Boolean tatami,
+      Boolean horigotatsu,
+      Boolean childFriendly,
+      Boolean charter,
+      Boolean freeDrink,
+      Boolean freeFood,
+      Boolean course,
+      Boolean lunch,
+      Boolean openLate,
+      Boolean parking,
+      Boolean barrierFree,
+      Boolean nonSmoking,
+      Boolean englishMenu,
+      Integer capacity,
+      Integer partyCapacity,
+      String stationName,
+      String openHours) {
   }
 
   public record PremiumPlaceDetailsResponse(

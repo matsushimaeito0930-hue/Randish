@@ -22,6 +22,33 @@ export type Restaurant = {
   googlePlaceId?: string | null;
   photoAttributions?: PhotoAttribution[];
   premiumDetails?: PremiumPlaceDetails | null;
+  facilities?: RestaurantFacilities | null;
+};
+
+/**
+ * 席・設備。ホットペッパーの検索結果にもとから含まれている項目。
+ * 「なぜこの店なのか」を、評価や価格帯ではなく個室・座敷・お子様連れ可といった
+ * シチュエーションに直接効く事実で説明するために使う。
+ */
+export type RestaurantFacilities = {
+  privateRoom?: boolean | null;
+  tatami?: boolean | null;
+  horigotatsu?: boolean | null;
+  childFriendly?: boolean | null;
+  charter?: boolean | null;
+  freeDrink?: boolean | null;
+  freeFood?: boolean | null;
+  course?: boolean | null;
+  lunch?: boolean | null;
+  openLate?: boolean | null;
+  parking?: boolean | null;
+  barrierFree?: boolean | null;
+  nonSmoking?: boolean | null;
+  englishMenu?: boolean | null;
+  capacity?: number | null;
+  partyCapacity?: number | null;
+  stationName?: string | null;
+  openHours?: string | null;
 };
 
 export type PremiumPlaceDetails = {

@@ -491,7 +491,9 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           place.currentOpeningHours() == null ? null : place.currentOpeningHours().nextCloseTime(),
           place.id(),
           hasExistingPhoto ? restaurant.photoAttributions() : googlePhotoAttributions(place),
-          restaurant.premiumDetails());
+          restaurant.premiumDetails(),
+          // ホットペッパー由来の席・設備情報は Google で上書きせず引き継ぐ
+          restaurant.facilities());
     } catch (RuntimeException exception) {
       logger.warn("Google Places enrichment failed for restaurant: {}", restaurant.name(), exception);
       return restaurant;
@@ -722,7 +724,8 @@ public class GooglePlacesEnrichmentService implements ExternalRestaurantProvider
           hours == null ? null : hours.nextCloseTime(),
           place.id(),
           hasExistingPhoto ? restaurant.photoAttributions() : googlePhotoAttributions(place),
-          toPremiumDetails(place));
+          toPremiumDetails(place),
+          restaurant.facilities());
     } catch (RuntimeException exception) {
       logger.warn("Google Places business status enrichment failed for restaurant: {}", restaurant.name(), exception);
       return restaurant;

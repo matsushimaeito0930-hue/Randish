@@ -2,6 +2,7 @@ package com.example.restaurantroulette.service;
 
 import com.example.restaurantroulette.dto.ApiDtos.FavoriteResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryResponse;
+import com.example.restaurantroulette.dto.ApiDtos.RestaurantFacilitiesResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.dto.ApiDtos.UserResponse;
 import com.example.restaurantroulette.dto.ApiDtos.VisitResponse;
@@ -9,6 +10,7 @@ import com.example.restaurantroulette.entity.AppUser;
 import com.example.restaurantroulette.entity.FavoriteRestaurant;
 import com.example.restaurantroulette.entity.RandomHistory;
 import com.example.restaurantroulette.entity.Restaurant;
+import com.example.restaurantroulette.entity.RestaurantFacilities;
 import com.example.restaurantroulette.entity.VisitCollection;
 import java.util.List;
 import org.springframework.stereotype.Component;
@@ -39,7 +41,33 @@ public class DtoMapper {
         null,
         null,
         List.of(),
-        null);
+        null,
+        toFacilitiesResponse(restaurant.facilities()));
+  }
+
+  private RestaurantFacilitiesResponse toFacilitiesResponse(RestaurantFacilities facilities) {
+    if (facilities == null) {
+      return null;
+    }
+    return new RestaurantFacilitiesResponse(
+        facilities.privateRoom(),
+        facilities.tatami(),
+        facilities.horigotatsu(),
+        facilities.childFriendly(),
+        facilities.charter(),
+        facilities.freeDrink(),
+        facilities.freeFood(),
+        facilities.course(),
+        facilities.lunch(),
+        facilities.openLate(),
+        facilities.parking(),
+        facilities.barrierFree(),
+        facilities.nonSmoking(),
+        facilities.englishMenu(),
+        facilities.capacity(),
+        facilities.partyCapacity(),
+        facilities.stationName(),
+        facilities.openHours());
   }
 
   public RandomHistoryResponse toRandomHistoryResponse(RandomHistory history, Restaurant restaurant) {

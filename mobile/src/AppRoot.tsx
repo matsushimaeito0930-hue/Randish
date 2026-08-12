@@ -4289,6 +4289,109 @@ const SITUATION_EVIDENCE_HINTS: Record<Exclude<SituationMode, 'none'>, { label: 
   ],
 };
 
+/** 候補生成時にこちらが付ける定型文。店が書いた紹介文ではないので、根拠として引用しない。 */
+const GENERATED_NOTE_TEXTS = ['近くのお店情報から選ばれました。'];
+
+/**
+ * 席・設備からシチュエーションの根拠を作る。
+ *
+ * 「評価が高い」「予算が合う」はどの店にも言えてしまう。個室があるか、座敷か、
+ * 子ども連れ歓迎か、宴会が何人まで入るか——利用シーンを左右するのはこちらなので、
+ * 事実がある場合は必ず先頭に出す。ホットペッパーの検索結果に元から入っている情報で、
+ * 追加のリクエストは発生しない。
+ */
+const buildFacilityReasons = (
+  situation: SituationMode,
+  facilities: Restaurant['facilities'],
+): string[] => {
+  if (!facilities || situation === 'none') {
+    return [];
+  }
+  const reasons: string[] = [];
+  const seats: string[] = [];
+  if (facilities.privateRoom) {
+    seats.push('個室');
+  }
+  if (facilities.tatami) {
+    seats.push('座敷');
+  }
+  if (facilities.horigotatsu) {
+    seats.push('掘りごたつ');
+  }
+
+  if (situation === 'solo') {
+    if (facilities.lunch) {
+      reasons.push('ランチ営業があり、ひとりでも入りやすい時間帯があります。');
+    }
+    if (facilities.openLate) {
+      reasons.push('23時以降も営業しています。');
+    }
+    if (facilities.capacity && facilities.capacity <= 30) {
+      reasons.push(`総席数${facilities.capacity}席の小さめの店です。`);
+    }
+  }
+
+  if (situation === 'date') {
+    if (facilities.privateRoom) {
+      reasons.push('個室があります。ふたりで落ち着いて話せます。');
+    }
+    if (facilities.course) {
+      reasons.push('コース料理の用意があります。');
+    }
+    if (!facilities.privateRoom && facilities.nonSmoking) {
+      reasons.push('禁煙席があります。');
+    }
+  }
+
+  if (situation === 'friends') {
+    if (facilities.freeDrink) {
+      reasons.push('飲み放題があります。');
+    }
+    if (facilities.freeFood) {
+      reasons.push('食べ放題があります。');
+    }
+    if (facilities.charter) {
+      reasons.push('貸切ができます。');
+    }
+    if (facilities.partyCapacity && facilities.partyCapacity >= 10) {
+      reasons.push(`最大${facilities.partyCapacity}名まで入れるので、人数が増えても対応できます。`);
+    }
+  }
+
+  if (situation === 'family') {
+    if (facilities.childFriendly) {
+      reasons.push('お子様連れ歓迎の店です。');
+    }
+    if (seats.length) {
+      reasons.push(`${seats.join('・')}があり、子ども連れでも落ち着いて座れます。`);
+    }
+    if (facilities.parking) {
+      reasons.push('駐車場があります。');
+    }
+    if (facilities.barrierFree) {
+      reasons.push('バリアフリー対応です。');
+    }
+  }
+
+  if (situation === 'afterWork') {
+    if (facilities.openLate) {
+      reasons.push('23時以降も営業しているので、遅くなっても寄れます。');
+    }
+    if (facilities.stationName) {
+      reasons.push(`最寄りは${facilities.stationName}駅です。`);
+    }
+    if (facilities.freeDrink) {
+      reasons.push('飲み放題があります。');
+    }
+  }
+
+  // どのシチュエーションでも、席の種類が分かっているなら伝える価値がある。
+  if (!reasons.length && seats.length) {
+    reasons.push(`${seats.join('・')}があります。`);
+  }
+  return reasons.slice(0, 2);
+};
+
 /** 候補全体の中で、この店の価格帯がどのあたりかを言葉にする。 */
 const describeBudgetPosition = (restaurant: Restaurant, pool: Restaurant[]) => {
   const value = toOptionalNumber(restaurant.budgetMax);
@@ -4338,7 +4441,15 @@ const buildSituationDrawReason = (
 
   const lines: string[] = [];
   const details = restaurant.premiumDetails;
-  const note = (restaurant.note ?? '').trim();
+  const facilities = restaurant.facilities;
+  // 候補に自動で付ける説明文（「近くのお店情報から選ばれました。」など）は
+  // 店が書いた紹介文ではないので、引用すると嘘になる。除外する。
+  const rawNote = (restaurant.note ?? '').trim();
+  const note = GENERATED_NOTE_TEXTS.includes(rawNote) ? '' : rawNote;
+
+  // 0) 席・設備の事実を最優先で出す。ここが「どのジャンルにも言えること」との差になる。
+  const facilityReasons = buildFacilityReasons(situation, facilities);
+  lines.push(...facilityReasons);
 
   // 1) この店がシチュエーションに合う「具体的な根拠」を、紹介文と設備情報から拾う。
   const hints = SITUATION_EVIDENCE_HINTS[situation] ?? [];
@@ -7284,6 +7395,27 @@ export default function App() {
     return { key, center, radius, category, priceRange, openNow: effectiveOpenNow, minRating: effectiveMinRating };
   }, [budgetMax, conditionRandom.budget, conditionRandom.genre, distance, genre, minRating, openNowOnly, requestCurrentLocation, resolveAreaCenter, situation, subscription.isPro]);
 
+  /**
+   * 地図のピン（CandidatePlace）から作った店には席・設備の情報が入らない。
+   * 同じ店が候補一覧にもいれば、そちらが持っている情報を移してくる。
+   * これが無いと、抽選で当たった店だけ「個室あり」などの理由を出せなくなる。
+   */
+  const withFacilitiesFromSearchList = useCallback((restaurant: Restaurant): Restaurant => {
+    if (restaurant.facilities) {
+      return restaurant;
+    }
+    const place = restaurantToCandidatePlace(restaurant);
+    if (!place) {
+      return restaurant;
+    }
+    const key = candidatePlaceKey(place);
+    const matched = restaurantsRef.current.find((item) => {
+      const itemPlace = restaurantToCandidatePlace(item);
+      return itemPlace ? candidatePlaceKey(itemPlace) === key : false;
+    });
+    return matched?.facilities ? { ...restaurant, facilities: matched.facilities } : restaurant;
+  }, []);
+
   const getUsableCandidateCache = useCallback((query: CandidateQuery) => {
     const cached = candidateCacheRef.current;
     if (!cached) {
@@ -7477,8 +7609,10 @@ export default function App() {
         let finalCandidate: CandidatePlace | null = null;
         let normalized: Restaurant | null = null;
         for (const candidate of validationQueue) {
-          const enrichedCandidate = await enrichPremiumPlaceDetails(
-            candidatePlaceToRestaurant(candidate, areaRef.current, genre),
+          const enrichedCandidate = withFacilitiesFromSearchList(
+            await enrichPremiumPlaceDetails(
+              candidatePlaceToRestaurant(candidate, areaRef.current, genre),
+            ),
           );
           if (!subscription.isPro
             || restaurantMatchesPremiumResult(enrichedCandidate, minRating, openNowOnly)) {
