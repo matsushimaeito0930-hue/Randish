@@ -4256,10 +4256,77 @@ const getRestaurantSituationScore = (restaurant: Restaurant, situation: Situatio
  * シチュエーションを選んだら「必ず」出したいので、実際に効いた並び替えの根拠から
  * その場で組み立てる。通信も費用も発生しない。
  */
+/**
+ * ホットペッパーのキャッチコピーから、シチュエーションに効く手がかりを拾うための語彙。
+ * 実際の店舗データ（梅田×イタリアン60件）を見て、実在する言い回しから作っている。
+ */
+const SITUATION_EVIDENCE_HINTS: Record<Exclude<SituationMode, 'none'>, { label: string; keywords: string[] }[]> = {
+  solo: [
+    { label: 'ひとりでも入りやすい点', keywords: ['カウンター', '一人', 'ひとり', 'おひとり', '1名', 'サク飲み'] },
+    { label: '短時間で食べられる点', keywords: ['サッと', '早い', 'ランチ', '定食', '気軽'] },
+  ],
+  date: [
+    { label: '個室あり', keywords: ['個室', '半個室'] },
+    { label: '記念日向けの用意', keywords: ['記念日', '誕生日', 'サプライズ', '特別', 'バースデー', 'お祝い', '特典'] },
+    { label: '落ち着いた雰囲気', keywords: ['落ち着', '静か', '大人', '隠れ家', 'デート', '優雅', '上質', '非日常'] },
+    { label: '眺めの良さ', keywords: ['夜景', '景色', 'テラス', '窓側', '眺め', '空庭', '地上'] },
+    { label: '二人向けの席', keywords: ['ペア', '二人', 'ソファ', 'カップル'] },
+  ],
+  friends: [
+    { label: '飲み放題・食べ放題', keywords: ['飲み放題', '食べ放題', '飲放題', 'コース'] },
+    { label: '大人数への対応', keywords: ['貸切', '団体', '大人数', '宴会', 'パーティー', '名以上'] },
+    { label: '席数が多い', keywords: ['席】', '広大', '大空間'] },
+  ],
+  family: [
+    { label: '子ども連れ歓迎の案内', keywords: ['お子様', '子供', '子ども', 'ファミリー', 'キッズ'] },
+    { label: '座敷・ソファ席', keywords: ['座敷', '掘りごたつ', 'ソファ'] },
+    { label: '取り分けやすい料理', keywords: ['ボリューム', '盛り合わせ', '食べ放題', '大皿'] },
+  ],
+  afterWork: [
+    { label: '駅からの近さ', keywords: ['駅', '徒歩', '駅近', '駅前', '分★'] },
+    { label: '遅い時間の営業', keywords: ['深夜', '24時', '朝まで', '遅く', '夜'] },
+    { label: '軽く飲める点', keywords: ['サク飲み', 'ハッピーアワー', '単品飲み放題', '気軽'] },
+  ],
+};
+
+/** 候補全体の中で、この店の価格帯がどのあたりかを言葉にする。 */
+const describeBudgetPosition = (restaurant: Restaurant, pool: Restaurant[]) => {
+  const value = toOptionalNumber(restaurant.budgetMax);
+  if (value == null || value <= 0 || value >= 100000) {
+    return null;
+  }
+  const others = pool
+    .map((item) => toOptionalNumber(item.budgetMax))
+    .filter((item): item is number => item != null && item > 0 && item < 100000)
+    .sort((a, b) => a - b);
+  if (others.length < 4) {
+    return null;
+  }
+  const median = others[Math.floor(others.length / 2)];
+  if (value < median * 0.8) {
+    return '候補の中では手頃な価格帯です。';
+  }
+  if (value > median * 1.25) {
+    return '候補の中では高めの価格帯で、特別な日に向く店です。';
+  }
+  return '候補の中では標準的な価格帯です。';
+};
+
+/**
+ * シチュエーションを選んで抽選したときに、なぜ「この店」なのかを組み立てる。
+ *
+ * AIに書かせると、生成に失敗したときや回数を使い切ったときに理由が出なくなる。
+ * シチュエーションを選んだら必ず出したいので、実際に効いた並び替えの根拠と
+ * その店自身のデータから組み立てる。通信も費用も発生しない。
+ *
+ * 「条件で絞りました」のような入力の言い換えは理由にならないため、
+ * 評価・価格帯・紹介文・設備といった、その店固有の事実を優先して並べる。
+ */
 const buildSituationDrawReason = (
   restaurant: Restaurant,
   situation: SituationMode,
   conditions: { area: string; genre: string; budgetMax: string; distance: string },
+  pool: Restaurant[],
 ): { headline: string; lines: string[] } | null => {
   if (situation === 'none') {
     return null;
@@ -4270,40 +4337,88 @@ const buildSituationDrawReason = (
   }
 
   const lines: string[] = [];
-
-  // 1. シチュエーションが実際に効いたかどうか（キーワード一致・店舗詳細）
-  const matchedKeyword = SITUATION_KEYWORDS[situation]
-    .find((keyword) => normalizeSearchText(`${restaurant.genre} ${restaurant.note}`).includes(normalizeSearchText(keyword)));
   const details = restaurant.premiumDetails;
+  const note = (restaurant.note ?? '').trim();
+
+  // 1) この店がシチュエーションに合う「具体的な根拠」を、紹介文と設備情報から拾う。
+  const hints = SITUATION_EVIDENCE_HINTS[situation] ?? [];
+  const matchedHints = hints.filter((hint) =>
+    hint.keywords.some((keyword) => normalizeSearchText(note).includes(normalizeSearchText(keyword))));
+  const quotedNote = note.length > 30 ? `${note.slice(0, 30)}…` : note;
+  if (matchedHints.length) {
+    lines.push(`決め手は${matchedHints.slice(0, 2).map((hint) => hint.label).join('と')}。紹介文に「${quotedNote}」とあります。`);
+  } else if (note) {
+    // 手がかり語に当たらなくても、その店の紹介文自体は固有の情報。黙って捨てない。
+    lines.push(`この店の紹介文は「${quotedNote}」です。`);
+  }
+
   if (situation === 'family' && (details?.goodForChildren || details?.menuForChildren)) {
-    lines.push('子ども向けの席やメニューがある店として、家族向けに優先しました。');
-  } else if ((situation === 'friends' || situation === 'family') && details?.goodForGroups) {
-    lines.push('グループで入りやすい店として優先しました。');
+    lines.push('子ども向けのメニューや席がある店として登録されています。');
   }
+  if ((situation === 'friends' || situation === 'family') && details?.goodForGroups) {
+    lines.push('グループでの利用に向いている店として登録されています。');
+  }
+  if (situation === 'date' && details?.reservable) {
+    lines.push('予約できる店なので、席を確保してから向かえます。');
+  }
+  if (situation === 'afterWork' && restaurant.openNow) {
+    lines.push('いま営業中です。');
+  }
+
+  // 2) ジャンルがシチュエーションと結びつくなら、その根拠を出す。
+  const matchedKeyword = SITUATION_KEYWORDS[situation]
+    .find((keyword) => normalizeSearchText(`${restaurant.genre} ${note}`).includes(normalizeSearchText(keyword)));
   if (matchedKeyword) {
-    lines.push(`「${option.label}」で選ばれやすい${matchedKeyword}系のお店です。`);
-  } else if (!lines.length) {
-    lines.push(`「${option.label}」向けの店を優先して並べたうえで、その中から選びました。`);
+    lines.push(`${matchedKeyword}は「${option.label}」で選ばれやすいジャンルです。`);
   }
 
-  // 2. 利用者が指定した条件のうち、実際に絞り込みが効いたもの
-  const cleanArea = conditions.area.trim();
-  if (cleanArea && cleanArea !== '現在地') {
-    lines.push(`エリアは${cleanArea}に絞っています。`);
-  } else {
-    lines.push(`現在地から${conditions.distance}以内で探しました。`);
-  }
-  if (conditions.genre && conditions.genre !== 'すべて') {
-    lines.push(`ジャンルは${conditions.genre}を指定しています。`);
-  }
-  const budgetValue = Number(conditions.budgetMax || 0);
-  if (budgetValue > 0) {
-    lines.push(`予算${budgetValue.toLocaleString('ja-JP')}円以内の条件に合っています。`);
+  // 3) この店ならではの数字。評価・件数・価格帯・所要時間。
+  const rating = toOptionalNumber(restaurant.googleRating) ?? toOptionalNumber(restaurant.rating);
+  const ratingCount = toOptionalNumber(details?.googleUserRatingCount);
+  if (rating && rating > 0) {
+    const betterThan = pool.filter((item) => {
+      const otherRating = toOptionalNumber(item.googleRating) ?? toOptionalNumber(item.rating) ?? 0;
+      return otherRating > 0 && otherRating < rating;
+    }).length;
+    const ratedCount = pool.filter((item) => {
+      const otherRating = toOptionalNumber(item.googleRating) ?? toOptionalNumber(item.rating) ?? 0;
+      return otherRating > 0;
+    }).length;
+    const rankNote = ratedCount >= 3 && betterThan >= Math.ceil(ratedCount * 0.6)
+      ? `評価のある${ratedCount}件の中でも上位です。`
+      : '';
+    lines.push(`評価は${rating.toFixed(1)}${ratingCount ? `（${ratingCount.toLocaleString('ja-JP')}件）` : ''}。${rankNote}`.trim());
   }
 
+  const budgetMin = toOptionalNumber(restaurant.budgetMin);
+  const budgetMax = toOptionalNumber(restaurant.budgetMax);
+  const requestedBudget = Number(conditions.budgetMax || 0);
+  if (budgetMin != null && budgetMax != null && budgetMax > 0 && budgetMax < 100000) {
+    const band = `${budgetMin.toLocaleString('ja-JP')}〜${budgetMax.toLocaleString('ja-JP')}円`;
+    const position = describeBudgetPosition(restaurant, pool);
+    lines.push(requestedBudget > 0
+      ? `予算の目安は${band}で、指定した${requestedBudget.toLocaleString('ja-JP')}円以内に収まります。`
+      : `予算の目安は${band}。${position ?? ''}`.trim());
+  }
+
+  if (restaurant.minutes && restaurant.minutes > 0) {
+    lines.push(`検索の起点から徒歩${restaurant.minutes}分ほどの距離です。`);
+  }
+
+  // 4) ここまでで店固有の材料がまったく無い場合だけ、絞り込みの説明を添える。
+  if (!lines.length) {
+    const cleanArea = conditions.area.trim();
+    const scope = cleanArea && cleanArea !== '現在地' ? cleanArea : `現在地から${conditions.distance}以内`;
+    lines.push(`${scope}で「${option.label}」向けに並べ替えた候補の中から選びました。`);
+    lines.push('この店の詳細情報がまだ取得できていないため、根拠はここまでです。');
+  }
+
+  const poolSize = pool.length;
   return {
-    headline: `${option.label}の${option.description}という条件で選びました`,
-    lines,
+    headline: poolSize > 1
+      ? `${option.label}向けに並べた候補${poolSize}件から、この店を選びました`
+      : `${option.label}（${option.description}）の条件で選びました`,
+    lines: lines.slice(0, 4),
   };
 };
 
@@ -11705,14 +11820,14 @@ function RandomTab({
   // シチュエーションを選んで引いた場合の理由。指定なしのときは出さない。
   const situationDrawReason = useMemo(
     () => (visibleSelectedRestaurant
-      ? buildSituationDrawReason(visibleSelectedRestaurant, situation, {
-        area: displayAreaBase,
-        genre,
-        budgetMax,
-        distance,
-      })
+      ? buildSituationDrawReason(
+        visibleSelectedRestaurant,
+        situation,
+        { area: displayAreaBase, genre, budgetMax, distance },
+        restaurants,
+      )
       : null),
-    [budgetMax, displayAreaBase, distance, genre, situation, visibleSelectedRestaurant],
+    [budgetMax, displayAreaBase, distance, genre, restaurants, situation, visibleSelectedRestaurant],
   );
   const distanceOriginText = useMemo(() => {
     const originName = selectedSearchOrigin?.label ?? (displayArea !== '？' ? displayArea : '選択地点');
