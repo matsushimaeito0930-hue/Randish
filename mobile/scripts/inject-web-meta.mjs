@@ -63,6 +63,79 @@ const metaBlock = `    <!-- ${MARKER}: scripts/inject-web-meta.mjs が生成。�
     <script type="application/ld+json">${JSON.stringify(structuredData)}</script>
 `;
 
+/**
+ * JSを読み込み終えるまでの間、真っ白な画面を見せないための起動画面。
+ *
+ * バンドルは gzip で約700KB あり、回線によっては読み込みと解析に数秒かかる。
+ * その間まったく何も出ないため、実際の時間以上に遅く感じていた。
+ *
+ * 消し方に JavaScript を使っていない点が重要で、CSP が script-src 'self' のため
+ * インラインスクリプトは実行できない。#root が空でなくなった（＝Reactが描画した）
+ * ことを CSS の :empty と兄弟セレクタだけで判定して消している。
+ */
+const bootStyle = `    <style id="randish-boot-style">
+      #randish-boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #fff8f2;
+        font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+        opacity: 1;
+        transition: opacity 220ms ease;
+        z-index: 9999;
+      }
+      /* Reactが #root に描画した瞬間に消える。JSを一切使わない。 */
+      #root:not(:empty) ~ #randish-boot {
+        opacity: 0;
+        visibility: hidden;
+      }
+      #randish-boot-mark {
+        font-size: 26px;
+        font-weight: 900;
+        letter-spacing: 0.16em;
+        color: #ef552e;
+      }
+      #randish-boot-lead {
+        font-size: 13px;
+        color: #9a9187;
+      }
+      #randish-boot-bar {
+        width: 132px;
+        height: 3px;
+        border-radius: 999px;
+        background: #f2e3d7;
+        overflow: hidden;
+      }
+      #randish-boot-bar::after {
+        content: '';
+        display: block;
+        width: 40%;
+        height: 100%;
+        border-radius: 999px;
+        background: #ef552e;
+        animation: randish-boot-slide 1.1s ease-in-out infinite;
+      }
+      @keyframes randish-boot-slide {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(330%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #randish-boot-bar::after { animation: none; }
+      }
+    </style>
+`;
+
+const bootMarkup = `    <div id="randish-boot" aria-hidden="true">
+      <div id="randish-boot-mark">RANDISH</div>
+      <div id="randish-boot-bar"></div>
+      <div id="randish-boot-lead">今日の一店を準備しています</div>
+    </div>
+`;
+
 const noscriptBlock = `<noscript>
       <h1>${TITLE}</h1>
       <p>${DESCRIPTION}</p>
@@ -90,6 +163,12 @@ html = html.replace(/<title>[^<]*<\/title>/i, `<title>${TITLE}</title>`);
 // title の直後にメタ情報をまとめて入れる。
 html = html.replace(/(<title>[^<]*<\/title>\s*\n?)/i, `$1${metaBlock}`);
 
+// 起動画面のスタイルを head の最後に置く。
+html = html.replace(/<\/head>/i, `${bootStyle}  </head>`);
+
+// 起動画面は #root の「あと」に置く。兄弟セレクタで消すため順序が意味を持つ。
+html = html.replace(/(<div id="root"><\/div>\s*\n?)/i, `$1${bootMarkup}`);
+
 // JSを実行しないクローラー向けの説明に差し替える。
 html = html.replace(/<noscript>[\s\S]*?<\/noscript>/i, noscriptBlock);
 
@@ -107,6 +186,10 @@ const checks = [
   ['noscript', html.includes('ご利用にはJavaScriptを有効に')],
   ['root要素が残っている', html.includes('id="root"')],
   ['スクリプトが残っている', /<script[^>]+src=/.test(html)],
+  ['起動画面', html.includes('id="randish-boot"')],
+  ['起動画面を消すCSS', html.includes('#root:not(:empty) ~ #randish-boot')],
+  // 起動画面は #root より後ろに無いと兄弟セレクタで消せず、画面を覆ったままになる
+  ['起動画面がrootの後ろにある', html.indexOf('id="randish-boot"') > html.indexOf('id="root"')],
 ];
 const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
 if (failed.length) {
