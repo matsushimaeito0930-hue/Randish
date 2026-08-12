@@ -12974,6 +12974,47 @@ export const styles = StyleSheet.create({
     color: ORANGE,
   },
 
+  // シチュエーション指定で引いたときに、選ばれた理由を示すパネル。
+  situationReasonPanel: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#fff7f2',
+    borderWidth: 1,
+    borderColor: '#f6ddd0',
+    gap: 7,
+  },
+  situationReasonHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginBottom: 2,
+  },
+  situationReasonTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '800',
+    color: INK,
+  },
+  situationReasonRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  situationReasonDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: ORANGE,
+    marginTop: 6,
+  },
+  situationReasonText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#6f665c',
+  },
+
   // 食AIの1日の回数を使い切ったときの案内。いつ戻るかを必ず添える。
   foodAiLimitNotice: {
     flexDirection: 'row',

@@ -4249,6 +4249,64 @@ const getRestaurantSituationScore = (restaurant: Restaurant, situation: Situatio
   return getSituationTextScore(`${restaurant.genre} ${restaurant.note}`, situation) + detailBonus;
 };
 
+/**
+ * シチュエーションを選んで抽選したときに、なぜこの店になったのかを組み立てる。
+ *
+ * AIに書かせると、生成に失敗したときや回数を使い切ったときに理由が出なくなる。
+ * シチュエーションを選んだら「必ず」出したいので、実際に効いた並び替えの根拠から
+ * その場で組み立てる。通信も費用も発生しない。
+ */
+const buildSituationDrawReason = (
+  restaurant: Restaurant,
+  situation: SituationMode,
+  conditions: { area: string; genre: string; budgetMax: string; distance: string },
+): { headline: string; lines: string[] } | null => {
+  if (situation === 'none') {
+    return null;
+  }
+  const option = SITUATION_OPTIONS.find((item) => item.key === situation);
+  if (!option) {
+    return null;
+  }
+
+  const lines: string[] = [];
+
+  // 1. シチュエーションが実際に効いたかどうか（キーワード一致・店舗詳細）
+  const matchedKeyword = SITUATION_KEYWORDS[situation]
+    .find((keyword) => normalizeSearchText(`${restaurant.genre} ${restaurant.note}`).includes(normalizeSearchText(keyword)));
+  const details = restaurant.premiumDetails;
+  if (situation === 'family' && (details?.goodForChildren || details?.menuForChildren)) {
+    lines.push('子ども向けの席やメニューがある店として、家族向けに優先しました。');
+  } else if ((situation === 'friends' || situation === 'family') && details?.goodForGroups) {
+    lines.push('グループで入りやすい店として優先しました。');
+  }
+  if (matchedKeyword) {
+    lines.push(`「${option.label}」で選ばれやすい${matchedKeyword}系のお店です。`);
+  } else if (!lines.length) {
+    lines.push(`「${option.label}」向けの店を優先して並べたうえで、その中から選びました。`);
+  }
+
+  // 2. 利用者が指定した条件のうち、実際に絞り込みが効いたもの
+  const cleanArea = conditions.area.trim();
+  if (cleanArea && cleanArea !== '現在地') {
+    lines.push(`エリアは${cleanArea}に絞っています。`);
+  } else {
+    lines.push(`現在地から${conditions.distance}以内で探しました。`);
+  }
+  if (conditions.genre && conditions.genre !== 'すべて') {
+    lines.push(`ジャンルは${conditions.genre}を指定しています。`);
+  }
+  const budgetValue = Number(conditions.budgetMax || 0);
+  if (budgetValue > 0) {
+    lines.push(`予算${budgetValue.toLocaleString('ja-JP')}円以内の条件に合っています。`);
+  }
+
+  return {
+    headline: `${option.label}の${option.description}という条件で選びました`,
+    lines,
+  };
+};
+
 const prioritizeRestaurantsForSituation = (restaurants: Restaurant[], situation: SituationMode) =>
   situation === 'none'
     ? restaurants
@@ -8286,6 +8344,7 @@ export default function App() {
             uiText={UI_TEXT[appLanguage]}
             area={area}
             genre={genre}
+            situation={subscription.isPro ? situation : 'none'}
             budgetMin={budgetMin}
             budgetMax={budgetMax}
             distance={distance}
@@ -11404,6 +11463,7 @@ function RandomTab({
   uiText,
   area,
   genre,
+  situation,
   budgetMin,
   budgetMax,
   distance,
@@ -11445,6 +11505,7 @@ function RandomTab({
   uiText: Record<string, string>;
   area: string;
   genre: string;
+  situation: SituationMode;
   budgetMin: string;
   budgetMax: string;
   distance: string;
@@ -11641,6 +11702,18 @@ function RandomTab({
     const queryValue = encodeURIComponent(`${destination.latitude},${destination.longitude}`);
     openExternalLink(`https://www.google.com/maps/search/?api=1&query=${queryValue}`);
   }, [mapCandidates, mapRouletteTarget, selectedSearchOrigin]);
+  // シチュエーションを選んで引いた場合の理由。指定なしのときは出さない。
+  const situationDrawReason = useMemo(
+    () => (visibleSelectedRestaurant
+      ? buildSituationDrawReason(visibleSelectedRestaurant, situation, {
+        area: displayAreaBase,
+        genre,
+        budgetMax,
+        distance,
+      })
+      : null),
+    [budgetMax, displayAreaBase, distance, genre, situation, visibleSelectedRestaurant],
+  );
   const distanceOriginText = useMemo(() => {
     const originName = selectedSearchOrigin?.label ?? (displayArea !== '？' ? displayArea : '選択地点');
     return displayDistance === '？'
@@ -11767,6 +11840,22 @@ function RandomTab({
             isFavorite={isSelectedRestaurantSaved}
             allowExternalPhoto
           />
+          {/* シチュエーションを選んで引いたときは、なぜこの店なのかを必ず添える。
+              AIに依存しないので、生成の成否や回数制限に左右されない。 */}
+          {situationDrawReason && (
+            <View style={styles.situationReasonPanel}>
+              <View style={styles.situationReasonHeader}>
+                <Ionicons name="sparkles" size={14} color={ORANGE} />
+                <Text style={styles.situationReasonTitle}>{situationDrawReason.headline}</Text>
+              </View>
+              {situationDrawReason.lines.map((line, index) => (
+                <View key={`${line}-${index}`} style={styles.situationReasonRow}>
+                  <View style={styles.situationReasonDot} />
+                  <Text style={styles.situationReasonText}>{line}</Text>
+                </View>
+              ))}
+            </View>
+          )}
           <View style={styles.resultActions}>
             <Pressable style={styles.secondaryAction} onPress={onRandomPress}>
               <Text style={styles.secondaryActionText}>{uiText.drawAgain}</Text>
