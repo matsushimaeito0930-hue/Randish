@@ -5952,7 +5952,10 @@ export const styles = StyleSheet.create({
     ...pinShadow('rgba(227,50,43,0.34)', 12, 6, '#e3322b', 0.34),
   },
   mapRouletteCandidatePinDotSelected: {
-    transform: [{ scale: 1.12 }],
+    transform: [{ scale: 1.25 }],
+    // 薄くなった候補の中で当選店だけが確実に濃く残るよう、不透明度を明示的に戻す。
+    opacity: 1,
+    zIndex: 30,
   },
   mapRouletteCandidatePinDotHalo: {
     position: 'absolute',
@@ -12969,6 +12972,68 @@ export const styles = StyleSheet.create({
   },
   footerLabelActive: {
     color: ORANGE,
+  },
+
+  // 候補一覧が0件のときに、理由と広げ方をその場に出すためのパネル。
+  candidateEmptyPanel: {
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#f0e4d8',
+    borderStyle: 'dashed',
+    backgroundColor: '#fffaf5',
+    marginBottom: 12,
+  },
+  candidateEmptyTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: INK,
+  },
+  candidateEmptyText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#7d7369',
+    textAlign: 'center',
+  },
+  candidateEmptyActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  candidateEmptyButton: {
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: ORANGE,
+    backgroundColor: '#ffffff',
+  },
+  candidateEmptyButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: ORANGE,
+  },
+
+  // 抽選で脱落した候補。消さずに薄く残し、何件の中から選ばれたかを見せる。
+  mapRouletteCandidatePinDotEliminated: {
+    opacity: 0.16,
+  },
+  // 当選店の背後に敷く光。最後に1件だけ際立たせるための土台。
+  mapRouletteWinnerHalo: {
+    position: 'absolute',
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: 'rgba(239, 85, 46, 0.22)',
+    borderWidth: 2,
+    borderColor: 'rgba(239, 85, 46, 0.5)',
+    top: -12,
+    left: -17,
   },
 
   // --- 開発者向けの診断パネル（dev権限のときだけ表示される） ---

@@ -5424,6 +5424,8 @@ export default function App() {
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('ja');
   const [locationStatus, setLocationStatus] = useState('現在地を確認できます');
+  // 現在地ボタンの処理中フラグ。押した手応えをボタン自身で返すために使う。
+  const [currentLocationSearching, setCurrentLocationSearching] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('条件を選んで、今日の一店を決めましょう。');
   const [drawAnimationKey, setDrawAnimationKey] = useState<DrawAnimationKey>('roulette');
@@ -5431,6 +5433,8 @@ export default function App() {
   const [mapRouletteStatus, setMapRouletteStatus] = useState<MapRouletteStatus>('idle');
   const [mapCandidates, setMapCandidates] = useState<CandidatePlace[]>([]);
   const [mapRouletteTarget, setMapRouletteTarget] = useState<CandidatePlace | null>(null);
+  // 抽選演出で「脱落した」候補。1つずつ薄くしていき、最後に残った1件を当選店として際立たせる。
+  const [eliminatedCandidateIds, setEliminatedCandidateIds] = useState<string[]>([]);
   const [mapRouletteError, setMapRouletteError] = useState<string | null>(null);
   const [drawFailureDetails, setDrawFailureDetails] = useState<string[]>([]);
   const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false);
@@ -6508,6 +6512,7 @@ export default function App() {
     setMapRouletteStatus('idle');
     setMapCandidates([]);
     setMapRouletteTarget(null);
+    setEliminatedCandidateIds([]);
     setMapRouletteError(null);
     previewCandidateQueryKeyRef.current = null;
     spinValue.setValue(0);
@@ -6551,6 +6556,7 @@ export default function App() {
     setMapRouletteStatus('idle');
     setMapCandidates([]);
     setMapRouletteTarget(null);
+    setEliminatedCandidateIds([]);
     setMapRouletteError(null);
     previewCandidateQueryKeyRef.current = null;
     spinValue.setValue(0);
@@ -7239,6 +7245,7 @@ export default function App() {
           const noMatchMessage = buildPremiumConditionNoMatchMessage(areaRef.current, minRating, openNowOnly);
           setMapRouletteStatus('empty');
           setMapRouletteTarget(null);
+        setEliminatedCandidateIds([]);
           setMapRouletteError(noMatchMessage);
           setMessage(noMatchMessage);
           setIsLoading(false);
@@ -7276,28 +7283,50 @@ export default function App() {
         return;
       }
 
-      Animated.sequence([
-        Animated.timing(mapPinProgress, {
-          toValue: 1,
-          duration: 700,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(mapPinBounce, {
-          toValue: 1,
-          duration: 180,
-          easing: Easing.out(Easing.back(1.6)),
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (finished) {
-          finishSelection();
+      // 候補を1つずつ薄くしていき、最後に当選店だけが残る演出。
+      // ピンが当選店へ移動する以前の演出は、動きだけで行き先が読めてしまっていた。
+      // この時点で当選店として見せているのは selected（= setMapRouletteTarget した候補）。
+      // 有料条件の再検証で入れ替わる場合もあるが、その時は当選ピンの強調表示が追従する。
+      const winnerId = selected.id;
+      const losers = cacheEntry.candidates
+        .filter((candidate) => candidate.id !== winnerId)
+        .map((candidate) => candidate.id);
+      // 件数が多くても総時間は一定に保つ。候補60件でも待たされないようにする。
+      const totalSweepMs = 900;
+      const stepMs = losers.length ? Math.min(110, Math.max(24, Math.round(totalSweepMs / losers.length))) : 0;
+
+      const eliminated: string[] = [];
+      const sweep = () => {
+        if (mapSpinRunIdRef.current !== runId) {
+          return;
         }
-      });
+        if (!losers.length) {
+          mapPinProgress.setValue(1);
+          Animated.timing(mapPinBounce, {
+            toValue: 1,
+            duration: 180,
+            easing: Easing.out(Easing.back(1.6)),
+            useNativeDriver: true,
+          }).start(({ finished }) => finished && finishSelection());
+          return;
+        }
+        const next = losers.shift();
+        if (next) {
+          eliminated.push(next);
+          setEliminatedCandidateIds([...eliminated]);
+          // 60件ぶん鳴らすと不快なので、数件おきにだけ触覚を返す。
+          if (eliminated.length % 4 === 0) {
+            triggerRouletteHaptic();
+          }
+        }
+        setTimeout(sweep, stepMs);
+      };
+      sweep();
     } catch (error) {
       setMapRouletteStatus('error');
       setMapCandidates([]);
       setMapRouletteTarget(null);
+    setEliminatedCandidateIds([]);
       logApiUiError('nearby map roulette failed', error, apiBaseUrlCandidates);
       const noKey = error instanceof RandishApiError && error.status === 400;
       const messageText = noKey
@@ -7369,6 +7398,7 @@ export default function App() {
       previewCandidateQueryKeyRef.current = query.key;
       setMapRouletteError(null);
       setMapRouletteTarget(null);
+    setEliminatedCandidateIds([]);
       mapPinProgress.stopAnimation();
       mapPinBounce.stopAnimation();
       mapPinProgress.setValue(0);
@@ -7400,6 +7430,7 @@ export default function App() {
         setMapRouletteStatus('error');
         setMapCandidates([]);
         setMapRouletteTarget(null);
+        setEliminatedCandidateIds([]);
         logApiUiError('nearby preview failed', error, apiBaseUrlCandidates);
         const messageText = isApiConnectivityError(error)
           ? 'お店情報を取得できませんでした。'
@@ -7816,6 +7847,7 @@ export default function App() {
     setMapRouletteStatus('idle');
     setMapCandidates([]);
     setMapRouletteTarget(null);
+    setEliminatedCandidateIds([]);
     setMapRouletteError(null);
     setDrawFailureDetails([]);
     previewCandidateQueryKeyRef.current = null;
@@ -7824,30 +7856,38 @@ export default function App() {
   };
 
   const prepareCurrentLocationSearch = async () => {
-    if (isLoading) {
+    // 以前は isLoading の間まるごと無視していた。ホームでは候補の読み込みが
+    // しょっちゅう走るため、押しても何も起きない時間が長く「反応が悪い」状態になっていた。
+    // 二重実行だけを防ぎ、押した事実はボタン自身の表示で必ず返す。
+    if (currentLocationSearching) {
       return;
     }
-    setMessage('現在地を確認しています...');
-    const refreshedLocation = await requestCurrentLocation('sync-search');
-    const nextLocation = refreshedLocation ?? userLocationRef.current;
-    if (!nextLocation) {
-      setMessage('現在地を取得できませんでした。位置情報の許可を確認してください。');
-      return;
-    }
+    setCurrentLocationSearching(true);
+    try {
+      setMessage('現在地を確認しています...');
+      const refreshedLocation = await requestCurrentLocation('sync-search');
+      const nextLocation = refreshedLocation ?? userLocationRef.current;
+      if (!nextLocation) {
+        setMessage('現在地を取得できませんでした。位置情報の許可を確認してください。');
+        return;
+      }
 
-    void writeLocalValue(LOCATION_INTRO_STORAGE_KEY, 'granted');
-    areaRef.current = '現在地';
-    setArea('現在地');
-    setLocationStatus(`${nextLocation.label} 周辺から探します`);
-    setDrawMode('condition');
-    setTravelRevealStep('hidden');
-    setTravelDisplayArea(null);
-    setConditionRandom((current) => ({ ...current, area: false }));
-    setSelectedRestaurant(null);
-    resetMapRouletteView();
-    setActiveTab('search');
-    setMessage('現在地を設定しました。ジャンル・予算・距離を選んでください。');
-    scrollToContentTop();
+      void writeLocalValue(LOCATION_INTRO_STORAGE_KEY, 'granted');
+      areaRef.current = '現在地';
+      setArea('現在地');
+      setLocationStatus(`${nextLocation.label} 周辺から探します`);
+      setDrawMode('condition');
+      setTravelRevealStep('hidden');
+      setTravelDisplayArea(null);
+      setConditionRandom((current) => ({ ...current, area: false }));
+      setSelectedRestaurant(null);
+      resetMapRouletteView();
+      setActiveTab('search');
+      setMessage('現在地を設定しました。ジャンル・予算・距離を選んでください。');
+      scrollToContentTop();
+    } finally {
+      setCurrentLocationSearching(false);
+    }
   };
 
   const updateGenre = (value: string) => {
@@ -7925,6 +7965,7 @@ export default function App() {
     setMapRouletteStatus('idle');
     setMapCandidates([]);
     setMapRouletteTarget(null);
+    setEliminatedCandidateIds([]);
     setMapRouletteError(null);
     setDrawFailureDetails([]);
     previewCandidateQueryKeyRef.current = null;
@@ -8142,6 +8183,7 @@ export default function App() {
             drawMode={drawMode}
             conditionRandom={conditionRandom}
             restaurants={visibleRestaurants}
+            emptyReason={message}
             isLoading={isLoading}
             onAreaChange={updateArea}
             onGenreChange={updateGenre}
@@ -8176,6 +8218,7 @@ export default function App() {
             userLocation={userLocation}
             mapCandidates={unifiedCandidates}
             mapRouletteTarget={mapRouletteTarget}
+            eliminatedCandidateIds={eliminatedCandidateIds}
             mapRouletteStatus={mapRouletteStatus}
             mapRouletteError={mapRouletteError}
             drawFailureDetails={drawFailureDetails}
@@ -8268,11 +8311,18 @@ export default function App() {
           accessibilityLabel={UI_TEXT[appLanguage].currentLocationSearch}
           style={({ pressed }) => [styles.homeCurrentLocationFab, pressed && styles.homeCurrentLocationFabPressed]}
           onPress={prepareCurrentLocationSearch}
+          // 指はボタンの中心を正確には押さない。少し外れても拾えるようにする。
+          hitSlop={12}
+          disabled={currentLocationSearching}
         >
           {/* 現在地から探すボタン。的（locate）より進行方向を指す三角の矢印のほうが
               「現在地から探す」ことが直感的に伝わるため navigate を使う。 */}
-          <Ionicons name={userLocation ? 'navigate' : 'navigate-outline'} size={24} color="#ffffff" />
-          {userLocation && (
+          {currentLocationSearching ? (
+            <ActivityIndicator size="small" color="#ffffff" />
+          ) : (
+            <Ionicons name={userLocation ? 'navigate' : 'navigate-outline'} size={24} color="#ffffff" />
+          )}
+          {userLocation && !currentLocationSearching && (
             <View style={styles.homeCurrentLocationFabBadge}>
               <Ionicons name="checkmark" size={10} color="#ffffff" />
             </View>
@@ -11049,6 +11099,7 @@ function SegmentedValue({
 
 function SearchTab({
   uiText,
+  emptyReason,
   area,
   genre,
   budgetMin,
@@ -11092,6 +11143,7 @@ function SearchTab({
   drawMode: DrawMode;
   conditionRandom: ConditionRandomState;
   restaurants: Restaurant[];
+  emptyReason: string;
   isLoading: boolean;
   onAreaChange: (value: string) => void;
   onGenreChange: (value: string) => void;
@@ -11198,6 +11250,37 @@ function SearchTab({
         </Pressable>
       </View>
       <SectionHeader title={uiText.candidateList} action={`${restaurants.length}件`} />
+      {/* 0件のときに何も出ないと、条件が厳しいのか通信に失敗したのかが分からない。
+          どの条件で絞られたのかと、広げるための操作をその場に出す。 */}
+      {!isLoading && restaurants.length === 0 && (
+        <View style={styles.candidateEmptyPanel}>
+          <Ionicons name="search-outline" size={22} color="#9a9187" />
+          <Text style={styles.candidateEmptyTitle}>この条件では候補が見つかりません</Text>
+          <Text style={styles.candidateEmptyText}>{emptyReason}</Text>
+          <View style={styles.candidateEmptyActions}>
+            {distance !== DISTANCE_OPTIONS[DISTANCE_OPTIONS.length - 1] && (
+              <Pressable
+                style={styles.candidateEmptyButton}
+                onPress={() => onDistanceChange(
+                  DISTANCE_OPTIONS[Math.min(DISTANCE_OPTIONS.indexOf(distance) + 1, DISTANCE_OPTIONS.length - 1)],
+                )}
+              >
+                <Text style={styles.candidateEmptyButtonText}>距離を広げる</Text>
+              </Pressable>
+            )}
+            {genre !== 'すべて' && (
+              <Pressable style={styles.candidateEmptyButton} onPress={() => onGenreChange('すべて')}>
+                <Text style={styles.candidateEmptyButtonText}>ジャンルを外す</Text>
+              </Pressable>
+            )}
+            {!!budgetMax && (
+              <Pressable style={styles.candidateEmptyButton} onPress={() => onBudgetMaxChange('')}>
+                <Text style={styles.candidateEmptyButtonText}>予算を外す</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      )}
       {restaurants.map((restaurant) => (
         <RestaurantCard
           key={restaurant.id}
@@ -11227,6 +11310,7 @@ function RandomTab({
   userLocation,
   mapCandidates,
   mapRouletteTarget,
+  eliminatedCandidateIds,
   mapRouletteStatus,
   mapRouletteError,
   drawFailureDetails,
@@ -11267,6 +11351,7 @@ function RandomTab({
   userLocation: UserLocation | null;
   mapCandidates: CandidatePlace[];
   mapRouletteTarget: CandidatePlace | null;
+  eliminatedCandidateIds: string[];
   mapRouletteStatus: MapRouletteStatus;
   mapRouletteError: string | null;
   drawFailureDetails: string[];
@@ -11489,6 +11574,7 @@ function RandomTab({
             center={selectedSearchOrigin}
             candidates={mapCandidates}
             target={mapRouletteTarget}
+            eliminatedIds={eliminatedCandidateIds}
             status={mapRouletteStatus}
             progress={mapPinProgress}
             bounce={mapPinBounce}
@@ -11632,6 +11718,7 @@ function RouletteMapView({
   center,
   candidates,
   target,
+  eliminatedIds,
   status,
   progress,
   bounce,
@@ -11644,6 +11731,7 @@ function RouletteMapView({
   center: UserLocation | null;
   candidates: CandidatePlace[];
   target: CandidatePlace | null;
+  eliminatedIds: string[];
   status: MapRouletteStatus;
   progress: Animated.Value;
   bounce: Animated.Value;
@@ -11952,15 +12040,13 @@ function RouletteMapView({
             </Animated.View>
           </>
         )}
-        {!rendersNativeMap && (
-          <View style={[styles.mapRouletteOriginDot, { left: toPoint(mapCenter.latitude, mapCenter.longitude).x - 12, top: toPoint(mapCenter.latitude, mapCenter.longitude).y - 30 }]}>
-            <Ionicons name="location" size={30} color="#e3322b" />
-          </View>
-        )}
+        {/* 中心の赤ピンは描かない。埋め込みのGoogleマップが同じ地点に自前のマーカーを出すため、
+            重ねると二重に見えるうえ、こちらの投影計算とわずかにずれて不自然になる。 */}
         {!rendersNativeMap && displayCandidates.map((candidate, index) => {
           const point = toPoint(candidate.latitude, candidate.longitude);
           const isActiveCandidate = activeCandidateId === candidate.id;
-          const isSelectedCandidate = status === 'result' && target?.id === candidate.id;
+          const isSelectedCandidate = target?.id === candidate.id && (status === 'result' || eliminatedIds.length > 0);
+          const isEliminated = eliminatedIds.includes(candidate.id);
           return (
             <View
               key={`${candidate.id}-overlay`}
@@ -11968,12 +12054,15 @@ function RouletteMapView({
                 genreFocused ? styles.mapRouletteCandidatePinDot : styles.mapRouletteCandidateDot,
                 { left: point.x - (genreFocused ? 10 : 6), top: point.y - (genreFocused ? 23 : 6) },
                 isActiveCandidate && styles.mapRouletteCandidatePinDotActive,
+                // 脱落したピンは消さずに薄くする。どれだけの中から選ばれたかが見えるほうが納得感がある。
+                isEliminated && styles.mapRouletteCandidatePinDotEliminated,
+                // 当選店は最後に必ず濃く出す。脱落スタイルより後ろに置いて上書きさせる。
                 isSelectedCandidate && styles.mapRouletteCandidatePinDotSelected,
               ]}
             >
               {genreFocused ? (
                 <>
-                  {isActiveCandidate && (
+                  {isActiveCandidate && !isEliminated && (
                     <Animated.View
                       style={[
                         styles.mapRouletteCandidatePinDotHalo,
@@ -11984,7 +12073,12 @@ function RouletteMapView({
                       ]}
                     />
                   )}
-                  <Ionicons name="location-sharp" size={isSelectedCandidate ? 30 : isActiveCandidate ? 28 : 26} color={isSelectedCandidate ? '#11100e' : '#e3322b'} />
+                  {isSelectedCandidate && <View style={styles.mapRouletteWinnerHalo} />}
+                  <Ionicons
+                    name="location-sharp"
+                    size={isSelectedCandidate ? 38 : isActiveCandidate ? 28 : 26}
+                    color={isSelectedCandidate ? ORANGE : '#e3322b'}
+                  />
                   <Text style={styles.mapRouletteCandidatePinText}>{index + 1}</Text>
                 </>
               ) : (
@@ -11993,25 +12087,6 @@ function RouletteMapView({
             </View>
           );
         })}
-        {!rendersNativeMap && (status === 'spinning' || status === 'result') && (
-          <Animated.View
-            style={[
-              styles.mapRouletteSelectionMarker,
-              {
-                transform: [
-                  { translateX: pinX },
-                  { translateY: pinY },
-                  { translateY: bounceY },
-                ],
-              },
-            ]}
-          >
-            <View style={styles.mapRouletteSelectionPulse} />
-            <View style={styles.mapRouletteSelectionCore}>
-              <Ionicons name="restaurant" size={16} color="#ffffff" />
-            </View>
-          </Animated.View>
-        )}
       </View>
       <View style={styles.rouletteMapLoadingPill}>
         {loading ? <ActivityIndicator size="small" color={ORANGE} /> : <Ionicons name="map-outline" size={18} color={ORANGE} />}
