@@ -42,7 +42,7 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { FAVORITE_PINK, INK, ORANGE } from './constants/theme';
 import { styles } from './styles/appStyles';
-import { toCountBucket, trackEvent } from './services/analytics';
+import { initAnalytics, toCountBucket, trackEvent } from './services/analytics';
 
 const consumedOAuthCallbackUrls = new Set<string>();
 const MIDNIGHT_PURPLE = '#6c63ff';
@@ -6521,6 +6521,11 @@ export default function App() {
       setIsLoading(false);
     }
   }, [apiBaseUrlCandidates, area, buildFewCandidatesHint, conditionRandom.area, conditionRandom.genre, genre, hasHiddenPreviewCondition, loadGenreDiagnosticMessage, previewApiParams, syncWorkingApiBaseUrl]);
+
+  // 起動時に計測を用意する。操作を待つと、見ただけで帰った人が数に入らない。
+  useEffect(() => {
+    initAnalytics();
+  }, []);
 
   useEffect(() => {
     loadRestaurants();
