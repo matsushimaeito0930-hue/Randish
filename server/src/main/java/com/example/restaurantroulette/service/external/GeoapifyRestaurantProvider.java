@@ -295,6 +295,28 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
       Double latitude,
       Double longitude,
       int radiusMeters) {
+    try {
+      return fetchWithCategories(context, categories, latitude, longitude, radiusMeters);
+    } catch (RestClientResponseException exception) {
+      // ジャンルごとの細かいカテゴリが Geoapify に受け付けられないことがある。
+      // その1つのせいでリクエスト全体が落ち、プロバイダが無言で0件になるのは割に合わない。
+      // 広いカテゴリで引き直す。ジャンルの絞り込みは mapper 側の名前・カテゴリ判定が行うため、
+      // 結果の精度は保たれる。
+      boolean isBadRequest = exception.getStatusCode().value() == 400;
+      if (!isBadRequest || categories.equals(DEFAULT_CATEGORIES)) {
+        throw exception;
+      }
+      logger.warn("[RANDISH_GEOAPIFY] retrying with broad categories after 400. rejected={}", categories);
+      return fetchWithCategories(context, DEFAULT_CATEGORIES, latitude, longitude, radiusMeters);
+    }
+  }
+
+  private List<Restaurant> fetchWithCategories(
+      SearchContext context,
+      List<String> categories,
+      Double latitude,
+      Double longitude,
+      int radiusMeters) {
     usageCounter.increment();
     // Geoapify はカテゴリと filter をカンマ区切りで受け取るが、
     // queryParam 経由だとカンマがエンコードされ、区切りとして解釈されない。
