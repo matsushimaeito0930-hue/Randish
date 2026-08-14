@@ -13105,6 +13105,15 @@ export const styles = StyleSheet.create({
     color: ORANGE,
   },
 
+  // 指定した距離の範囲を示す円。塗りは薄くし、地図の読みやすさを損なわない。
+  mapRouletteRangeCircle: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: 'rgba(239, 85, 46, 0.55)',
+    backgroundColor: 'rgba(239, 85, 46, 0.07)',
+    zIndex: 1,
+  },
+
   // 抽選で脱落した候補。消さずに薄く残し、何件の中から選ばれたかを見せる。
   mapRouletteCandidatePinDotEliminated: {
     opacity: 0.16,

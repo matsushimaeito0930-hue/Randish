@@ -6250,6 +6250,21 @@ export default function App() {
   // 候補一覧(/api/restaurants)と抽選の候補(/api/places/nearby)は別APIなので、
   // そのままだと「一覧0件なのに抽選では店が出る」「一覧の件数と地図のピン数が合わない」が起きる。
   // ここで両方を1つの集合にまとめ、一覧・ピン・抽選プールがすべて同じものを見るようにする。
+  /**
+   * 距離の円の中心。候補の位置ではなく「探す起点」で決める。
+   * 中心を候補側から決めていたため、距離を変えて候補が入れ替わるたびに
+   * 地図がその方向へずれていた。
+   */
+  const searchCircleOrigin = useMemo(() => {
+    const cleanArea = area.trim();
+    if (!cleanArea || cleanArea === '現在地') {
+      return userLocation;
+    }
+    return getSearchOriginForArea(cleanArea, null)
+      ?? (serverAreaCenter?.area === cleanArea ? serverAreaCenter.center : null)
+      ?? userLocation;
+  }, [area, serverAreaCenter, userLocation]);
+
   // エリアを切り替えた直後は、前の街の候補をいっさい使わない。
   // 「江東区を選んでいるのに地図が大阪（＝現在地）」を根本から防ぐ。
   const areaMatchedRestaurants = useMemo(
@@ -6261,8 +6276,21 @@ export default function App() {
     const fromSearchList = areaMatchedRestaurants
       .map(restaurantToCandidatePlace)
       .filter((place): place is CandidatePlace => place != null);
-    return mergeCandidatePlaces(fromSearchList, mapCandidates).slice(0, MAX_VISIBLE_CANDIDATES);
-  }, [areaMatchedRestaurants, mapCandidates]);
+    const merged = mergeCandidatePlaces(fromSearchList, mapCandidates);
+    // 指定した距離の外にある店は落とす。
+    // Google由来の結果はサーバー側で距離を絞っていないため、
+    // 1.5kmと指定したのに数km先の店が混ざり、地図の中心まで引っ張られていた。
+    const radiusMeters = parseDistanceMeters(distance);
+    const origin = searchCircleOrigin;
+    const withinRadius = radiusMeters && origin
+      ? merged.filter((place) =>
+        distanceBetweenLocationsMeters(origin, { latitude: place.latitude, longitude: place.longitude, label: '' })
+          <= radiusMeters)
+      : merged;
+    // 全部落ちてしまう場合だけは、絞り込み前の結果を残す（0件と誤解させないため）
+    const safeCandidates = withinRadius.length ? withinRadius : merged;
+    return safeCandidates.slice(0, MAX_VISIBLE_CANDIDATES);
+  }, [areaMatchedRestaurants, distance, mapCandidates, searchCircleOrigin]);
 
   const visibleRestaurants = useMemo(() => {
     // 一覧側の店舗情報のほうが予算・所要時間などが揃っているので、同じ店なら一覧側を使う。
@@ -8629,6 +8657,7 @@ export default function App() {
             mapCandidates={unifiedCandidates}
             mapRouletteTarget={mapRouletteTarget}
             eliminatedCandidateIds={eliminatedCandidateIds}
+            searchCircleOrigin={searchCircleOrigin}
             mapRouletteStatus={mapRouletteStatus}
             mapRouletteError={mapRouletteError}
             drawFailureDetails={drawFailureDetails}
@@ -11799,6 +11828,7 @@ function RandomTab({
   mapCandidates,
   mapRouletteTarget,
   eliminatedCandidateIds,
+  searchCircleOrigin,
   mapRouletteStatus,
   mapRouletteError,
   drawFailureDetails,
@@ -11841,6 +11871,7 @@ function RandomTab({
   mapCandidates: CandidatePlace[];
   mapRouletteTarget: CandidatePlace | null;
   eliminatedCandidateIds: string[];
+  searchCircleOrigin: UserLocation | null;
   mapRouletteStatus: MapRouletteStatus;
   mapRouletteError: string | null;
   drawFailureDetails: string[];
@@ -12076,6 +12107,8 @@ function RandomTab({
             candidates={mapCandidates}
             target={mapRouletteTarget}
             eliminatedIds={eliminatedCandidateIds}
+            circleOrigin={searchCircleOrigin}
+            circleRadiusMeters={parseDistanceMeters(distance)}
             status={mapRouletteStatus}
             progress={mapPinProgress}
             bounce={mapPinBounce}
@@ -12236,6 +12269,8 @@ function RouletteMapView({
   candidates,
   target,
   eliminatedIds,
+  circleOrigin,
+  circleRadiusMeters,
   status,
   progress,
   bounce,
@@ -12249,6 +12284,8 @@ function RouletteMapView({
   candidates: CandidatePlace[];
   target: CandidatePlace | null;
   eliminatedIds: string[];
+  circleOrigin: UserLocation | null;
+  circleRadiusMeters: number | null;
   status: MapRouletteStatus;
   progress: Animated.Value;
   bounce: Animated.Value;
@@ -12265,8 +12302,13 @@ function RouletteMapView({
   const MapModule = useMemo(getNativeMapModule, []);
   // 中心が確定していないのに適当な場所（東京や現在地）を映すと誤解を招くため、
   // 確定できたかどうかを持っておき、未確定なら地図の代わりに準備中を出す。
-  const hasResolvedMapCenter = Boolean(center || target || candidates[0]);
+  const hasResolvedMapCenter = Boolean(circleOrigin || center || target || candidates[0]);
   const mapCenter = useMemo(() => {
+    // 探す起点を最優先にする。候補側から中心を決めると、距離を変えて候補が
+    // 入れ替わるたびに地図がその方向へずれてしまう。
+    if (circleOrigin) {
+      return circleOrigin;
+    }
     if (center) {
       return center;
     }
@@ -12275,9 +12317,22 @@ function RouletteMapView({
       return { latitude: reference.latitude, longitude: reference.longitude, label: fallbackLabel || '現在地周辺' };
     }
     return { latitude: 35.681236, longitude: 139.767125, label: fallbackLabel || '現在地周辺' };
-  }, [candidates, center, fallbackLabel, target]);
+  }, [candidates, center, circleOrigin, fallbackLabel, target]);
 
   const region = useMemo(() => {
+    // 指定した距離の円がちょうど収まる縮尺にする。
+    // 候補の広がりから決めていたため、遠くの1件に引っ張られて縮尺が暴れていた。
+    if (circleRadiusMeters) {
+      // 円の直径に少し余白を足した範囲を映す
+      const latitudeDelta = (circleRadiusMeters * 2 * 1.35) / 111_320;
+      const longitudeScale = Math.max(0.2, Math.cos((mapCenter.latitude * Math.PI) / 180));
+      return {
+        latitude: mapCenter.latitude,
+        longitude: mapCenter.longitude,
+        latitudeDelta,
+        longitudeDelta: latitudeDelta / longitudeScale,
+      };
+    }
     const latitudes = [mapCenter.latitude, ...candidates.map((candidate) => candidate.latitude)];
     const longitudes = [mapCenter.longitude, ...candidates.map((candidate) => candidate.longitude)];
     const latitudeDelta = Math.max(0.008, (Math.max(...latitudes) - Math.min(...latitudes)) * 1.7 || 0.008);
@@ -12288,7 +12343,7 @@ function RouletteMapView({
       latitudeDelta,
       longitudeDelta,
     };
-  }, [candidates, mapCenter.latitude, mapCenter.longitude]);
+  }, [candidates, circleRadiusMeters, mapCenter.latitude, mapCenter.longitude]);
   const [visibleRegion, setVisibleRegion] = useState(region);
   // 候補一覧と同じ上限を使う。ここだけ別の数にすると「一覧12件なのにピンは8個」になる。
   const displayCandidates = useMemo(() => candidates.slice(0, MAX_VISIBLE_CANDIDATES), [candidates]);
@@ -12360,6 +12415,7 @@ function RouletteMapView({
       y: clamp(rotatedY, height * 0.12, height * 0.86),
     };
   }, [
+
     canvasSize.height,
     canvasSize.width,
     mapHeading,
@@ -12368,6 +12424,25 @@ function RouletteMapView({
     visibleRegion.longitude,
     visibleRegion.longitudeDelta,
   ]);
+
+  /**
+   * 半径を画面上のピクセルに直す。
+   * 中心から真東へ半径ぶん進んだ点を同じ投影で置き、その距離を測る。
+   * 投影の計算を二重に持たずに済み、ピンとのズレも起きない。
+   */
+  const circleRadiusPixels = useMemo(() => {
+    if (!circleRadiusMeters) {
+      return 0;
+    }
+    const metersPerDegreeLongitude = Math.max(
+      1,
+      Math.cos((mapCenter.latitude * Math.PI) / 180) * 111_320,
+    );
+    const edgeLongitude = mapCenter.longitude + circleRadiusMeters / metersPerDegreeLongitude;
+    const centerPoint = toPoint(mapCenter.latitude, mapCenter.longitude);
+    const edgePoint = toPoint(mapCenter.latitude, edgeLongitude);
+    return Math.max(0, edgePoint.x - centerPoint.x);
+  }, [circleRadiusMeters, mapCenter.latitude, mapCenter.longitude, toPoint]);
 
   const routeCandidates = useMemo(() => {
     if (target) {
@@ -12410,8 +12485,18 @@ function RouletteMapView({
   const rendersWebGoogleMap = Platform.OS === 'web' && hasResolvedMapCenter;
   const webGoogleMapUrl = useMemo(() => {
     const query = encodeURIComponent(`${mapCenter.latitude},${mapCenter.longitude}`);
-    return `https://www.google.com/maps?q=${query}&z=16&output=embed`;
-  }, [mapCenter.latitude, mapCenter.longitude]);
+    // 距離に合わせて縮尺を決める。1.5kmを指定しているのに常にz=16だと、
+    // 円が画面からはみ出して「範囲」が伝わらない。
+    // ズームが1上がると縮尺は半分になるので、半径から逆算する。
+    // 幅360px前後の画面に「直径＋余白」が収まるズームを逆算した式。
+    // 地図の1pxあたりのメートルはズームが1上がるごとに半分になるので、対数で求める。
+    // 切り捨てにするのは、四捨五入だと5km・10kmで円がわずかにはみ出すため。
+    // 少し引きすぎるほうが、範囲が伝わらないより良い。
+    const zoom = circleRadiusMeters
+      ? Math.max(10, Math.min(17, Math.floor(24 - Math.log2(circleRadiusMeters))))
+      : 16;
+    return `https://www.google.com/maps?q=${query}&z=${zoom}&output=embed`;
+  }, [circleRadiusMeters, mapCenter.latitude, mapCenter.longitude]);
 
   return (
     <View
@@ -12556,6 +12641,22 @@ function RouletteMapView({
               </Text>
             </Animated.View>
           </>
+        )}
+        {/* 指定した距離の範囲。どこまでが対象なのかを目で確かめられるようにする。 */}
+        {!rendersNativeMap && circleRadiusMeters != null && circleRadiusPixels > 0 && (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.mapRouletteRangeCircle,
+              {
+                left: toPoint(mapCenter.latitude, mapCenter.longitude).x - circleRadiusPixels,
+                top: toPoint(mapCenter.latitude, mapCenter.longitude).y - circleRadiusPixels,
+                width: circleRadiusPixels * 2,
+                height: circleRadiusPixels * 2,
+                borderRadius: circleRadiusPixels,
+              },
+            ]}
+          />
         )}
         {/* 中心の赤ピンは描かない。埋め込みのGoogleマップが同じ地点に自前のマーカーを出すため、
             重ねると二重に見えるうえ、こちらの投影計算とわずかにずれて不自然になる。 */}
