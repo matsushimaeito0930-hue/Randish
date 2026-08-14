@@ -4,9 +4,13 @@ import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.service.ApiUsageCounter;
 import com.example.restaurantroulette.service.external.GeoapifyRestaurantMapper.SearchContext;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,7 +25,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.MediaType;
-import org.springframework.web.client.RestClientResponseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
@@ -98,6 +101,16 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
           "catering.restaurant")));
 
   private final RestClient restClient;
+  private final ObjectMapper objectMapper;
+  /**
+   * Geoapify への問い合わせだけは JDK の HttpClient を使う。
+   * Spring の RestClient はカテゴリ区切りのカンマをエンコードしてしまい、
+   * 「Category "a,b,c,d" is not supported」という 400 が全リクエストで返っていた。
+   * URI を組み立ててもエンコードは避けられなかったため、URIをそのまま送れる方に変える。
+   */
+  private final HttpClient httpClient = HttpClient.newBuilder()
+      .connectTimeout(Duration.ofSeconds(10))
+      .build();
   private final GeoapifyRestaurantMapper mapper;
   private final String apiKey;
   private final ApiUsageCounter usageCounter = new ApiUsageCounter(
@@ -117,8 +130,12 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
       Path.of("server", ".env"),
       Path.of("..", "server", ".env"));
 
-  public GeoapifyRestaurantProvider(RestClient.Builder restClientBuilder, GeoapifyRestaurantMapper mapper) {
+  public GeoapifyRestaurantProvider(
+      RestClient.Builder restClientBuilder,
+      ObjectMapper objectMapper,
+      GeoapifyRestaurantMapper mapper) {
     this.restClient = restClientBuilder.baseUrl(API_URL).build();
+    this.objectMapper = objectMapper;
     this.mapper = mapper;
     this.apiKey = resolveApiKey();
     this.cacheTtlSeconds = resolveCacheTtlSeconds();
@@ -297,13 +314,12 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
       int radiusMeters) {
     try {
       return fetchWithCategories(context, categories, latitude, longitude, radiusMeters);
-    } catch (RestClientResponseException exception) {
+    } catch (GeoapifyRequestException exception) {
       // ジャンルごとの細かいカテゴリが Geoapify に受け付けられないことがある。
       // その1つのせいでリクエスト全体が落ち、プロバイダが無言で0件になるのは割に合わない。
       // 広いカテゴリで引き直す。ジャンルの絞り込みは mapper 側の名前・カテゴリ判定が行うため、
       // 結果の精度は保たれる。
-      boolean isBadRequest = exception.getStatusCode().value() == 400;
-      if (!isBadRequest || categories.equals(DEFAULT_CATEGORIES)) {
+      if (exception.statusCode() != 400 || categories.equals(DEFAULT_CATEGORIES)) {
         throw exception;
       }
       logger.warn("[RANDISH_GEOAPIFY] retrying with broad categories after 400. rejected={}", categories);
@@ -332,20 +348,28 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
         API_LIMIT,
         URLEncoder.encode(apiKey, StandardCharsets.UTF_8)));
 
+    HttpRequest request = HttpRequest.newBuilder(requestUri)
+        .timeout(Duration.ofSeconds(15))
+        .header("Accept", "application/json")
+        .GET()
+        .build();
+
     JsonNode response;
     try {
-      response = restClient.get()
-          .uri(requestUri)
-          .accept(MediaType.APPLICATION_JSON)
-          .retrieve()
-          .body(JsonNode.class);
-    } catch (RestClientResponseException exception) {
-      // 応答本文にGeoapify側の理由が入っている。これが見えないと原因にたどり着けない。
-      logger.warn("[RANDISH_GEOAPIFY] request failed status={} categories={} body={}",
-          exception.getStatusCode(),
-          categories,
-          abbreviate(exception.getResponseBodyAsString()));
-      throw exception;
+      HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+      if (httpResponse.statusCode() < 200 || httpResponse.statusCode() >= 300) {
+        // 応答本文にGeoapify側の理由が入っている。これが見えないと原因にたどり着けない。
+        logger.warn("[RANDISH_GEOAPIFY] request failed status={} categories={} body={}",
+            httpResponse.statusCode(), categories, abbreviate(httpResponse.body()));
+        throw new GeoapifyRequestException(httpResponse.statusCode());
+      }
+      response = objectMapper.readTree(httpResponse.body());
+    } catch (IOException exception) {
+      logger.warn("[RANDISH_GEOAPIFY] request failed categories={}", categories, exception);
+      throw new IllegalStateException("Geoapify request failed.", exception);
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Geoapify request interrupted.", exception);
     }
 
     JsonNode features = response == null ? null : response.path("features");
@@ -360,6 +384,20 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
   }
 
   /** ログに載せる応答本文。長すぎると読みにくいので頭だけ残す。 */
+  /** Geoapify が返したステータスを持ち回るための例外。再試行の判断に使う。 */
+  static final class GeoapifyRequestException extends RuntimeException {
+    private final int statusCode;
+
+    GeoapifyRequestException(int statusCode) {
+      super("Geoapify responded with status " + statusCode);
+      this.statusCode = statusCode;
+    }
+
+    int statusCode() {
+      return statusCode;
+    }
+  }
+
   private static String abbreviate(String value) {
     if (value == null) {
       return "";
