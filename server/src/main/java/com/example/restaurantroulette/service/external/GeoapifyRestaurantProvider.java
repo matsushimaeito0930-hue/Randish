@@ -5,6 +5,8 @@ import com.example.restaurantroulette.service.ApiUsageCounter;
 import com.example.restaurantroulette.service.external.GeoapifyRestaurantMapper.SearchContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.MediaType;
+import org.springframework.web.client.RestClientResponseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
@@ -293,18 +296,35 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
       Double longitude,
       int radiusMeters) {
     usageCounter.increment();
-    JsonNode response = restClient.get()
-        .uri(uriBuilder -> uriBuilder
-            .path("/places")
-            .queryParam("categories", String.join(",", categories))
-            .queryParam("filter", "circle:%s,%s,%d".formatted(formatCoordinate(longitude), formatCoordinate(latitude), radiusMeters))
-            .queryParam("limit", API_LIMIT)
-            .queryParam("lang", "ja")
-            .queryParam("apiKey", apiKey)
-            .build())
-        .accept(MediaType.APPLICATION_JSON)
-        .retrieve()
-        .body(JsonNode.class);
+    // Geoapify はカテゴリと filter をカンマ区切りで受け取るが、
+    // queryParam 経由だとカンマがエンコードされ、区切りとして解釈されない。
+    // 「Category "catering.restaurant,catering.fast_food,..." is not supported」という
+    // 400 が全リクエストで返り、プロバイダが丸ごと機能していなかった。
+    // URI を自分で組み立ててカンマをそのまま渡す。
+    URI requestUri = URI.create("%s/places?categories=%s&filter=circle:%s,%s,%d&limit=%d&lang=ja&apiKey=%s".formatted(
+        API_URL,
+        String.join(",", categories),
+        formatCoordinate(longitude),
+        formatCoordinate(latitude),
+        radiusMeters,
+        API_LIMIT,
+        URLEncoder.encode(apiKey, StandardCharsets.UTF_8)));
+
+    JsonNode response;
+    try {
+      response = restClient.get()
+          .uri(requestUri)
+          .accept(MediaType.APPLICATION_JSON)
+          .retrieve()
+          .body(JsonNode.class);
+    } catch (RestClientResponseException exception) {
+      // 応答本文にGeoapify側の理由が入っている。これが見えないと原因にたどり着けない。
+      logger.warn("[RANDISH_GEOAPIFY] request failed status={} categories={} body={}",
+          exception.getStatusCode(),
+          categories,
+          abbreviate(exception.getResponseBodyAsString()));
+      throw exception;
+    }
 
     JsonNode features = response == null ? null : response.path("features");
     if (features == null || !features.isArray()) {
@@ -315,6 +335,15 @@ public class GeoapifyRestaurantProvider implements ExternalRestaurantProvider {
     features.forEach(feature -> mapper.toRestaurant(feature, context)
         .ifPresent(restaurant -> restaurantsById.putIfAbsent(restaurant.id(), restaurant)));
     return List.copyOf(restaurantsById.values());
+  }
+
+  /** ログに載せる応答本文。長すぎると読みにくいので頭だけ残す。 */
+  private static String abbreviate(String value) {
+    if (value == null) {
+      return "";
+    }
+    String trimmed = value.strip();
+    return trimmed.length() <= 300 ? trimmed : trimmed.substring(0, 300) + "...";
   }
 
   private List<String> categoriesForGenre(String genre) {
