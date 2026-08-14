@@ -13105,6 +13105,52 @@ export const styles = StyleSheet.create({
     color: ORANGE,
   },
 
+  // 地図を手で動かすモードの切り替え。
+  rouletteMapDragToggle: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    borderWidth: 1,
+    borderColor: '#e7ddd2',
+    zIndex: 40,
+  },
+  rouletteMapDragToggleActive: {
+    backgroundColor: ORANGE,
+    borderColor: ORANGE,
+  },
+  rouletteMapDragToggleText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: INK,
+  },
+  rouletteMapDragToggleTextActive: {
+    color: '#ffffff',
+  },
+
+  // 候補のピン。地図で見慣れた赤いピンをそのまま置く。
+  mapRoulettePin: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  // 抽選で外れたピン。消さずに薄く残すことで、何件から選ばれたかが伝わる。
+  mapRoulettePinEliminated: {
+    opacity: 0.18,
+  },
+  // 当選したピン。大きさと濃さだけで際立たせる。
+  mapRoulettePinSelected: {
+    opacity: 1,
+    zIndex: 30,
+  },
+
   // 指定した距離の範囲を示す円。塗りは薄くし、地図の読みやすさを損なわない。
   mapRouletteRangeCircle: {
     position: 'absolute',

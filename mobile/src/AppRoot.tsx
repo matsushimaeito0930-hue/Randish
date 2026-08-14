@@ -12345,6 +12345,9 @@ function RouletteMapView({
     };
   }, [candidates, circleRadiusMeters, mapCenter.latitude, mapCenter.longitude]);
   const [visibleRegion, setVisibleRegion] = useState(region);
+  // 地図を手で動かせる状態かどうか。
+  // 動かしている間はこちらのピンが追従できないので、そのときはピンを隠す。
+  const [mapInteractive, setMapInteractive] = useState(false);
   // 候補一覧と同じ上限を使う。ここだけ別の数にすると「一覧12件なのにピンは8個」になる。
   const displayCandidates = useMemo(() => candidates.slice(0, MAX_VISIBLE_CANDIDATES), [candidates]);
   const showGenreEffect = genreFocused && (candidates.length > 0 || loading || status === 'searching' || status === 'spinning');
@@ -12591,7 +12594,10 @@ function RouletteMapView({
             width: '100%',
             height: '100%',
             border: 0,
-            pointerEvents: 'none',
+            // 地図を触れるようにすると、こちらが重ねているピンは地図と一緒に動かない
+            // （埋め込み地図の移動を検知できないため）。ピンと地図がずれて見えるので、
+            // 触れるのは「地図を動かす」を選んだときだけにする。
+            pointerEvents: mapInteractive ? 'auto' : 'none',
           },
         })
       ) : !hasResolvedMapCenter ? (
@@ -12643,7 +12649,7 @@ function RouletteMapView({
           </>
         )}
         {/* 指定した距離の範囲。どこまでが対象なのかを目で確かめられるようにする。 */}
-        {!rendersNativeMap && circleRadiusMeters != null && circleRadiusPixels > 0 && (
+        {!rendersNativeMap && !mapInteractive && circleRadiusMeters != null && circleRadiusPixels > 0 && (
           <View
             pointerEvents="none"
             style={[
@@ -12660,48 +12666,30 @@ function RouletteMapView({
         )}
         {/* 中心の赤ピンは描かない。埋め込みのGoogleマップが同じ地点に自前のマーカーを出すため、
             重ねると二重に見えるうえ、こちらの投影計算とわずかにずれて不自然になる。 */}
-        {!rendersNativeMap && displayCandidates.map((candidate, index) => {
+        {!rendersNativeMap && !mapInteractive && displayCandidates.map((candidate, index) => {
           const point = toPoint(candidate.latitude, candidate.longitude);
           const isActiveCandidate = activeCandidateId === candidate.id;
           const isSelectedCandidate = target?.id === candidate.id && (status === 'result' || eliminatedIds.length > 0);
           const isEliminated = eliminatedIds.includes(candidate.id);
           return (
+            // 地図でおなじみの赤いピンをそのまま使う。番号や色分けを足すと
+            // 情報が増えるわりに読み取りづらく、演出も散らかって見えた。
+            // 脱落は「薄くなる」だけ、当選は「大きく濃く残る」だけで違いを出す。
             <View
               key={`${candidate.id}-overlay`}
               style={[
-                genreFocused ? styles.mapRouletteCandidatePinDot : styles.mapRouletteCandidateDot,
-                { left: point.x - (genreFocused ? 10 : 6), top: point.y - (genreFocused ? 23 : 6) },
-                isActiveCandidate && styles.mapRouletteCandidatePinDotActive,
-                // 脱落したピンは消さずに薄くする。どれだけの中から選ばれたかが見えるほうが納得感がある。
-                isEliminated && styles.mapRouletteCandidatePinDotEliminated,
-                // 当選店は最後に必ず濃く出す。脱落スタイルより後ろに置いて上書きさせる。
-                isSelectedCandidate && styles.mapRouletteCandidatePinDotSelected,
+                styles.mapRoulettePin,
+                { left: point.x - 11, top: point.y - 26 },
+                isEliminated && styles.mapRoulettePinEliminated,
+                isSelectedCandidate && styles.mapRoulettePinSelected,
               ]}
             >
-              {genreFocused ? (
-                <>
-                  {isActiveCandidate && !isEliminated && (
-                    <Animated.View
-                      style={[
-                        styles.mapRouletteCandidatePinDotHalo,
-                        {
-                          opacity: activePinOpacity,
-                          transform: [{ scale: activePinScale }],
-                        },
-                      ]}
-                    />
-                  )}
-                  {isSelectedCandidate && <View style={styles.mapRouletteWinnerHalo} />}
-                  <Ionicons
-                    name="location-sharp"
-                    size={isSelectedCandidate ? 38 : isActiveCandidate ? 28 : 26}
-                    color={isSelectedCandidate ? ORANGE : '#e3322b'}
-                  />
-                  <Text style={styles.mapRouletteCandidatePinText}>{index + 1}</Text>
-                </>
-              ) : (
-                index < 9 && <Text style={styles.mapRouletteCandidateDotText}>{index + 1}</Text>
-              )}
+              {isSelectedCandidate && <View style={styles.mapRouletteWinnerHalo} />}
+              <Ionicons
+                name="location"
+                size={isSelectedCandidate ? 34 : 26}
+                color="#e3322b"
+              />
             </View>
           );
         })}
@@ -12710,6 +12698,23 @@ function RouletteMapView({
         {loading ? <ActivityIndicator size="small" color={ORANGE} /> : <Ionicons name="map-outline" size={18} color={ORANGE} />}
         <Text style={styles.rouletteMapLoadingText}>{statusLabel}</Text>
       </View>
+      {/* 地図を自由に見たいときのための切り替え。
+          動かしている間はピンを隠す（埋め込み地図の移動に追従できないため）。 */}
+      {Platform.OS === 'web' && rendersWebGoogleMap && (
+        <Pressable
+          style={[styles.rouletteMapDragToggle, mapInteractive && styles.rouletteMapDragToggleActive]}
+          onPress={() => setMapInteractive((current) => !current)}
+        >
+          <Ionicons
+            name={mapInteractive ? 'checkmark' : 'move-outline'}
+            size={14}
+            color={mapInteractive ? '#ffffff' : INK}
+          />
+          <Text style={[styles.rouletteMapDragToggleText, mapInteractive && styles.rouletteMapDragToggleTextActive]}>
+            {mapInteractive ? '候補に戻す' : '地図を動かす'}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
