@@ -5626,6 +5626,23 @@ export const styles = StyleSheet.create({
     fontWeight: '900',
     color: INK,
   },
+  // 登録画面での外部送信の告知。読ませたいが主役ではないので控えめに。
+  authPrivacyNote: {
+    marginTop: 10,
+    fontSize: 10,
+    lineHeight: 15,
+    color: '#9b9184',
+    textAlign: 'center',
+  },
+
+  // オプトアウトや各社ポリシーへの導線。押せることが分かるよう下線を引く。
+  creditSheetLink: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#2f6ad9',
+    textDecorationLine: 'underline',
+  },
   creditSheetText: {
     marginTop: 6,
     fontSize: 12,

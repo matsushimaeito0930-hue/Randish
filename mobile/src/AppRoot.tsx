@@ -9138,6 +9138,13 @@ function LoginScreen({
           </Text>
         </Pressable>
 
+        {/* 外部送信規律の表示は、この画面からも辿れるようにしておく。
+            計測はアプリを開いた時点で始まっているため、登録前に知らせる必要がある。 */}
+        <Text style={styles.authPrivacyNote}>
+          サービス改善のため利用状況を計測しており、Google アナリティクスと Vercel へ
+          情報が送信されます。詳細はアプリ内の「クレジット・規約」でご確認いただけます。
+        </Text>
+
         {supportOpen && (
           <View style={styles.supportPanel}>
             <Text style={styles.supportPanelLead}>
@@ -10420,6 +10427,47 @@ function HomeLocationPanel({
               <Text style={styles.creditSheetText}>
                 現在地は近くのお店を検索するためだけに使用します。正確な位置をサーバーへ保存することはありません。
                 許可はいつでも端末やブラウザの設定から変更できます。
+              </Text>
+
+              {/* 改正電気通信事業法の外部送信規律にもとづく表示。
+                  「何を」「どこへ」「何のために」送るかの3点を書く義務がある。 */}
+              <Text style={styles.creditSheetSectionTitle}>利用状況の計測と外部送信</Text>
+              <Text style={styles.creditSheetText}>
+                サービスの改善のため、利用状況を計測しています。以下の情報が外部に送信されます。
+              </Text>
+              <Text style={styles.creditSheetText}>
+                ■ Vercel Web Analytics（Vercel Inc.）{'\n'}
+                送信される情報：閲覧したページ、参照元、端末の種類、おおまかな地域{'\n'}
+                利用目的：訪問数や利用画面の把握{'\n'}
+                Cookieは使用しません。
+              </Text>
+              <Text style={styles.creditSheetText}>
+                ■ Google アナリティクス（Google LLC）{'\n'}
+                送信される情報：Cookieによる識別子、閲覧したページ、アプリ内の操作（抽選の実行、
+                会員登録の完了など）、端末・ブラウザの情報、おおまかな地域{'\n'}
+                利用目的：利用状況の分析とサービス改善{'\n'}
+                データはGoogle社のサーバーへ送信され、同社のプライバシーポリシーに従って扱われます。
+              </Text>
+              <Text style={styles.creditSheetText}>
+                いずれの計測でも、店舗名・現在地の座標・メールアドレス・アカウントIDは送信していません。
+                抽選の候補件数などは「6〜20件」のような幅にまとめて送っています。
+              </Text>
+              <Pressable onPress={() => openExternalLink('https://tools.google.com/dlpage/gaoptout?hl=ja')}>
+                <Text style={styles.creditSheetLink}>Googleアナリティクスの計測を無効にする（オプトアウト）</Text>
+              </Pressable>
+              <Pressable onPress={() => openExternalLink('https://policies.google.com/privacy?hl=ja')}>
+                <Text style={styles.creditSheetLink}>Google プライバシーポリシー</Text>
+              </Pressable>
+              <Pressable onPress={() => openExternalLink('https://vercel.com/legal/privacy-policy')}>
+                <Text style={styles.creditSheetLink}>Vercel プライバシーポリシー</Text>
+              </Pressable>
+
+              <Text style={styles.creditSheetSectionTitle}>個人情報の取り扱い</Text>
+              <Text style={styles.creditSheetText}>
+                会員登録の際にメールアドレスをお預かりします。ログインと本人確認のためだけに使用し、
+                ご本人の同意なく第三者へ提供することはありません。{'\n'}
+                お気に入り・抽選履歴は、アカウントに紐づけて保存されます。{'\n'}
+                削除をご希望の場合は、お問い合わせフォームからご連絡ください。
               </Text>
 
               <Text style={styles.creditSheetSectionTitle}>免責事項</Text>
