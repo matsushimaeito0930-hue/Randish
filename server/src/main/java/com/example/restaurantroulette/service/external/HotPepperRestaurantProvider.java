@@ -289,7 +289,10 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
     boolean hasCoordinates = latitude != null && longitude != null;
     String keyword = hasCoordinates ? buildKeyword(null, plan.extraKeywords()) : buildKeyword(area, plan.extraKeywords());
     if (!hasCoordinates && keyword.isBlank()) {
-      keyword = "\u6885\u7530";
+      // 場所の手がかりが何も無いまま問い合わせると、ホットペッパーは全国の店を
+      // 適当な順で返す。以前はここで「梅田」を補っていたが、島根から引いても
+      // 大阪の店が返るという実害が出たため、手がかりが無いときは何も返さない。
+      return HotPepperResponse.empty();
     }
     String requestKeyword = keyword;
     Integer safeRange = range == null ? 4 : Math.max(1, Math.min(5, range));
@@ -605,6 +608,10 @@ public class HotPepperRestaurantProvider implements ExternalRestaurantProvider {
 
   @JsonIgnoreProperties(ignoreUnknown = true)
   private record HotPepperResponse(HotPepperResults results) {
+    /** 問い合わせずに「0件」を返すとき用。 */
+    static HotPepperResponse empty() {
+      return new HotPepperResponse(new HotPepperResults(0, 0, 1, List.of(), null));
+    }
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)

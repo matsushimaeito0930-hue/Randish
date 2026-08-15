@@ -20,6 +20,8 @@ import org.springframework.stereotype.Service;
 public class RestaurantQueryService {
   private static final Logger logger = LoggerFactory.getLogger(RestaurantQueryService.class);
   private static final int HYBRID_TARGET_RESULT_COUNT = 100;
+  /** ホットペッパーの距離指定の最大値（約3km）。近くに無いときはここまでは広げる。 */
+  private static final int WIDEST_RANGE = 5;
   private static final int MAX_FALLBACK_FILL_COUNT = 30;
   private static final int DUPLICATE_DISTANCE_METERS = 60;
   private static final Map<String, Integer> PROVIDER_SEARCH_ORDER = Map.of(
@@ -120,16 +122,16 @@ public class RestaurantQueryService {
         desiredCandidateCount,
         externalOnlyRestaurants);
 
-    if (externalOnlyRestaurants.isEmpty() && hasCoordinates(latitude, longitude)) {
+    if (externalOnlyRestaurants.isEmpty() && shouldWidenRange(latitude, longitude, range)) {
       hasAvailableProvider = queryRandomProviders(
           primaryProviders(),
           area,
           genre,
           budgetMin,
           budgetMax,
-          null,
-          null,
-          null,
+          latitude,
+          longitude,
+          WIDEST_RANGE,
           desiredCandidateCount,
           externalOnlyRestaurants) || hasAvailableProvider;
     }
@@ -239,16 +241,16 @@ public class RestaurantQueryService {
         range,
         externalOnlyRestaurants);
 
-    if (externalOnlyRestaurants.isEmpty() && hasCoordinates(latitude, longitude)) {
+    if (externalOnlyRestaurants.isEmpty() && shouldWidenRange(latitude, longitude, range)) {
       hasAvailableProvider = queryProviders(
           primaryProviders(),
           area,
           genre,
           budgetMin,
           budgetMax,
-          null,
-          null,
-          null,
+          latitude,
+          longitude,
+          WIDEST_RANGE,
           externalOnlyRestaurants) || hasAvailableProvider;
     }
 
@@ -412,6 +414,17 @@ public class RestaurantQueryService {
 
   private boolean hasCoordinates(Double latitude, Double longitude) {
     return latitude != null && longitude != null;
+  }
+
+  /**
+   * 近くで見つからなかったときに、距離だけ広げて引き直してよいかを返す。
+   *
+   * <p>以前はここで座標そのものを捨てて引き直していた。結果として島根から引いても
+   * 大阪の店が並ぶという、利用者から見れば明確な誤りが起きていた。
+   * 見つからないことより、違う場所を出すことのほうが困る。
+   */
+  private boolean shouldWidenRange(Double latitude, Double longitude, Integer range) {
+    return hasCoordinates(latitude, longitude) && (range == null || range < WIDEST_RANGE);
   }
 
   private List<Restaurant> limitedCandidates(Map<String, Restaurant> restaurants, int maxCandidates) {
