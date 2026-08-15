@@ -5321,6 +5321,24 @@ const getOptionalHapticsModule = () => {
 const FOOD_AI_DAILY_LIMIT = 4;
 const FOOD_AI_USAGE_STORAGE_KEY_PREFIX = 'randish.foodAi.usage.v1';
 
+/**
+ * 使い終えた食券の控え。
+ *
+ * <p>使用済みかどうかは、サーバーの抽選履歴とこの控えの両方から決める。
+ * ゲストの抽選はサーバーに残さない方針なので、履歴側は常に空になる。控えが
+ * 画面の状態だけだと、読み込み直した瞬間に4枚とも戻ってしまい、食券が
+ * 何も制限していないことになっていた。
+ *
+ * <p>会員でも同じ穴がある。履歴の取得に失敗した回は、その日の分が白紙になる。
+ *
+ * <p>端末の保存領域を消されれば戻る。そこまでは防げないし、防ごうとすると
+ * 会員でない人の記録をサーバーに置くことになるので、ここまでにしている。
+ */
+const MEAL_TICKET_USAGE_STORAGE_KEY_PREFIX = 'randish.mealTickets.v1';
+
+const buildMealTicketUsageStorageKey = (userId: string) =>
+  `${MEAL_TICKET_USAGE_STORAGE_KEY_PREFIX}:${encodeURIComponent(userId.trim() || APP_USER_ID)}`;
+
 const buildFoodAiUsageStorageKey = (userId: string) =>
   `${FOOD_AI_USAGE_STORAGE_KEY_PREFIX}:${encodeURIComponent(userId.trim() || APP_USER_ID)}`;
 
@@ -6066,7 +6084,8 @@ export default function App() {
   const foodAiRemainingToday = subscription.isDev
     ? null
     : Math.max(0, FOOD_AI_DAILY_LIMIT - foodAiUsedToday);
-  // 食券を「使った」状態（見た目のみ）。抽選自体はブロックしない。
+  // 今日その端末で使い終えた食券。端末の保存領域から読み直す。
+  // 画面の状態だけで持っていたころは、読み込み直すたびに4枚とも戻っていた。
   const [usedTicketKeys, setUsedTicketKeys] = useState<Set<MealSlotKey>>(() => new Set<MealSlotKey>());
   const mealTicketState = useMemo(
     // 開発者は食券の上限を受けない（APIが飛ぶかを何度でも確かめられるようにするため）
@@ -7036,6 +7055,34 @@ export default function App() {
         setFoodAiUsedToday(isToday && typeof parsed.count === 'number' ? parsed.count : 0);
       } catch {
         setFoodAiUsedToday(0);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // 今日その端末で使い終えた食券を読み直す。
+  // これが無いと、読み込み直すたびに食券が全部戻り、上限が意味を持たなかった。
+  useEffect(() => {
+    let cancelled = false;
+    void readLocalValue(buildMealTicketUsageStorageKey(userId)).then((stored) => {
+      if (cancelled) {
+        return;
+      }
+      if (!stored) {
+        setUsedTicketKeys(new Set<MealSlotKey>());
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stored) as { date?: string; keys?: MealSlotKey[] };
+        // 日付が変わっていれば控えは無効。翌日は必ず新しい4枚から始まる。
+        const isToday = parsed.date === toLocalDateKey(new Date());
+        setUsedTicketKeys(isToday && Array.isArray(parsed.keys)
+          ? new Set<MealSlotKey>(parsed.keys)
+          : new Set<MealSlotKey>());
+      } catch {
+        setUsedTicketKeys(new Set<MealSlotKey>());
       }
     });
     return () => {
@@ -8222,12 +8269,18 @@ export default function App() {
       setUsedTicketKeys((current) => {
         const next = new Set(current);
         next.add(ticketKey);
+        // 端末にも控える。ここを画面の状態だけにしていたため、
+        // 読み込み直すと使った食券が戻っていた。
+        void writeLocalValue(buildMealTicketUsageStorageKey(userId), JSON.stringify({
+          date: toLocalDateKey(new Date()),
+          keys: Array.from(next),
+        }));
         return next;
       });
       setMessage(`${currentTicket.label}の食券を使いました。`);
     }
     await runPreparedDraw();
-  }, [isLoading, mealTicketState, runPreparedDraw, scrollToContentTop, subscription.isDev, usedTicketKeys]);
+  }, [isLoading, mealTicketState, runPreparedDraw, scrollToContentTop, subscription.isDev, usedTicketKeys, userId]);
 
   const saveRestaurantToAlbum = useCallback(async (restaurant: Restaurant) => {
     const localFavorite = toSavedRestaurantFromSelection({
@@ -9837,10 +9890,12 @@ function FoodAiTodayCard({
           <Text style={[styles.foodAiLead, styles.lockedContent]}>
             先月と今月の推定支出、ジャンル、予算、検索範囲を読み、今ある候補から今日の一店を提案します。
           </Text>
-          <Pressable style={styles.foodAiPrimaryButton} onPress={onAsk}>
-            {/* 使えない側に開いた錠を出していた。まだ開いていないので閉じた錠にする。 */}
-            <Ionicons name="lock-closed" size={16} color="#ffffff" />
-            <Text style={styles.foodAiPrimaryButtonText}>食AIはPremium限定</Text>
+          {/* 塗りつぶしのままだと、押せば動くボタンに見える。使えないものは使えない形にする。 */}
+          <Pressable style={[styles.foodAiPrimaryButton, styles.foodAiPrimaryButtonLocked]} onPress={onAsk}>
+            <Ionicons name="lock-closed" size={16} color="#7161f2" />
+            <Text style={[styles.foodAiPrimaryButtonText, styles.foodAiPrimaryButtonLockedText]}>
+              食AIはPremium限定
+            </Text>
           </Pressable>
         </>
       ) : suggestion ? (

@@ -5790,6 +5790,15 @@ export const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: '#7161f2',
   },
+  // まだ使えないときの形。塗りつぶしのままだと「押せば動く」ように見えてしまう。
+  foodAiPrimaryButtonLocked: {
+    backgroundColor: '#f2f0ff',
+    borderWidth: 1,
+    borderColor: '#d7d1ff',
+  },
+  foodAiPrimaryButtonLockedText: {
+    color: '#7161f2',
+  },
   foodAiPrimaryButtonCompact: {
     flex: 1.15,
     minHeight: 42,
