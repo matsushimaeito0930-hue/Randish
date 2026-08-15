@@ -5414,19 +5414,6 @@ export const styles = StyleSheet.create({
   mapRouletteOverlay: {
     ...StyleSheet.absoluteFillObject,
   },
-  mapRouletteGenrePulse: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    width: 210,
-    height: 210,
-    marginLeft: -105,
-    marginTop: -105,
-    borderRadius: 105,
-    backgroundColor: 'rgba(227,50,43,0.12)',
-    borderWidth: 2,
-    borderColor: 'rgba(227,50,43,0.34)',
-  },
   mapRouletteGenreBadge: {
     position: 'absolute',
     top: 14,

@@ -12584,8 +12584,6 @@ function RouletteMapView({
   const bounceY = bounce.interpolate({ inputRange: [0, 0.45, 1], outputRange: [0, -18, 0] });
   const activePinScale = genrePulse.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.42] });
   const activePinOpacity = genrePulse.interpolate({ inputRange: [0, 0.65, 1], outputRange: [0.34, 0.2, 0.02] });
-  const genrePulseScale = genrePulse.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1.28] });
-  const genrePulseOpacity = genrePulse.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0.18, 0.38, 0] });
   const genreBadgeLift = genrePulse.interpolate({ inputRange: [0, 1], outputRange: [0, -5] });
   const statusLabel = status === 'searching'
     ? '候補を取得中'
@@ -12739,29 +12737,20 @@ function RouletteMapView({
         </View>
       )}
       <View pointerEvents="none" style={styles.mapRouletteOverlay}>
+        {/* 演出用の円は描かない。距離の円と二重になり、どちらが検索範囲なのか分からなくなる。
+            範囲を示す円は実際の距離を表しているので、そちらを残す。 */}
         {showGenreEffect && (
-          <>
-            <Animated.View
-              style={[
-                styles.mapRouletteGenrePulse,
-                {
-                  opacity: genrePulseOpacity,
-                  transform: [{ scale: genrePulseScale }],
-                },
-              ]}
-            />
-            <Animated.View
-              style={[
-                styles.mapRouletteGenreBadge,
-                { transform: [{ translateY: genreBadgeLift }] },
-              ]}
-            >
-              <Ionicons name="radio-outline" size={14} color="#ffffff" />
-              <Text style={styles.mapRouletteGenreBadgeText} numberOfLines={1}>
-                {genreLabel} SCAN
-              </Text>
-            </Animated.View>
-          </>
+          <Animated.View
+            style={[
+              styles.mapRouletteGenreBadge,
+              { transform: [{ translateY: genreBadgeLift }] },
+            ]}
+          >
+            <Ionicons name="radio-outline" size={14} color="#ffffff" />
+            <Text style={styles.mapRouletteGenreBadgeText} numberOfLines={1}>
+              {genreLabel} SCAN
+            </Text>
+          </Animated.View>
         )}
         {/* 指定した距離の範囲。どこまでが対象なのかを目で確かめられるようにする。 */}
         {!rendersNativeMap && !mapInteractive && circleRadiusMeters != null && circleRadiusPixels > 0 && (
