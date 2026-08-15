@@ -4290,6 +4290,35 @@ const SITUATION_EVIDENCE_HINTS: Record<Exclude<SituationMode, 'none'>, { label: 
   ],
 };
 
+/**
+ * 候補一覧のキャッシュ。
+ * 同じ場所から繰り返し引くのが普通の使い方なので、そのたびに取り直すと毎回待たされる。
+ * 店舗情報が数分で変わるものでもないため、少し長めに保持する。
+ */
+const RESTAURANT_LIST_CACHE_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * キャッシュのキー。座標は小数第3位（約110m）まで丸める。
+ * これより細かくすると、同じ場所に立っていてもGPSの揺れで毎回キャッシュを外す。
+ */
+const buildRestaurantCacheKey = (params: {
+  area?: string;
+  genre?: string;
+  budgetMin?: number;
+  budgetMax?: number;
+  latitude?: number;
+  longitude?: number;
+  range?: number;
+}) => [
+  params.area ?? '',
+  params.genre ?? '',
+  params.budgetMin ?? '',
+  params.budgetMax ?? '',
+  params.latitude != null ? params.latitude.toFixed(3) : '',
+  params.longitude != null ? params.longitude.toFixed(3) : '',
+  params.range ?? '',
+].join('|');
+
 /** 候補生成時にこちらが付ける定型文。店が書いた紹介文ではないので、根拠として引用しない。 */
 const GENERATED_NOTE_TEXTS = ['近くのお店情報から選ばれました。'];
 
@@ -5719,6 +5748,12 @@ export default function App() {
   // これが無いと、エリアを変えた直後に前の街の候補が残り、
   // 地図がその街（＝多くの場合は現在地）を指してしまう。
   const [restaurantsArea, setRestaurantsArea] = useState('');
+  // 同じ条件での再検索を避けるためのキャッシュ。画面を戻ったときも即座に出る。
+  const restaurantListCacheRef = useRef(new Map<string, {
+    restaurants: Restaurant[];
+    message: string;
+    fetchedAt: number;
+  }>());
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [randomHistory, setRandomHistory] = useState<Restaurant[]>([]);
   const [drawHistories, setDrawHistories] = useState<DrawHistoryEntry[]>([]);
@@ -6472,6 +6507,19 @@ export default function App() {
       setMessage('現在地を確認しています。位置情報が取れたら近くのお店を探します。');
       return;
     }
+
+    // 同じ場所・同じ条件なら取り直さない。
+    // 家や職場から繰り返し引くのが普通の使い方なので、そのたびに数十秒待たせると
+    // 「重いアプリ」になってしまう。サーバーの負荷とAPI課金も減る。
+    const cacheKey = buildRestaurantCacheKey(previewApiParams);
+    const cached = restaurantListCacheRef.current.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < RESTAURANT_LIST_CACHE_TTL_MS) {
+      setRestaurants(cached.restaurants);
+      setRestaurantsArea(areaRef.current.trim());
+      setMessage(cached.message);
+      return;
+    }
+
     setIsLoading(true);
     try {
       let data = await randishApi.getRestaurants(apiBaseUrlCandidates, previewApiParams);
@@ -6495,26 +6543,35 @@ export default function App() {
       const normalized = genreMatched.length ? genreMatched : apiRestaurants;
       setRestaurants(normalized);
       setRestaurantsArea(areaRef.current.trim());
+      // 表示文もそのまま控える。次に同じ条件で来たとき、件数だけ出て説明が消えると不自然なため。
+      const setMessageAndCache = (text: string) => {
+        restaurantListCacheRef.current.set(cacheKey, {
+          restaurants: normalized,
+          message: text,
+          fetchedAt: Date.now(),
+        });
+        setMessage(text);
+      };
       if (relaxedByBudget && normalized.length) {
-        setMessage(`予算内のお店が見つからなかったので、予算をひろげて${normalized.length}件を表示しています。`);
+        setMessageAndCache(`予算内のお店が見つからなかったので、予算をひろげて${normalized.length}件を表示しています。`);
         return;
       }
       const genreLabel = genre === 'すべて' ? 'すべてのジャンル' : genre;
       if (hasHiddenPreviewCondition) {
         const areaLabel = conditionRandom.area ? 'ランダムエリア' : area;
-        setMessage(`${areaLabel}で${normalized.length}件を下準備中。STARTで伏せた条件を開きます。`);
+        setMessageAndCache(`${areaLabel}で${normalized.length}件を下準備中。STARTで伏せた条件を開きます。`);
         return;
       }
       if (normalized.length) {
         const apiGenres = buildGenreSummaryItems(normalized).join(' / ');
         // 候補が少ないと同じ店ばかり当たるので、実際に効く条件だけを案内する。
         const hint = buildFewCandidatesHint(normalized.length);
-        setMessage(hint
+        setMessageAndCache(hint
           ? `${genreLabel}で${normalized.length}件。${hint}`
           : `${genreLabel}で${normalized.length}件から候補を整えました。見つかったジャンル: ${apiGenres}`);
       } else {
         const diagnosticMessage = await loadGenreDiagnosticMessage();
-        setMessage(diagnosticMessage ?? `${genreLabel}に合うお店が見つかりませんでした。エリアやジャンルを変えてみてください。`);
+        setMessageAndCache(diagnosticMessage ?? `${genreLabel}に合うお店が見つかりませんでした。エリアやジャンルを変えてみてください。`);
       }
     } catch (error) {
       logApiUiError('restaurant search failed', error, apiBaseUrlCandidates);
@@ -12264,6 +12321,64 @@ function RandomTab({
   );
 }
 
+/**
+ * 地図に重ねる候補のピン。
+ *
+ * 地図で見慣れた赤いピンをそのまま使う。番号や色分けは情報が増えるだけで読み取りづらく、
+ * 抽選の演出も散らかって見えた。外れは「薄くなる」、当たりは「残って大きくなる」の2つだけで違いを出す。
+ *
+ * 不透明度をスタイルで切り替えると瞬間的に消えて雑に見えるため、
+ * ピンごとに値を持たせてなめらかに変化させる。
+ */
+function RouletteMapPin({
+  left,
+  top,
+  eliminated,
+  selected,
+}: {
+  left: number;
+  top: number;
+  eliminated: boolean;
+  selected: boolean;
+}) {
+  const fade = useRef(new Animated.Value(1)).current;
+  const pop = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.timing(fade, {
+      toValue: eliminated && !selected ? 0.16 : 1,
+      duration: 260,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [eliminated, fade, selected]);
+
+  useEffect(() => {
+    if (!selected) {
+      return;
+    }
+    // 当たったピンだけ、最後に軽く跳ねさせて視線を集める。
+    Animated.sequence([
+      Animated.timing(pop, { toValue: 1.25, duration: 180, easing: Easing.out(Easing.back(2)), useNativeDriver: true }),
+      Animated.timing(pop, { toValue: 1.12, duration: 140, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+    ]).start();
+  }, [pop, selected]);
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.mapRoulettePin,
+        { left, top, opacity: fade, transform: [{ scale: pop }] },
+        selected && styles.mapRoulettePinSelected,
+      ]}
+    >
+      {selected && <View style={styles.mapRouletteWinnerHalo} />}
+      <Ionicons name="location" size={selected ? 34 : 26} color="#e3322b" />
+    </Animated.View>
+  );
+}
+
 function RouletteMapView({
   center,
   candidates,
@@ -12672,25 +12787,13 @@ function RouletteMapView({
           const isSelectedCandidate = target?.id === candidate.id && (status === 'result' || eliminatedIds.length > 0);
           const isEliminated = eliminatedIds.includes(candidate.id);
           return (
-            // 地図でおなじみの赤いピンをそのまま使う。番号や色分けを足すと
-            // 情報が増えるわりに読み取りづらく、演出も散らかって見えた。
-            // 脱落は「薄くなる」だけ、当選は「大きく濃く残る」だけで違いを出す。
-            <View
+            <RouletteMapPin
               key={`${candidate.id}-overlay`}
-              style={[
-                styles.mapRoulettePin,
-                { left: point.x - 11, top: point.y - 26 },
-                isEliminated && styles.mapRoulettePinEliminated,
-                isSelectedCandidate && styles.mapRoulettePinSelected,
-              ]}
-            >
-              {isSelectedCandidate && <View style={styles.mapRouletteWinnerHalo} />}
-              <Ionicons
-                name="location"
-                size={isSelectedCandidate ? 34 : 26}
-                color="#e3322b"
-              />
-            </View>
+              left={point.x - 11}
+              top={point.y - 26}
+              eliminated={isEliminated}
+              selected={isSelectedCandidate}
+            />
           );
         })}
       </View>

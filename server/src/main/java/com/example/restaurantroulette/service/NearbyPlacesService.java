@@ -109,7 +109,10 @@ public class NearbyPlacesService {
     cleanupExpired(cacheKey);
 
     boolean googleSearchAvailable = googlePlacesEnrichmentService.isAvailable();
-    Optional<NearbyCacheEntry> cached = googleSearchAvailable ? Optional.empty() : findCacheEntry(cacheKey, normalized);
+    // Google が使えるときはキャッシュを丸ごと飛ばしていたが、同じ場所から何度も引くのが
+    // 普通の使い方なので、そのたびに待たせるうえ Google の従量課金も積み上がっていた。
+    // 店舗情報が数分で変わるものでもないため、Google の有無にかかわらずキャッシュを使う。
+    Optional<NearbyCacheEntry> cached = findCacheEntry(cacheKey, normalized);
     if (cached.isPresent()) {
       NearbyCacheEntry entry = cached.get();
       logger.info("[RANDISH_PLACES] cache hit key={} ageSeconds={} distanceMeters={}",
