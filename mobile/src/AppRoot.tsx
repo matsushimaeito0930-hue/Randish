@@ -1102,7 +1102,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     showAll: 'すべてを表示',
     showLessGenres: 'ジャンルを少なく表示',
     decisionButton: 'この条件で決める',
-    checkingCandidates: '候補を確認中...',
+    checkingCandidates: '候補を確認中',
     candidateDrawSuffix: '件から抽選',
     allRandom: '完全ランダム',
     candidateList: '候補一覧',
@@ -1287,7 +1287,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     showAll: 'Show all',
     showLessGenres: 'Show fewer genres',
     decisionButton: 'Decide With These',
-    checkingCandidates: 'Checking spots...',
+    checkingCandidates: 'Checking spots',
     candidateDrawSuffix: ' spots to draw',
     allRandom: 'Full Random',
     candidateList: 'Candidates',
@@ -1472,7 +1472,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     showAll: '显示全部',
     showLessGenres: '减少显示类型',
     decisionButton: '按此条件决定',
-    checkingCandidates: '正在确认候选...',
+    checkingCandidates: '正在确认候选',
     candidateDrawSuffix: '家中抽选',
     allRandom: '完全随机',
     candidateList: '候选列表',
@@ -1657,7 +1657,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     showAll: '전체 보기',
     showLessGenres: '장르 줄여 보기',
     decisionButton: '이 조건으로 결정',
-    checkingCandidates: '후보 확인 중...',
+    checkingCandidates: '후보 확인 중',
     candidateDrawSuffix: '곳에서 추첨',
     allRandom: '완전 랜덤',
     candidateList: '후보 목록',
@@ -4290,6 +4290,48 @@ const SITUATION_EVIDENCE_HINTS: Record<Exclude<SituationMode, 'none'>, { label: 
   ],
 };
 
+/** 「今日のおすすめ」を1日固定するための保存先。 */
+const DAILY_RECOMMENDATION_STORAGE_KEY_PREFIX = 'randish.dailyRecommendations.v1';
+
+/** おすすめに出す件数。 */
+const DAILY_RECOMMENDATION_COUNT = 5;
+
+/**
+ * ジャンルが偏らないように選ぶ。
+ * 同じジャンルが5つ並ぶと「おすすめ」というより検索結果の先頭5件に見えてしまう。
+ */
+const pickVariedRecommendations = (candidates: Restaurant[]): Restaurant[] => {
+  const usable = candidates.filter((restaurant) =>
+    Boolean(restaurant?.name?.trim())
+    && (restaurant.externalProvider ?? '').toLowerCase() !== 'mock');
+  if (usable.length <= DAILY_RECOMMENDATION_COUNT) {
+    return usable;
+  }
+  const picked: Restaurant[] = [];
+  const usedGenres = new Set<string>();
+  for (const restaurant of usable) {
+    if (picked.length >= DAILY_RECOMMENDATION_COUNT) {
+      break;
+    }
+    const genreKey = (restaurant.genre ?? '').trim();
+    if (genreKey && usedGenres.has(genreKey)) {
+      continue;
+    }
+    usedGenres.add(genreKey);
+    picked.push(restaurant);
+  }
+  // ジャンルの種類が足りなければ、残りから順に埋めて必ず5件にする。
+  for (const restaurant of usable) {
+    if (picked.length >= DAILY_RECOMMENDATION_COUNT) {
+      break;
+    }
+    if (!picked.includes(restaurant)) {
+      picked.push(restaurant);
+    }
+  }
+  return picked.slice(0, DAILY_RECOMMENDATION_COUNT);
+};
+
 /**
  * プロフィール（表示名・アイコン）の保存先。
  * これまで画面の状態としてしか持っておらず、再読み込みで消えていた。
@@ -6710,6 +6752,50 @@ export default function App() {
 
   // 「今日のおすすめ」はジャンル・予算を外して取得する（条件のジャンルに偏らせない）。
   const recommendationScopeKey = `${previewApiParams.area ?? ''}|${previewApiParams.latitude ?? ''}|${previewApiParams.longitude ?? ''}|${previewApiParams.range ?? ''}`;
+
+  /**
+   * 「今日のおすすめ」を決める。
+   *
+   * 開くたびに顔ぶれが変わると、気になった店をもう一度見に来ても消えている。
+   * その日のうちは同じ5店を出し、日付が変わったら選び直す。
+   */
+  const resolveDailyRecommendations = useCallback(async (
+    candidates: Restaurant[],
+    scopeKey: string,
+  ): Promise<Restaurant[]> => {
+    if (!candidates.length) {
+      return [];
+    }
+    const today = toLocalDateKey(new Date());
+    const storageKey = `${DAILY_RECOMMENDATION_STORAGE_KEY_PREFIX}:${encodeURIComponent(userId)}`;
+
+    try {
+      const stored = await readLocalValue(storageKey);
+      if (stored) {
+        const parsed = JSON.parse(stored) as { date?: string; scopeKey?: string; ids?: string[] };
+        if (parsed.date === today && parsed.scopeKey === scopeKey && Array.isArray(parsed.ids)) {
+          const byId = new Map(candidates.map((restaurant) => [restaurant.id, restaurant]));
+          const kept = parsed.ids
+            .map((id) => byId.get(id))
+            .filter((restaurant): restaurant is Restaurant => restaurant != null);
+          // 保存した店がまだ全部あるなら、その並びをそのまま使う。
+          if (kept.length >= Math.min(RECOMMENDATION_COUNT, candidates.length)) {
+            return kept.slice(0, RECOMMENDATION_COUNT);
+          }
+        }
+      }
+    } catch {
+      // 読めなければ選び直すだけ
+    }
+
+    const picked = pickVariedRecommendations(candidates);
+    void writeLocalValue(storageKey, JSON.stringify({
+      date: today,
+      scopeKey,
+      ids: picked.map((restaurant) => restaurant.id),
+    }));
+    return picked;
+  }, [userId]);
   useEffect(() => {
     const hasScope = Boolean(previewApiParams.area)
       || (previewApiParams.latitude != null && previewApiParams.longitude != null);
@@ -6727,12 +6813,16 @@ export default function App() {
           distanceMeters: previewApiParams.distanceMeters,
         });
         if (!cancelled) {
-          // おすすめは写真ありきの見せ方なので、写真を持つ店だけを採用する。
-          // （ホットペッパー由来はほぼ写真つき。Geoapifyは写真が無いので自然と除外される）
-          const withPhoto = data
-            .map(normalizeRestaurant)
-            .filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
-          setRecommendations(withPhoto);
+          // 写真のある店だけに絞ると、写真を持たない提供元しかない地域で
+          // 1件しか出せなくなる。写真つきを前に並べたうえで、写真なしも残す。
+          const normalized = data.map(normalizeRestaurant);
+          const withPhoto = normalized.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
+          const withoutPhoto = normalized.filter((restaurant) => !restaurant.photoUrl?.trim());
+          const ordered = [...withPhoto, ...withoutPhoto];
+          const daily = await resolveDailyRecommendations(ordered, recommendationScopeKey);
+          if (!cancelled) {
+            setRecommendations(daily);
+          }
         }
       } catch {
         // おすすめは補助的な表示なので、失敗しても何もしない。
@@ -9574,6 +9664,50 @@ function HomeTab({
 
 const RECOMMENDATION_COUNT = 5;
 
+/**
+ * 読み込み中を示す3つの点。
+ * 文字として「...」を置くと止まって見え、固まったのか待てばいいのか判断できない。
+ * 順に光らせることで「動いている」ことを伝える。
+ */
+function LoadingDots({ color = INK }: { color?: string }) {
+  const progress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(progress, {
+        toValue: 3,
+        duration: 1200,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [progress]);
+
+  return (
+    <View style={styles.loadingDots}>
+      {[0, 1, 2].map((index) => (
+        <Animated.View
+          key={index}
+          style={[
+            styles.loadingDot,
+            {
+              backgroundColor: color,
+              opacity: progress.interpolate({
+                // 自分の番で濃くなり、それ以外は薄いままにする
+                inputRange: [index - 0.6, index, index + 0.6, index + 2.4, index + 3],
+                outputRange: [0.25, 1, 0.25, 0.25, 1],
+                extrapolate: 'clamp',
+              }),
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
 function FoodAiTodayCard({
   isPro,
   hasCandidates,
@@ -11867,13 +12001,16 @@ function SearchTab({
         <Pressable style={[styles.bigDecisionButton, styles.bigDecisionButtonPrimary]} onPress={onRandomPress}>
           {/* 候補が取れていない時に「0件から抽選」と出ると誤解を招くため、
               件数が確定している時だけ表示する。 */}
-          <Text style={styles.bigDecisionSmall}>
-            {isLoading
-              ? uiText.checkingCandidates
-              : restaurants.length
-                ? `${restaurants.length}${uiText.candidateDrawSuffix}`
-                : uiText.checkingCandidates}
-          </Text>
+          {isLoading || !restaurants.length ? (
+            <View style={styles.bigDecisionSmallRow}>
+              <Text style={styles.bigDecisionSmall}>{uiText.checkingCandidates}</Text>
+              <LoadingDots color="#ffffff" />
+            </View>
+          ) : (
+            <Text style={styles.bigDecisionSmall}>
+              {`${restaurants.length}${uiText.candidateDrawSuffix}`}
+            </Text>
+          )}
           <Text style={styles.bigDecisionText}>{uiText.decisionButton}</Text>
         </Pressable>
         <Pressable style={[styles.bigDecisionButton, styles.bigDecisionButtonRandom]} onPress={onAllRandomPress}>

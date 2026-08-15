@@ -13138,6 +13138,24 @@ export const styles = StyleSheet.create({
     zIndex: 30,
   },
 
+  // 読み込み中を示す3点。文字の「...」だと止まって見えるため。
+  loadingDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginLeft: 5,
+  },
+  loadingDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+  },
+  bigDecisionSmallRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   // 指定した距離の範囲を示す円。塗りは薄くし、地図の読みやすさを損なわない。
   mapRouletteRangeCircle: {
     position: 'absolute',
