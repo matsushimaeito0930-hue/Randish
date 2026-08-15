@@ -4302,20 +4302,46 @@ const DAILY_RECOMMENDATION_STORAGE_KEY_PREFIX = 'randish.dailyRecommendations.v1
 const DAILY_RECOMMENDATION_COUNT = 5;
 
 /**
+ * 「今日のおすすめ」を探す範囲。
+ *
+ * 条件画面で選んだ距離とは切り離して、常に現在地から1.5kmで固定する。
+ * おすすめは「今日ここから歩いて行ける店」であってほしく、
+ * 条件をいじるたびに顔ぶれが変わるものではないため。
+ */
+const DAILY_RECOMMENDATION_RADIUS_METERS = 1500;
+
+/** ホットペッパーの距離指定は段階なので、1.5kmを含む一段上（2km）で取って、あとで正確に絞る。 */
+const DAILY_RECOMMENDATION_RANGE = 4;
+
+/**
+ * この距離だけ動いたら、同じ日でも選び直す。
+ * 旅先で家の近くの店を出されても、その日のおすすめとしては役に立たない。
+ */
+const DAILY_RECOMMENDATION_RESELECT_METERS = 1500;
+
+/**
  * ジャンルが偏らないように選ぶ。
  * 同じジャンルが5つ並ぶと「おすすめ」というより検索結果の先頭5件に見えてしまう。
  */
-const pickVariedRecommendations = (candidates: Restaurant[]): Restaurant[] => {
+const pickVariedRecommendations = (
+  candidates: Restaurant[],
+  count = DAILY_RECOMMENDATION_COUNT,
+  excludeIds?: Set<string>,
+): Restaurant[] => {
+  if (count <= 0) {
+    return [];
+  }
   const usable = candidates.filter((restaurant) =>
     Boolean(restaurant?.name?.trim())
-    && (restaurant.externalProvider ?? '').toLowerCase() !== 'mock');
-  if (usable.length <= DAILY_RECOMMENDATION_COUNT) {
+    && (restaurant.externalProvider ?? '').toLowerCase() !== 'mock'
+    && !excludeIds?.has(restaurant.id));
+  if (usable.length <= count) {
     return usable;
   }
   const picked: Restaurant[] = [];
   const usedGenres = new Set<string>();
   for (const restaurant of usable) {
-    if (picked.length >= DAILY_RECOMMENDATION_COUNT) {
+    if (picked.length >= count) {
       break;
     }
     const genreKey = (restaurant.genre ?? '').trim();
@@ -4325,16 +4351,16 @@ const pickVariedRecommendations = (candidates: Restaurant[]): Restaurant[] => {
     usedGenres.add(genreKey);
     picked.push(restaurant);
   }
-  // ジャンルの種類が足りなければ、残りから順に埋めて必ず5件にする。
+  // ジャンルの種類が足りなければ、残りから順に埋める。
   for (const restaurant of usable) {
-    if (picked.length >= DAILY_RECOMMENDATION_COUNT) {
+    if (picked.length >= count) {
       break;
     }
     if (!picked.includes(restaurant)) {
       picked.push(restaurant);
     }
   }
-  return picked.slice(0, DAILY_RECOMMENDATION_COUNT);
+  return picked.slice(0, count);
 };
 
 /**
@@ -6755,8 +6781,14 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [isLoading, loadRestaurants, previewApiParams, restaurants.length]);
 
-  // 「今日のおすすめ」はジャンル・予算を外して取得する（条件のジャンルに偏らせない）。
-  const recommendationScopeKey = `${previewApiParams.area ?? ''}|${previewApiParams.latitude ?? ''}|${previewApiParams.longitude ?? ''}|${previewApiParams.range ?? ''}`;
+  // 「今日のおすすめ」は条件から切り離す。
+  // ジャンルも予算も外し、範囲は常に現在地から1.5km。条件をいじるたびに
+  // 顔ぶれが変わると「今日のおすすめ」ではなく検索結果の別名になってしまう。
+  const recommendationOrigin = userLocation;
+  const recommendationScopeKey = recommendationOrigin
+    ? `here:${recommendationOrigin.latitude.toFixed(3)},${recommendationOrigin.longitude.toFixed(3)}`
+    // 位置情報が使えない端末では、せめて選んだエリアで出す。
+    : `area:${previewApiParams.area ?? ''}`;
 
   /**
    * 「今日のおすすめ」を決める。
@@ -6767,25 +6799,43 @@ export default function App() {
   const resolveDailyRecommendations = useCallback(async (
     candidates: Restaurant[],
     scopeKey: string,
+    origin: UserLocation | null,
   ): Promise<Restaurant[]> => {
     if (!candidates.length) {
       return [];
     }
     const today = toLocalDateKey(new Date());
     const storageKey = `${DAILY_RECOMMENDATION_STORAGE_KEY_PREFIX}:${encodeURIComponent(userId)}`;
+    const byId = new Map(candidates.map((restaurant) => [restaurant.id, restaurant]));
+    let kept: Restaurant[] = [];
 
     try {
       const stored = await readLocalValue(storageKey);
       if (stored) {
-        const parsed = JSON.parse(stored) as { date?: string; scopeKey?: string; ids?: string[] };
-        if (parsed.date === today && parsed.scopeKey === scopeKey && Array.isArray(parsed.ids)) {
-          const byId = new Map(candidates.map((restaurant) => [restaurant.id, restaurant]));
-          const kept = parsed.ids
+        const parsed = JSON.parse(stored) as {
+          date?: string;
+          scopeKey?: string;
+          ids?: string[];
+          latitude?: number;
+          longitude?: number;
+        };
+        // 同じ日で、かつ大きく移動していなければ、朝に決めた店をそのまま出す。
+        // 場所の判定は保存した座標との距離で見る。少し歩いただけで
+        // 別の店に変わってしまうと、気になった店を見に戻れない。
+        const movedFar = origin != null
+          && parsed.latitude != null
+          && parsed.longitude != null
+          && distanceBetweenLocationsMeters(
+            { latitude: parsed.latitude, longitude: parsed.longitude, label: '' },
+            origin,
+          ) >= DAILY_RECOMMENDATION_RESELECT_METERS;
+        const sameScope = origin != null ? !movedFar : parsed.scopeKey === scopeKey;
+        if (parsed.date === today && sameScope && Array.isArray(parsed.ids)) {
+          kept = parsed.ids
             .map((id) => byId.get(id))
             .filter((restaurant): restaurant is Restaurant => restaurant != null);
-          // 保存した店がまだ全部あるなら、その並びをそのまま使う。
-          if (kept.length >= Math.min(RECOMMENDATION_COUNT, candidates.length)) {
-            return kept.slice(0, RECOMMENDATION_COUNT);
+          if (kept.length >= DAILY_RECOMMENDATION_COUNT) {
+            return kept.slice(0, DAILY_RECOMMENDATION_COUNT);
           }
         }
       }
@@ -6793,38 +6843,62 @@ export default function App() {
       // 読めなければ選び直すだけ
     }
 
-    const picked = pickVariedRecommendations(candidates);
+    // 朝の時点では店が数件しか取れていないことがある（サーバーの起動待ちなど）。
+    // 一度出した店は動かさず、足りない分だけ後から足す。
+    const keptIds = new Set(kept.map((restaurant) => restaurant.id));
+    const filled = [
+      ...kept,
+      ...pickVariedRecommendations(candidates, DAILY_RECOMMENDATION_COUNT - kept.length, keptIds),
+    ].slice(0, DAILY_RECOMMENDATION_COUNT);
+
     void writeLocalValue(storageKey, JSON.stringify({
       date: today,
       scopeKey,
-      ids: picked.map((restaurant) => restaurant.id),
+      ids: filled.map((restaurant) => restaurant.id),
+      latitude: origin?.latitude,
+      longitude: origin?.longitude,
     }));
-    return picked;
+    return filled;
   }, [userId]);
   useEffect(() => {
-    const hasScope = Boolean(previewApiParams.area)
-      || (previewApiParams.latitude != null && previewApiParams.longitude != null);
+    const hasScope = recommendationOrigin != null || Boolean(previewApiParams.area);
     if (!hasScope) {
       return;
     }
+    const origin = recommendationOrigin;
     let cancelled = false;
     void (async () => {
       try {
-        const data = await randishApi.getRestaurants(apiBaseUrlCandidates, {
-          area: previewApiParams.area,
-          latitude: previewApiParams.latitude,
-          longitude: previewApiParams.longitude,
-          range: previewApiParams.range,
-          distanceMeters: previewApiParams.distanceMeters,
-        });
+        const data = await randishApi.getRestaurants(apiBaseUrlCandidates, origin
+          ? {
+            latitude: origin.latitude,
+            longitude: origin.longitude,
+            range: DAILY_RECOMMENDATION_RANGE,
+            distanceMeters: DAILY_RECOMMENDATION_RADIUS_METERS,
+          }
+          : { area: previewApiParams.area });
         if (!cancelled) {
           // 写真のある店だけに絞ると、写真を持たない提供元しかない地域で
           // 1件しか出せなくなる。写真つきを前に並べたうえで、写真なしも残す。
           const normalized = data.map(normalizeRestaurant);
-          const withPhoto = normalized.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
-          const withoutPhoto = normalized.filter((restaurant) => !restaurant.photoUrl?.trim());
+          // サーバー側でも1.5kmで絞っているが、座標を持たない店は素通りする。
+          // ここで落としておかないと「1.5km以内」と言いながら遠い店が混じる。
+          const withinRadius = origin
+            ? normalized.filter((restaurant) => {
+              if (restaurant.latitude == null || restaurant.longitude == null) {
+                return false;
+              }
+              return distanceBetweenLocationsMeters(origin, {
+                latitude: restaurant.latitude,
+                longitude: restaurant.longitude,
+                label: '',
+              }) <= DAILY_RECOMMENDATION_RADIUS_METERS;
+            })
+            : normalized;
+          const withPhoto = withinRadius.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
+          const withoutPhoto = withinRadius.filter((restaurant) => !restaurant.photoUrl?.trim());
           const ordered = [...withPhoto, ...withoutPhoto];
-          const daily = await resolveDailyRecommendations(ordered, recommendationScopeKey);
+          const daily = await resolveDailyRecommendations(ordered, recommendationScopeKey, origin);
           if (!cancelled) {
             setRecommendations(daily);
           }
@@ -9667,7 +9741,6 @@ function HomeTab({
   );
 }
 
-const RECOMMENDATION_COUNT = 5;
 
 /**
  * 読み込み中を示す3つの点。
@@ -9845,40 +9918,10 @@ function HomeRecommendationCarousel({
   isLoading: boolean;
   onVisit: (restaurant: Restaurant) => void;
 }) {
-  // 候補が入れ替わるたびに並びが飛ばないよう、リストの並びから安定して5件選ぶ。
-  const picks = useMemo(() => {
-    // API が落ちている時の確認用ダミー（麺や RANDISH など）はおすすめに出さない。
-    const usable = restaurants.filter((restaurant) =>
-      Boolean(restaurant?.name?.trim())
-      && (restaurant.externalProvider ?? '').toLowerCase() !== 'mock');
-    if (usable.length <= RECOMMENDATION_COUNT) {
-      return usable;
-    }
-    // 同じジャンルばかり並ばないよう、まずジャンル違いを1件ずつ拾う。
-    const picked: Restaurant[] = [];
-    const usedGenres = new Set<string>();
-    for (const restaurant of usable) {
-      if (picked.length >= RECOMMENDATION_COUNT) {
-        break;
-      }
-      const genreKey = (restaurant.genre ?? '').trim();
-      if (genreKey && usedGenres.has(genreKey)) {
-        continue;
-      }
-      usedGenres.add(genreKey);
-      picked.push(restaurant);
-    }
-    // ジャンル数が足りなければ残りから補う。
-    for (const restaurant of usable) {
-      if (picked.length >= RECOMMENDATION_COUNT) {
-        break;
-      }
-      if (!picked.includes(restaurant)) {
-        picked.push(restaurant);
-      }
-    }
-    return picked.slice(0, RECOMMENDATION_COUNT);
-  }, [restaurants]);
+  // 出す店は resolveDailyRecommendations が1日1回決めて保存している。
+  // ここで選び直すと、その日固定という約束が崩れる（同じ選び方を2か所に
+  // 持っていて、片方だけ直すと食い違う）。ここは受け取ったものを並べるだけ。
+  const picks = restaurants;
 
   if (!picks.length) {
     return null;
@@ -9894,7 +9937,7 @@ function HomeRecommendationCarousel({
         {isLoading && <ActivityIndicator color={ORANGE} />}
       </View>
       <Text style={styles.homeRecommendLead}>
-        気になる一店を選ぶと、抽選と同じように分析へ記録されます。
+        現在地から1.5km以内のお店です。今日はこの顔ぶれのまま変わりません。
       </Text>
       <ScrollView
         horizontal
