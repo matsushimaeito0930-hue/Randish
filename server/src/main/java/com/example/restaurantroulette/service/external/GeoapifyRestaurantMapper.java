@@ -10,7 +10,6 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
@@ -31,40 +30,8 @@ public class GeoapifyRestaurantMapper {
       "ramen",
       "noodle");
   private static final List<String> JAPANESE_KEYWORDS = List.of("和食", "日本料理", "食堂", "定食", "japanese");
-  private static final BudgetRange DEFAULT_BUDGET = new BudgetRange(0, 8000);
-  private static final Map<String, BudgetRange> GENRE_BUDGETS = Map.ofEntries(
-      Map.entry("ラーメン", new BudgetRange(700, 1500)),
-      Map.entry("焼肉", new BudgetRange(2500, 7000)),
-      Map.entry("居酒屋", new BudgetRange(2000, 5000)),
-      Map.entry("韓国料理", new BudgetRange(1500, 4000)),
-      Map.entry("カレー", new BudgetRange(800, 1800)),
-      Map.entry("うどん", new BudgetRange(600, 1600)),
-      Map.entry("そば", new BudgetRange(600, 1800)),
-      Map.entry("粉もの", new BudgetRange(700, 2500)),
-      Map.entry("たこ焼き", new BudgetRange(300, 1200)),
-      Map.entry("お好み焼き", new BudgetRange(1000, 2500)),
-      Map.entry("焼き鳥", new BudgetRange(1800, 4000)),
-      Map.entry("ピザ", new BudgetRange(1200, 3500)),
-      Map.entry("ハンバーガー", new BudgetRange(0, 1800)),
-      Map.entry("定食", new BudgetRange(700, 1800)),
-      Map.entry("串カツ", new BudgetRange(1500, 3500)),
-      Map.entry("餃子", new BudgetRange(600, 2000)),
-      Map.entry("和食", new BudgetRange(1200, 5000)),
-      Map.entry("洋食", new BudgetRange(1000, 3500)),
-      Map.entry("イタリアン", new BudgetRange(1500, 4500)),
-      Map.entry("中華", new BudgetRange(900, 3500)),
-      Map.entry("寿司", new BudgetRange(1800, 8000)),
-      Map.entry("海鮮", new BudgetRange(1800, 6000)),
-      Map.entry("肉料理", new BudgetRange(1800, 7000)),
-      Map.entry("サラダ・野菜", new BudgetRange(800, 2500)),
-      Map.entry("スープ", new BudgetRange(700, 2200)),
-      Map.entry("スイーツ", new BudgetRange(500, 2200)),
-      Map.entry("カフェ", new BudgetRange(500, 2200)),
-      Map.entry("パン", new BudgetRange(300, 1600)),
-      Map.entry("郷土料理", new BudgetRange(1000, 4500)),
-      Map.entry("ファストフード", new BudgetRange(0, 1800)),
-      Map.entry("お酒・バー", new BudgetRange(2000, 5500)),
-      Map.entry("各国料理", new BudgetRange(1000, 4500)));
+  /** 価格が分からないことを表す。表示側は0,0を「予算目安なし」として扱う。 */
+  private static final BudgetRange UNKNOWN_BUDGET = new BudgetRange(0, 0);
 
   Optional<Restaurant> toRestaurant(JsonNode feature, SearchContext context) {
     JsonNode properties = feature == null ? null : feature.path("properties");
@@ -110,7 +77,11 @@ public class GeoapifyRestaurantMapper {
 
     String externalId = externalId(properties, name, latitude, longitude);
     String genre = restaurantGenre(context.genre(), categories, name, address);
-    BudgetRange budgetRange = defaultBudgetForGenre(genre, categories, name);
+    // OpenStreetMap は価格を持たない。以前はジャンルごとの目安を当てはめていたが、
+    // 出典の無い数字を「予算」として出すことになるうえ、その数字で予算の絞り込みまで
+    // していた。そばの店に「8,000円以内」と出たのはこれが理由。分からないものは
+    // 分からないままにして、表示側で「予算目安なし」と伝える。
+    BudgetRange budgetRange = UNKNOWN_BUDGET;
 
     return Optional.of(new Restaurant(
         restaurantId(externalId),
@@ -134,12 +105,23 @@ public class GeoapifyRestaurantMapper {
     if (budgetMin == null && budgetMax == null) {
       return true;
     }
+    // 価格が分からない店を、分からないという理由で落とさない。
+    // 落とすと地方では候補がほとんど残らないうえ、「予算内に無い」のではなく
+    // 「調べられていない」だけの店を、利用者に知らせないまま消すことになる。
+    if (isBudgetUnknown(restaurant)) {
+      return true;
+    }
     if (budgetMin == null || budgetMin <= 0) {
       return budgetMax == null || restaurant.budgetMin() <= budgetMax;
     }
     int averageBudget = (restaurant.budgetMin() + restaurant.budgetMax()) / 2;
     return averageBudget >= budgetMin
         && (budgetMax == null || averageBudget <= budgetMax);
+  }
+
+  /** 0円〜0円は「調べたが分からなかった」の意味で使っている。 */
+  private boolean isBudgetUnknown(Restaurant restaurant) {
+    return restaurant.budgetMin() <= 0 && restaurant.budgetMax() <= 0;
   }
 
   boolean isRamenOrNoodleGenre(String genre) {
@@ -222,24 +204,6 @@ public class GeoapifyRestaurantMapper {
     return "飲食店";
   }
 
-  private BudgetRange defaultBudgetForGenre(String genre, List<String> categories, String name) {
-    BudgetRange requestedBudget = GENRE_BUDGETS.get(genre);
-    if (requestedBudget != null) {
-      return requestedBudget;
-    }
-    if (isRamenOrNoodleGenre(genre)
-        || categories.stream().anyMatch(category -> category.contains(".ramen") || category.contains(".noodle"))
-        || RAMEN_KEYWORDS.stream().map(this::normalizeText).anyMatch(normalizeText(name)::contains)) {
-      return new BudgetRange(700, 1500);
-    }
-    if (categories.stream().anyMatch(category -> category.contains(".cafe") || category.contains("ice_cream"))) {
-      return GENRE_BUDGETS.get("カフェ");
-    }
-    if (categories.stream().anyMatch(category -> category.contains(".burger") || category.contains(".pizza"))) {
-      return GENRE_BUDGETS.get("ファストフード");
-    }
-    return DEFAULT_BUDGET;
-  }
 
   private String restaurantArea(String requestedArea, JsonNode properties) {
     String cleanArea = cleanText(requestedArea);

@@ -2987,6 +2987,11 @@ const getEstimatedBudget = (restaurant: Restaurant) => {
   if (min == null && max == null) {
     return null;
   }
+  // 0円〜0円は「価格が分からない」を表す。集計に0円として混ぜると
+  // 平均単価が実際より安く出てしまうため、標本から外す。
+  if ((min ?? 0) <= 0 && (max ?? 0) <= 0) {
+    return null;
+  }
   if ((max ?? 0) >= 100000) {
     return null;
   }
