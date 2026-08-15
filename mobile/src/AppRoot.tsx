@@ -6895,10 +6895,11 @@ export default function App() {
               }) <= DAILY_RECOMMENDATION_RADIUS_METERS;
             })
             : normalized;
+          // 写真の無い店は出さない。「おすすめ」として並べるのに、
+          // 世界地図のアイコンと店名だけでは行きたいかどうか判断できない。
+          // 件数が減っても、見て決められる店だけを出す。
           const withPhoto = withinRadius.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
-          const withoutPhoto = withinRadius.filter((restaurant) => !restaurant.photoUrl?.trim());
-          const ordered = [...withPhoto, ...withoutPhoto];
-          const daily = await resolveDailyRecommendations(ordered, recommendationScopeKey, origin);
+          const daily = await resolveDailyRecommendations(withPhoto, recommendationScopeKey, origin);
           if (!cancelled) {
             setRecommendations(daily);
           }
