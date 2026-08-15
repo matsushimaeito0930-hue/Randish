@@ -6948,7 +6948,9 @@ export default function App() {
 
   const askFoodAiRecommendation = useCallback(async () => {
     if (!subscription.isPro) {
-      subscription.startProPurchase();
+      // ゲストは購入画面へ行っても行き止まりになる（Premiumはアカウントに紐づくため）。
+      // startPremiumPurchase が会員登録へ回してくれる。
+      startPremiumPurchase();
       return;
     }
     // 1回ごとにGeminiを呼ぶため、回数を絞らないと利用者ごとの原価が青天井になる。
@@ -7036,6 +7038,9 @@ export default function App() {
     subscription,
     syncWorkingApiBaseUrl,
     userId,
+    // startPremiumPurchase はここより下で宣言しているため、この配列に書くと
+    // 描画時に評価されて ReferenceError になる。userId が変われば
+    // このコールバックも作り直されるので、掴んでいる関数は古くならない。
   ]);
 
   // 保存してある今日の利用回数を読み込む。日付が変わっていれば0に戻す。
@@ -8970,7 +8975,12 @@ export default function App() {
             onSituationChange={setSituation}
             onMinRatingChange={setMinRating}
             onOpenNowOnlyChange={setOpenNowOnly}
-            onRequirePremium={subscription.startProPurchase}
+            // ゲストのまま購入へ進ませない。Premiumはアカウントに紐づくため、
+            // 先に会員登録へ回す startPremiumPurchase を通す。以前は
+            // subscription.startProPurchase を直接渡していたので、ゲストが押すと
+            // 「会員登録が必要です」の警告が出るだけの行き止まりだった。
+            onRequirePremium={startPremiumPurchase}
+            isRegisteredUser={isRegisteredUser}
             onConditionRandomize={markConditionRandom}
             onRequestCurrentLocation={requestCurrentLocation}
             onSearch={loadRestaurants}
@@ -11378,6 +11388,7 @@ function FilterPanel({
   onMinRatingChange,
   onOpenNowOnlyChange,
   onRequirePremium,
+  isRegisteredUser,
   onRandomized,
   onUseCurrentLocation,
   onSubmit,
@@ -11406,6 +11417,8 @@ function FilterPanel({
   onMinRatingChange: (value: number) => void;
   onOpenNowOnlyChange: (value: boolean) => void;
   onRequirePremium: () => void;
+  /** ゲストかどうか。案内の文言を「会員登録」に変えるために使う。 */
+  isRegisteredUser: boolean;
   onRandomized?: (field: ConditionRandomField) => void;
   onUseCurrentLocation?: () => void | Promise<unknown>;
   onSubmit: () => void;
@@ -11552,8 +11565,10 @@ function FilterPanel({
         </View>
         {!isPro && (
           <LockedNotice
-            text="シチュエーションで選ぶのはPremium限定です"
-            actionLabel="見てみる"
+            text={isRegisteredUser
+              ? 'シチュエーションで選ぶのはPremium限定です'
+              : 'シチュエーションで選ぶのはPremium限定です。まず会員登録から'}
+            actionLabel={isRegisteredUser ? '見てみる' : '会員登録する'}
             onPress={onRequirePremium}
           />
         )}
@@ -11603,8 +11618,10 @@ function FilterPanel({
         </Pressable>
         {!isPro && (
           <LockedNotice
-            text="評価と営業状況での絞り込みはPremium限定です"
-            actionLabel="見てみる"
+            text={isRegisteredUser
+              ? '評価と営業状況での絞り込みはPremium限定です'
+              : '評価と営業状況での絞り込みはPremium限定です。まず会員登録から'}
+            actionLabel={isRegisteredUser ? '見てみる' : '会員登録する'}
             onPress={onRequirePremium}
           />
         )}
@@ -12022,6 +12039,7 @@ function SearchTab({
   onMinRatingChange,
   onOpenNowOnlyChange,
   onRequirePremium,
+  isRegisteredUser,
   onConditionRandomize,
   onRequestCurrentLocation,
   onSearch,
@@ -12054,6 +12072,8 @@ function SearchTab({
   onMinRatingChange: (value: number) => void;
   onOpenNowOnlyChange: (value: boolean) => void;
   onRequirePremium: () => void;
+  /** ゲストかどうか。Premiumの案内を「会員登録」に切り替えるために下へ渡す。 */
+  isRegisteredUser: boolean;
   onConditionRandomize: (field: ConditionRandomField) => void;
   onRequestCurrentLocation: () => void | Promise<unknown>;
   onSearch: () => void;
@@ -12096,6 +12116,7 @@ function SearchTab({
         onMinRatingChange={onMinRatingChange}
         onOpenNowOnlyChange={onOpenNowOnlyChange}
         onRequirePremium={onRequirePremium}
+        isRegisteredUser={isRegisteredUser}
         onRandomized={onConditionRandomize}
         onSubmit={onSearch}
       />
