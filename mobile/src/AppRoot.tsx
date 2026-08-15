@@ -9025,9 +9025,11 @@ export default function App() {
             savedRestaurants={savedRestaurants}
             isPro={subscription.isPro}
             isDev={subscription.isDev}
+            isRegisteredUser={isRegisteredUser}
             onStartPro={startPremiumPurchase}
             onRestorePro={restorePremiumPurchase}
             onAreaPress={() => setActiveTab('home')}
+            onRegister={openRegistration}
           />
         )}
       </ScrollView>
@@ -9825,18 +9827,20 @@ function FoodAiTodayCard({
           <Text style={styles.foodAiTitle}>今日の食AI</Text>
         </View>
         <View style={styles.foodAiPlanBadge}>
+          {!isPro && <Ionicons name="lock-closed" size={10} color="#7161f2" style={styles.proBadgeLockIcon} />}
           <Text style={styles.foodAiPlanBadgeText}>Premium</Text>
         </View>
       </View>
 
       {!isPro ? (
         <>
-          <Text style={styles.foodAiLead}>
+          <Text style={[styles.foodAiLead, styles.lockedContent]}>
             先月と今月の推定支出、ジャンル、予算、検索範囲を読み、今ある候補から今日の一店を提案します。
           </Text>
           <Pressable style={styles.foodAiPrimaryButton} onPress={onAsk}>
-            <Ionicons name="lock-open-outline" size={16} color="#ffffff" />
-            <Text style={styles.foodAiPrimaryButtonText}>Premiumで食AIを使う</Text>
+            {/* 使えない側に開いた錠を出していた。まだ開いていないので閉じた錠にする。 */}
+            <Ionicons name="lock-closed" size={16} color="#ffffff" />
+            <Text style={styles.foodAiPrimaryButtonText}>食AIはPremium限定</Text>
           </Pressable>
         </>
       ) : suggestion ? (
@@ -11471,9 +11475,9 @@ function FilterPanel({
             <Text style={styles.premiumConditionTitle}>シチュエーションで選ぶ</Text>
             <Text style={styles.premiumConditionLead}>誰と、どんな日に行くかに合うお店を優先します</Text>
           </View>
-          <ProBadge label="Premium" />
+          <ProBadge label="Premium" locked={!isPro} />
         </View>
-        <View style={styles.situationOptionGrid}>
+        <View style={[styles.situationOptionGrid, !isPro && styles.lockedContent]}>
           {SITUATION_OPTIONS.map((option) => {
             const selected = situation === option.key;
             return (
@@ -11491,6 +11495,13 @@ function FilterPanel({
             );
           })}
         </View>
+        {!isPro && (
+          <LockedNotice
+            text="シチュエーションで選ぶのはPremium限定です"
+            actionLabel="見てみる"
+            onPress={onRequirePremium}
+          />
+        )}
       </View>
       <View style={styles.premiumConditionSection}>
         <View style={styles.premiumConditionHeader}>
@@ -11498,10 +11509,10 @@ function FilterPanel({
             <Text style={styles.premiumConditionTitle}>詳細条件</Text>
             <Text style={styles.premiumConditionLead}>評価と現在の営業状況で候補を絞ります</Text>
           </View>
-          <ProBadge label="Premium" />
+          <ProBadge label="Premium" locked={!isPro} />
         </View>
-        <Text style={styles.premiumConditionFieldLabel}>最低評価</Text>
-        <View style={styles.ratingConditionRow}>
+        <Text style={[styles.premiumConditionFieldLabel, !isPro && styles.lockedContent]}>最低評価</Text>
+        <View style={[styles.ratingConditionRow, !isPro && styles.lockedContent]}>
           {MIN_RATING_OPTIONS.map((rating) => {
             const selected = minRating === rating;
             return (
@@ -11519,7 +11530,11 @@ function FilterPanel({
           })}
         </View>
         <Pressable
-          style={[styles.openNowCondition, openNowOnly && styles.openNowConditionActive]}
+          style={[
+            styles.openNowCondition,
+            openNowOnly && styles.openNowConditionActive,
+            !isPro && styles.lockedContent,
+          ]}
           onPress={() => isPro ? onOpenNowOnlyChange(!openNowOnly) : onRequirePremium()}
         >
           <View style={[styles.openNowConditionIcon, openNowOnly && styles.openNowConditionIconActive]}>
@@ -11531,6 +11546,13 @@ function FilterPanel({
           </View>
           <Ionicons name={openNowOnly ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={openNowOnly ? '#23885d' : '#aaa198'} />
         </Pressable>
+        {!isPro && (
+          <LockedNotice
+            text="評価と営業状況での絞り込みはPremium限定です"
+            actionLabel="見てみる"
+            onPress={onRequirePremium}
+          />
+        )}
       </View>
       <View style={styles.genreSectionHeader}>
         <Text style={styles.genreSectionTitle}>{uiText.genreLabel}</Text>
@@ -13799,11 +13821,49 @@ function SavedPlaceCard({
   );
 }
 
-function ProBadge({ label = 'Premium', dark = false }: { label?: string; dark?: boolean }) {
+/**
+ * @param locked まだ使えないことを示す。錠を閉じた形で添える。
+ *   Premium の人には錠を出さない。買ったあとも鍵の絵が残っていると、
+ *   まだ何か足りないように見える。
+ */
+function ProBadge({
+  label = 'Premium',
+  dark = false,
+  locked = false,
+}: { label?: string; dark?: boolean; locked?: boolean }) {
   return (
-    <View style={[styles.proBadge, dark && styles.proBadgeDark]}>
+    <View style={[styles.proBadge, dark && styles.proBadgeDark, locked && styles.proBadgeLocked]}>
+      {locked && (
+        <Ionicons
+          name="lock-closed"
+          size={10}
+          color={dark ? '#ffffff' : ORANGE}
+          style={styles.proBadgeLockIcon}
+        />
+      )}
       <Text style={[styles.proBadgeText, dark && styles.proBadgeTextDark]}>{label}</Text>
     </View>
+  );
+}
+
+/**
+ * まだ使えない一区画に添える一行。
+ *
+ * 薄暗くするだけだと「壊れている」「読み込み中」に見える。
+ * なぜ触れないのかと、どうすれば使えるのかを必ず言葉で置く。
+ */
+function LockedNotice({ text, actionLabel, onPress }: {
+  text: string;
+  actionLabel: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.lockedNotice} onPress={onPress}>
+      <Ionicons name="lock-closed" size={13} color={ORANGE} />
+      <Text style={styles.lockedNoticeText}>{text}</Text>
+      <Text style={styles.lockedNoticeAction}>{actionLabel}</Text>
+      <Ionicons name="chevron-forward" size={13} color={ORANGE} />
+    </Pressable>
   );
 }
 
@@ -15385,9 +15445,11 @@ function AnalyticsTab({
   savedRestaurants,
   isPro,
   isDev,
+  isRegisteredUser,
   onStartPro,
   onRestorePro,
   onAreaPress,
+  onRegister,
 }: {
   uiText: Record<string, string>;
   userId: string;
@@ -15400,9 +15462,11 @@ function AnalyticsTab({
   savedRestaurants: SavedRestaurant[];
   isPro: boolean;
   isDev: boolean;
+  isRegisteredUser: boolean;
   onStartPro: () => void;
   onRestorePro: () => void;
   onAreaPress: () => void;
+  onRegister: () => void;
 }) {
   const [paywallContext, setPaywallContext] = useState<{ title: string; message: string } | null>(null);
   const [spendOpen, setSpendOpen] = useState(false);
@@ -15576,6 +15640,48 @@ function AnalyticsTab({
   }, [aiReport, aiReportMonthEndUnlocked, aiReportStatus, aiReportUsed, isDev, isPro, loadAiReport, openPaywall]);
 
   const aiReportMatchesCurrentAnalytics = aiReportPeriod?.year === reportYear && aiReportPeriod.month === reportMonth;
+
+  // ゲストの記録は端末を閉じれば消えるので、分析として見せると嘘になる。
+  // 中身は見せたまま触れなくして、何が貯まるのかは分かるようにする。
+  if (!isRegisteredUser) {
+    return (
+      <View style={styles.analysisScreen}>
+        <View style={styles.guestLockCard}>
+          <View style={styles.guestLockIcon}>
+            <Ionicons name="lock-closed" size={20} color="#ffffff" />
+          </View>
+          <Text style={styles.guestLockKicker}>MEMBERS ONLY</Text>
+          <Text style={styles.guestLockTitle}>分析は会員限定です</Text>
+          <Text style={styles.guestLockLead}>
+            抽選の履歴や外食費の集計は、アカウントに紐づけて残します。
+            ゲストのままだと記録が端末に残らないため、集計もできません。
+          </Text>
+          <Pressable style={styles.guestLockButton} onPress={onRegister}>
+            <Ionicons name="mail-outline" size={16} color="#ffffff" />
+            <Text style={styles.guestLockButtonText}>メールで会員登録する</Text>
+          </Pressable>
+          <Text style={styles.guestLockNote}>登録は無料です。パスワードは要りません。</Text>
+        </View>
+        <View pointerEvents="none" style={styles.lockedContent}>
+          <AnalysisSectionHeader
+            kicker="PREVIEW"
+            title="登録するとここに貯まります"
+            lead="今月の抽選、推定した外食費、よく選んだジャンル。"
+          />
+          <AnalysisDigestCard
+            analytics={currentAnalytics}
+            totalLabel={monthlyTotalLabel}
+            averageBudgetLabel={averageBudgetLabel}
+            savedCount={savedRestaurants.length}
+            spendOpen={false}
+            isPro={false}
+            onSpendPress={() => undefined}
+            onProPress={() => undefined}
+          />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.analysisScreen}>

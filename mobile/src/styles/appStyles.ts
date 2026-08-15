@@ -5675,6 +5675,8 @@ export const styles = StyleSheet.create({
     color: INK,
   },
   foodAiPlanBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: 999,
@@ -9166,6 +9168,102 @@ export const styles = StyleSheet.create({
   proBadgeDark: {
     backgroundColor: '#2a211d',
     borderColor: '#2a211d',
+  },
+  // まだ使えないことを示す形。錠のぶん左を詰める。
+  proBadgeLocked: {
+    paddingLeft: 8,
+  },
+  proBadgeLockIcon: {
+    marginRight: 4,
+  },
+
+  // 使えない区画に添える一行。薄暗いだけだと故障に見えるため、理由を言葉で置く。
+  lockedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: '#fff5ef',
+    borderWidth: 1,
+    borderColor: '#ffdcc9',
+  },
+  lockedNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+    color: '#7d6a5d',
+  },
+  lockedNoticeAction: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '900',
+    color: ORANGE,
+  },
+
+  // 使えない操作そのもの。触れる（案内が開く）が、選べる状態ではないと分かる濃さにする。
+  lockedContent: {
+    opacity: 0.45,
+  },
+
+  // ゲストに分析タブを開かれたときの案内。
+  guestLockCard: {
+    padding: 20,
+    borderRadius: 24,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#eadfd2',
+    gap: 8,
+  },
+  guestLockIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: ORANGE,
+    marginBottom: 4,
+  },
+  guestLockKicker: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+    color: ORANGE,
+  },
+  guestLockTitle: {
+    fontSize: 20,
+    lineHeight: 27,
+    fontWeight: '900',
+    color: INK,
+  },
+  guestLockLead: {
+    fontSize: 13,
+    lineHeight: 21,
+    color: '#6f665e',
+  },
+  guestLockButton: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: ORANGE,
+  },
+  guestLockButtonText: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#ffffff',
+  },
+  guestLockNote: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#8d8478',
+    textAlign: 'center',
   },
   proBadgeText: {
     fontSize: 12,
