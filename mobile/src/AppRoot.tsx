@@ -4291,6 +4291,16 @@ const SITUATION_EVIDENCE_HINTS: Record<Exclude<SituationMode, 'none'>, { label: 
 };
 
 /**
+ * プロフィール（表示名・アイコン）の保存先。
+ * これまで画面の状態としてしか持っておらず、再読み込みで消えていた。
+ * 利用者ごとに分けて保存する。
+ */
+const PROFILE_STORAGE_KEY_PREFIX = 'randish.profile.v1';
+
+const buildProfileStorageKey = (userId: string) =>
+  `${PROFILE_STORAGE_KEY_PREFIX}:${encodeURIComponent(userId.trim() || APP_USER_ID)}`;
+
+/**
  * 候補一覧のキャッシュ。
  * 同じ場所から繰り返し引くのが普通の使い方なので、そのたびに取り直すと毎回待たされる。
  * 店舗情報が数分で変わるものでもないため、少し長めに保持する。
@@ -5769,6 +5779,8 @@ export default function App() {
   const [locationIntroState, setLocationIntroState] = useState<LocationIntroState>('loading');
   const [profileName, setProfileName] = useState('RANDISH Guest');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
+  // 保存済みのプロフィールを読み終えたか。読み込む前に書き戻して消してしまうのを防ぐ。
+  const profileLoadedRef = useRef(false);
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('ja');
   const [locationStatus, setLocationStatus] = useState('現在地を確認できます');
   // 現在地ボタンの処理中フラグ。押した手応えをボタン自身で返すために使う。
@@ -6611,6 +6623,46 @@ export default function App() {
   useEffect(() => {
     initAnalytics();
   }, []);
+
+  // 保存しておいたプロフィールを読み込む。
+  // これが無いと、名前も画像も画面の状態でしかなく、再読み込みで毎回消えていた。
+  useEffect(() => {
+    let cancelled = false;
+    profileLoadedRef.current = false;
+    void readLocalValue(buildProfileStorageKey(userId)).then((stored) => {
+      if (cancelled) {
+        return;
+      }
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as { name?: string; imageUri?: string | null };
+          if (parsed.name?.trim()) {
+            setProfileName(parsed.name);
+          }
+          if (parsed.imageUri) {
+            setProfileImageUri(parsed.imageUri);
+          }
+        } catch {
+          // 壊れていたら既定値のまま使う
+        }
+      }
+      profileLoadedRef.current = true;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // 変更を保存する。読み込みが終わるまでは書かない（空の状態で上書きしないため）。
+  useEffect(() => {
+    if (!profileLoadedRef.current) {
+      return;
+    }
+    void writeLocalValue(
+      buildProfileStorageKey(userId),
+      JSON.stringify({ name: profileName, imageUri: profileImageUri }),
+    );
+  }, [profileImageUri, profileName, userId]);
 
   useEffect(() => {
     loadRestaurants();
@@ -10232,11 +10284,18 @@ function HomeLocationPanel({
       allowsEditing: true,
       aspect: [1, 1],
       shape: 'oval',
-      quality: 0.85,
+      // 保存して持ち回るので小さくする。アイコン表示に大きな画像は要らない。
+      quality: 0.6,
+      // Webのblob URLは再読み込みで無効になるため、画像そのものを持てる形で受け取る。
+      base64: true,
     });
 
-    if (!result.canceled && result.assets[0]?.uri) {
-      onProfileImageChange(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      const dataUrl = asset.base64
+        ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
+        : asset.uri;
+      onProfileImageChange(dataUrl);
     }
   };
 
