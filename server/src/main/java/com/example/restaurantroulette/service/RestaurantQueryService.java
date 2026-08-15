@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -30,16 +31,33 @@ public class RestaurantQueryService {
   private final List<ExternalRestaurantProvider> externalRestaurantProviders;
   private final DtoMapper mapper;
   private final ValidationService validationService;
+  private final SearchCacheService searchCacheService;
 
+  // コンストラクタが2つあるため、Spring にどちらを使うかを明示する。
+  @Autowired
+  public RestaurantQueryService(
+      RestaurantRepository restaurantRepository,
+      List<ExternalRestaurantProvider> externalRestaurantProviders,
+      DtoMapper mapper,
+      ValidationService validationService,
+      SearchCacheService searchCacheService) {
+    this.restaurantRepository = restaurantRepository;
+    this.externalRestaurantProviders = externalRestaurantProviders;
+    this.mapper = mapper;
+    this.validationService = validationService;
+    this.searchCacheService = searchCacheService;
+  }
+
+  /**
+   * キャッシュを使わない生成。テストなど、DBを用意しない場面のために残している。
+   * 本番では Spring が上のコンストラクタを使う。
+   */
   public RestaurantQueryService(
       RestaurantRepository restaurantRepository,
       List<ExternalRestaurantProvider> externalRestaurantProviders,
       DtoMapper mapper,
       ValidationService validationService) {
-    this.restaurantRepository = restaurantRepository;
-    this.externalRestaurantProviders = externalRestaurantProviders;
-    this.mapper = mapper;
-    this.validationService = validationService;
+    this(restaurantRepository, externalRestaurantProviders, mapper, validationService, null);
   }
 
   public List<RestaurantResponse> search(String area, String genre, Integer budgetMin, Integer budgetMax) {
@@ -180,6 +198,33 @@ public class RestaurantQueryService {
       Integer range,
       boolean allowFallbackProviders) {
     validationService.validateSearchRequest(area, genre, budgetMin, budgetMax, latitude, longitude, range);
+
+    // 同じ条件での引き直しは外部APIへ行かない。
+    // 家や職場から繰り返し使うのが普通なので、毎回取り直すと待たせるうえ課金も積み上がる。
+    if (searchCacheService == null) {
+      return searchEntitiesFromProviders(
+          area, genre, budgetMin, budgetMax, latitude, longitude, range, allowFallbackProviders);
+    }
+    String cacheKey = searchCacheService.buildKey(area, genre, budgetMin, budgetMax, latitude, longitude, range);
+    Optional<List<Restaurant>> cached = searchCacheService.find(cacheKey);
+    if (cached.isPresent()) {
+      return cached.get();
+    }
+    List<Restaurant> freshResults = searchEntitiesFromProviders(
+        area, genre, budgetMin, budgetMax, latitude, longitude, range, allowFallbackProviders);
+    searchCacheService.save(cacheKey, freshResults);
+    return freshResults;
+  }
+
+  private List<Restaurant> searchEntitiesFromProviders(
+      String area,
+      String genre,
+      Integer budgetMin,
+      Integer budgetMax,
+      Double latitude,
+      Double longitude,
+      Integer range,
+      boolean allowFallbackProviders) {
     Map<String, Restaurant> externalOnlyRestaurants = new LinkedHashMap<>();
     boolean hasAvailableProvider = false;
 

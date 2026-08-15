@@ -456,6 +456,19 @@ CREATE INDEX IF NOT EXISTS idx_enrichments_expires ON restaurant_enrichments(pro
 CREATE INDEX IF NOT EXISTS idx_histories_user ON random_histories(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_histories_restaurant ON random_histories(restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorite_restaurants(user_id, created_at);
+-- 検索結果のキャッシュ。同じ場所からの引き直しで外部APIを叩かないための控え。
+-- メモリ上のキャッシュはサーバーがスリープすると消えるため、再起動をまたげるようDBに置く。
+CREATE TABLE IF NOT EXISTS search_cache (
+  cache_key VARCHAR(300) PRIMARY KEY,
+  payload JSONB NOT NULL,
+  result_count INTEGER NOT NULL DEFAULT 0,
+  hit_count INTEGER NOT NULL DEFAULT 0,
+  fetched_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_cache_fetched_at ON search_cache(fetched_at);
+
 CREATE INDEX IF NOT EXISTS idx_favorites_restaurant ON favorite_restaurants(restaurant_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_user_provider_place ON favorite_restaurants(user_id, provider, provider_place_id);
 CREATE INDEX IF NOT EXISTS idx_visits_user ON visit_collections(user_id, visit_date);
