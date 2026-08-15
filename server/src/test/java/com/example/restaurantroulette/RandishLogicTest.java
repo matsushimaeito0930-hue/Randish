@@ -164,7 +164,8 @@ class RandishLogicTest {
         "",
         35.6912,
         139.7671);
-    Mockito.when(queryService.searchRandomEntities(null, "cafe", 0, 2000, 35.6812, 139.7671, 1, 360))
+    Mockito.when(queryService.searchRandomEntities(null, "cafe", 0, 2000, 35.6812, 139.7671, 1, 360,
+            RestaurantQueryService.GooglePlacesUsage.ONLY_WHEN_EMPTY))
         .thenReturn(List.of(near, far));
     RandomRestaurantService service = new RandomRestaurantService(queryService, historyService, mapper, validationService);
 
@@ -218,7 +219,8 @@ class RandishLogicTest {
         "",
         35.6812,
         139.7671);
-    Mockito.when(queryService.searchRandomEntities(null, "cafe", 0, 2000, null, null, null, 360))
+    Mockito.when(queryService.searchRandomEntities(null, "cafe", 0, 2000, null, null, null, 360,
+            RestaurantQueryService.GooglePlacesUsage.ONLY_WHEN_EMPTY))
         .thenReturn(List.of(withoutPhoto, withPhoto));
     var enrichmentService = new CountingEnrichmentService();
     RandomRestaurantService service = new RandomRestaurantService(

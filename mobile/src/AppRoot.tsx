@@ -4392,7 +4392,11 @@ const buildRestaurantCacheKey = (params: {
   latitude?: number;
   longitude?: number;
   range?: number;
+  userId?: string;
 }) => [
+  // Premium かどうかで結果の中身が変わる（Google Places を引くかどうか）。
+  // 利用者ごとに分けておかないと、解約や購入の直後に前の結果が残る。
+  params.userId ?? '',
   params.area ?? '',
   params.genre ?? '',
   params.budgetMin ?? '',
@@ -6347,9 +6351,12 @@ export default function App() {
         longitude: coordinateSource?.longitude,
         range: coordinateSource ? toHotPepperRange(distance) : undefined,
         distanceMeters: coordinateSource ? parseDistanceMeters(distance) ?? undefined : undefined,
+        // 誰の検索かを伝える。Premium と dev のときだけサーバーが Google Places も引く。
+        // ゲストは付けなくてよい（サーバー側で無料枠として扱われる）。
+        userId,
       };
     },
-    [area, budgetMax, budgetMin, distance, genre, userLocation],
+    [area, budgetMax, budgetMin, distance, genre, userLocation, userId],
   );
 
   const previewApiParams = useMemo(
@@ -6875,8 +6882,9 @@ export default function App() {
             longitude: origin.longitude,
             range: DAILY_RECOMMENDATION_RANGE,
             distanceMeters: DAILY_RECOMMENDATION_RADIUS_METERS,
+            userId: previewApiParams.userId,
           }
-          : { area: previewApiParams.area });
+          : { area: previewApiParams.area, userId: previewApiParams.userId });
         if (!cancelled) {
           // 写真のある店だけに絞ると、写真を持たない提供元しかない地域で
           // 1件しか出せなくなる。写真つきを前に並べたうえで、写真なしも残す。
@@ -7328,8 +7336,8 @@ export default function App() {
     try {
       const chooseWithParams = async (params: typeof drawApiParams) => {
         const data = await randishApi.chooseRandom(apiBaseUrlCandidates, {
-          userId,
           ...params,
+          userId,
         });
         syncWorkingApiBaseUrl();
         const selected = normalizeRestaurant(data);

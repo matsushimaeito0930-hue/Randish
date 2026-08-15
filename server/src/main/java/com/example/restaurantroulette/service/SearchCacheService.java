@@ -66,8 +66,26 @@ public class SearchCacheService {
       Double latitude,
       Double longitude,
       Integer range) {
+    return buildKey(area, genre, budgetMin, budgetMax, latitude, longitude, range, "");
+  }
+
+  /**
+   * @param providerScope どの提供元まで使って作った結果か。Google を使った結果と
+   *     使っていない結果は中身が違うので、同じキーに入れてはいけない。無料の検索が
+   *     Premium の控えを引いてしまう。
+   */
+  public String buildKey(
+      String area,
+      String genre,
+      Integer budgetMin,
+      Integer budgetMax,
+      Double latitude,
+      Double longitude,
+      Integer range,
+      String providerScope) {
     return String.join("|",
         "v" + PAYLOAD_GENERATION,
+        normalize(providerScope),
         normalize(area),
         normalize(genre),
         budgetMin == null ? "" : budgetMin.toString(),

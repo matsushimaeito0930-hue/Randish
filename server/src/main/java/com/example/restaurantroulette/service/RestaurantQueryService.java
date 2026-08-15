@@ -19,6 +19,22 @@ import org.springframework.stereotype.Service;
 @Service
 public class RestaurantQueryService {
   private static final Logger logger = LoggerFactory.getLogger(RestaurantQueryService.class);
+  /**
+   * Google Places をどこまで使うか。
+   *
+   * <p>3つの提供元のうち Google だけが従量課金で、試算では1人あたりの原価の7割を占める。
+   * 全員に常用させると持たないが、他が空振りしたときに何も出せないのも困る。
+   * そこで「誰の検索か」で使い方を変える。
+   */
+  public enum GooglePlacesUsage {
+    /** 使わない。 */
+    NONE,
+    /** 他の提供元が1件も返せなかったときだけ。無料枠の空振りを防ぐための最後の手段。 */
+    ONLY_WHEN_EMPTY,
+    /** 件数が目標に届かないぶんを補う。Premium と dev。 */
+    FILL_SHORTFALL
+  }
+
   private static final int HYBRID_TARGET_RESULT_COUNT = 100;
   /** ホットペッパーの距離指定の最大値（約3km）。近くに無いときはここまでは広げる。 */
   private static final int WIDEST_RANGE = 5;
@@ -74,7 +90,19 @@ public class RestaurantQueryService {
       Double latitude,
       Double longitude,
       Integer range) {
-    return searchEntities(area, genre, budgetMin, budgetMax, latitude, longitude, range).stream()
+    return search(area, genre, budgetMin, budgetMax, latitude, longitude, range, GooglePlacesUsage.NONE);
+  }
+
+  public List<RestaurantResponse> search(
+      String area,
+      String genre,
+      Integer budgetMin,
+      Integer budgetMax,
+      Double latitude,
+      Double longitude,
+      Integer range,
+      GooglePlacesUsage googlePlacesUsage) {
+    return searchEntities(area, genre, budgetMin, budgetMax, latitude, longitude, range, googlePlacesUsage).stream()
         .map(mapper::toRestaurantResponse)
         .toList();
   }
@@ -105,6 +133,20 @@ public class RestaurantQueryService {
       Integer range,
       int maxCandidates,
       boolean allowFallbackProviders) {
+    return searchRandomEntities(area, genre, budgetMin, budgetMax, latitude, longitude, range, maxCandidates,
+        allowFallbackProviders ? GooglePlacesUsage.FILL_SHORTFALL : GooglePlacesUsage.NONE);
+  }
+
+  public List<Restaurant> searchRandomEntities(
+      String area,
+      String genre,
+      Integer budgetMin,
+      Integer budgetMax,
+      Double latitude,
+      Double longitude,
+      Integer range,
+      int maxCandidates,
+      GooglePlacesUsage googlePlacesUsage) {
     validationService.validateSearchRequest(area, genre, budgetMin, budgetMax, latitude, longitude, range);
     Map<String, Restaurant> externalOnlyRestaurants = new LinkedHashMap<>();
     boolean hasAvailableProvider = false;
@@ -136,8 +178,9 @@ public class RestaurantQueryService {
           externalOnlyRestaurants) || hasAvailableProvider;
     }
 
-    int fallbackLimit = fallbackCandidateLimit(desiredCandidateCount, externalOnlyRestaurants.size());
-    if (allowFallbackProviders && fallbackLimit > 0) {
+    int fallbackLimit = googlePlacesFetchLimit(
+        googlePlacesUsage, externalOnlyRestaurants.size(), desiredCandidateCount);
+    if (fallbackLimit > 0) {
       hasAvailableProvider = queryRandomProviders(
           fallbackProviders(),
           area,
@@ -187,7 +230,8 @@ public class RestaurantQueryService {
       Double latitude,
       Double longitude,
       Integer range) {
-    return searchEntities(area, genre, budgetMin, budgetMax, latitude, longitude, range, false);
+    return searchEntities(
+        area, genre, budgetMin, budgetMax, latitude, longitude, range, GooglePlacesUsage.NONE);
   }
 
   public List<Restaurant> searchEntities(
@@ -198,22 +242,25 @@ public class RestaurantQueryService {
       Double latitude,
       Double longitude,
       Integer range,
-      boolean allowFallbackProviders) {
+      GooglePlacesUsage googlePlacesUsage) {
     validationService.validateSearchRequest(area, genre, budgetMin, budgetMax, latitude, longitude, range);
 
     // 同じ条件での引き直しは外部APIへ行かない。
     // 家や職場から繰り返し使うのが普通なので、毎回取り直すと待たせるうえ課金も積み上がる。
     if (searchCacheService == null) {
       return searchEntitiesFromProviders(
-          area, genre, budgetMin, budgetMax, latitude, longitude, range, allowFallbackProviders);
+          area, genre, budgetMin, budgetMax, latitude, longitude, range, googlePlacesUsage);
     }
-    String cacheKey = searchCacheService.buildKey(area, genre, budgetMin, budgetMax, latitude, longitude, range);
+    // Google を使った結果と使っていない結果は中身が違う。同じキーに入れると、
+    // 無料の検索がPremiumの控えを引いたり、その逆が起きる。使い方ごとに分ける。
+    String cacheKey = searchCacheService.buildKey(
+        area, genre, budgetMin, budgetMax, latitude, longitude, range, googlePlacesUsage.name());
     Optional<List<Restaurant>> cached = searchCacheService.find(cacheKey);
     if (cached.isPresent()) {
       return cached.get();
     }
     List<Restaurant> freshResults = searchEntitiesFromProviders(
-        area, genre, budgetMin, budgetMax, latitude, longitude, range, allowFallbackProviders);
+        area, genre, budgetMin, budgetMax, latitude, longitude, range, googlePlacesUsage);
     searchCacheService.save(cacheKey, freshResults);
     return freshResults;
   }
@@ -226,7 +273,7 @@ public class RestaurantQueryService {
       Double latitude,
       Double longitude,
       Integer range,
-      boolean allowFallbackProviders) {
+      GooglePlacesUsage googlePlacesUsage) {
     Map<String, Restaurant> externalOnlyRestaurants = new LinkedHashMap<>();
     boolean hasAvailableProvider = false;
 
@@ -254,8 +301,9 @@ public class RestaurantQueryService {
           externalOnlyRestaurants) || hasAvailableProvider;
     }
 
-    int fallbackLimit = fallbackCandidateLimit(HYBRID_TARGET_RESULT_COUNT, externalOnlyRestaurants.size());
-    if (allowFallbackProviders && fallbackLimit > 0) {
+    int fallbackLimit = googlePlacesFetchLimit(
+        googlePlacesUsage, externalOnlyRestaurants.size(), HYBRID_TARGET_RESULT_COUNT);
+    if (fallbackLimit > 0) {
       hasAvailableProvider = queryRandomProviders(
           fallbackProviders(),
           area,
@@ -402,6 +450,21 @@ public class RestaurantQueryService {
         .filter(Optional::isPresent)
         .map(Optional::get)
         .findFirst();
+  }
+
+  /**
+   * Google Places から何件取るか。0なら引かない。
+   *
+   * <p>ここが従量課金の入口なので、判断を1か所にまとめている。
+   */
+  private int googlePlacesFetchLimit(
+      GooglePlacesUsage usage, int currentResultCount, int targetResultCount) {
+    return switch (usage) {
+      case NONE -> 0;
+      // 他が1件でも返せているなら引かない。無料枠でGoogleに行くのは空振りのときだけ。
+      case ONLY_WHEN_EMPTY -> currentResultCount == 0 ? MAX_FALLBACK_FILL_COUNT : 0;
+      case FILL_SHORTFALL -> fallbackCandidateLimit(targetResultCount, currentResultCount);
+    };
   }
 
   private int fallbackCandidateLimit(int targetResultCount, int currentResultCount) {

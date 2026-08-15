@@ -6,6 +6,7 @@ import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.entity.RandomHistory;
 import com.example.restaurantroulette.entity.Restaurant;
 import com.example.restaurantroulette.exception.NotFoundException;
+import com.example.restaurantroulette.service.RestaurantQueryService.GooglePlacesUsage;
 import com.example.restaurantroulette.service.external.GooglePlacesEnrichmentService;
 import java.util.List;
 import java.util.Set;
@@ -24,6 +25,7 @@ public class RandomRestaurantService {
   private final DtoMapper mapper;
   private final ValidationService validationService;
   private final GooglePlacesEnrichmentService googlePlacesEnrichmentService;
+  private final PremiumService premiumService;
 
   @Autowired
   public RandomRestaurantService(
@@ -31,12 +33,14 @@ public class RandomRestaurantService {
       RandomHistoryService randomHistoryService,
       DtoMapper mapper,
       ValidationService validationService,
-      GooglePlacesEnrichmentService googlePlacesEnrichmentService) {
+      GooglePlacesEnrichmentService googlePlacesEnrichmentService,
+      PremiumService premiumService) {
     this.restaurantQueryService = restaurantQueryService;
     this.randomHistoryService = randomHistoryService;
     this.mapper = mapper;
     this.validationService = validationService;
     this.googlePlacesEnrichmentService = googlePlacesEnrichmentService;
+    this.premiumService = premiumService;
   }
 
   public RandomRestaurantService(
@@ -44,7 +48,38 @@ public class RandomRestaurantService {
       RandomHistoryService randomHistoryService,
       DtoMapper mapper,
       ValidationService validationService) {
-    this(restaurantQueryService, randomHistoryService, mapper, validationService, null);
+    this(restaurantQueryService, randomHistoryService, mapper, validationService, null, null);
+  }
+
+  /** 課金状態を見ない形。テストなど、権限の判定が本筋でない場面のために残している。 */
+  public RandomRestaurantService(
+      RestaurantQueryService restaurantQueryService,
+      RandomHistoryService randomHistoryService,
+      DtoMapper mapper,
+      ValidationService validationService,
+      GooglePlacesEnrichmentService googlePlacesEnrichmentService) {
+    this(restaurantQueryService, randomHistoryService, mapper, validationService,
+        googlePlacesEnrichmentService, null);
+  }
+
+  /**
+   * この抽選で Google Places をどこまで使うか。
+   *
+   * <p>従量課金なのは Google だけなので、Premium と dev は候補の不足分を補う形で使い、
+   * 無料とゲストは他が1件も返せなかったときだけ使う。呼び出し元（コントローラ）で
+   * 本人確認は済んでいる。
+   */
+  private GooglePlacesUsage googlePlacesUsageFor(String userId) {
+    if (premiumService == null) {
+      return GooglePlacesUsage.ONLY_WHEN_EMPTY;
+    }
+    try {
+      return premiumService.status(userId).isPro()
+          ? GooglePlacesUsage.FILL_SHORTFALL
+          : GooglePlacesUsage.ONLY_WHEN_EMPTY;
+    } catch (RuntimeException exception) {
+      return GooglePlacesUsage.ONLY_WHEN_EMPTY;
+    }
   }
 
   public RestaurantResponse choose(RandomRestaurantRequest request) {
@@ -66,7 +101,8 @@ public class RandomRestaurantService {
         request.latitude(),
         request.longitude(),
         request.range(),
-        RANDOM_CANDIDATE_POOL_LIMIT);
+        RANDOM_CANDIDATE_POOL_LIMIT,
+        googlePlacesUsageFor(userId));
     if (request.latitude() != null && request.longitude() != null && distanceMeters != null) {
       candidates = candidates.stream()
           .filter(restaurant -> restaurant.latitude() != null && restaurant.longitude() != null)

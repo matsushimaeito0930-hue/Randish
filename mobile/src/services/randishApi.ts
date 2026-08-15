@@ -83,6 +83,11 @@ export type RestaurantSearchParams = {
   longitude?: number;
   range?: number;
   distanceMeters?: number;
+  /**
+   * 誰の検索かをサーバーに伝える。Premium と dev のときだけ Google Places も引くため。
+   * 無しでも検索はできる（無料枠として扱われる）。
+   */
+  userId?: string;
 };
 
 export type RandomRestaurantParams = RestaurantSearchParams & {

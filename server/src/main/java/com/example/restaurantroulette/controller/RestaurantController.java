@@ -5,7 +5,9 @@ import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
 import com.example.restaurantroulette.service.ValidationService;
 import com.example.restaurantroulette.service.RandomRestaurantService;
+import com.example.restaurantroulette.service.PremiumService;
 import com.example.restaurantroulette.service.RestaurantQueryService;
+import com.example.restaurantroulette.service.RestaurantQueryService.GooglePlacesUsage;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,18 +22,23 @@ public class RestaurantController {
   private final RestaurantQueryService restaurantQueryService;
   private final RandomRestaurantService randomRestaurantService;
   private final AuthenticatedUserService authenticatedUserService;
+  private final PremiumService premiumService;
 
   public RestaurantController(
       RestaurantQueryService restaurantQueryService,
       RandomRestaurantService randomRestaurantService,
-      AuthenticatedUserService authenticatedUserService) {
+      AuthenticatedUserService authenticatedUserService,
+      PremiumService premiumService) {
     this.restaurantQueryService = restaurantQueryService;
     this.randomRestaurantService = randomRestaurantService;
     this.authenticatedUserService = authenticatedUserService;
+    this.premiumService = premiumService;
   }
 
   @GetMapping
   public List<RestaurantResponse> findAll(
+      @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+      @RequestParam(value = "userId", required = false) String requestUserId,
       @RequestParam(required = false) String area,
       @RequestParam(required = false) String genre,
       @RequestParam(required = false) Integer budgetMin,
@@ -53,7 +60,8 @@ public class RestaurantController {
         budgetMax,
         effectiveLatitude,
         effectiveLongitude,
-        effectiveRange);
+        effectiveRange,
+        resolveGooglePlacesUsage(authorizationHeader, requestUserId));
     if (effectiveLatitude == null || effectiveLongitude == null || distanceMeters == null || distanceMeters <= 0) {
       return restaurants;
     }
@@ -104,6 +112,31 @@ public class RestaurantController {
   @GetMapping("/{id}")
   public RestaurantResponse findById(@PathVariable String id) {
     return restaurantQueryService.findById(id);
+  }
+
+  /**
+   * この検索で Google Places をどこまで使うかを決める。
+   *
+   * <p>Google だけが従量課金で、試算では1人あたりの原価の7割を占める。Premium と dev は
+   * 件数が足りないぶんを補う形で使い、無料とゲストは他が1件も返せなかったときだけ使う。
+   *
+   * <p>認証に失敗しても検索そのものは止めない。ここで弾くと、トークンが切れているだけの人に
+   * 店が1軒も出なくなる。分からないときは無料として扱う（多く見せることはあっても、
+   * 他人の権限を借りることはない）。
+   */
+  private GooglePlacesUsage resolveGooglePlacesUsage(String authorizationHeader, String requestUserId) {
+    String userId = requestUserId == null ? "" : requestUserId.trim();
+    if (userId.isEmpty() || authenticatedUserService.isGuestUserId(userId)) {
+      return GooglePlacesUsage.ONLY_WHEN_EMPTY;
+    }
+    try {
+      authenticatedUserService.requireSameUser(authorizationHeader, userId);
+      return premiumService.status(userId).isPro()
+          ? GooglePlacesUsage.FILL_SHORTFALL
+          : GooglePlacesUsage.ONLY_WHEN_EMPTY;
+    } catch (RuntimeException exception) {
+      return GooglePlacesUsage.ONLY_WHEN_EMPTY;
+    }
   }
 
   private Integer radiusToHotPepperRange(Integer radiusMeters) {
