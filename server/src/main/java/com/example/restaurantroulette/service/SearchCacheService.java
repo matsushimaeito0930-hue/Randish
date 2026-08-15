@@ -31,6 +31,18 @@ public class SearchCacheService {
   /** 掃除の間隔。毎回消しにいくとDBへの往復が増えるため、時々でよい。 */
   private static final Duration CLEANUP_INTERVAL = Duration.ofHours(1);
 
+  /**
+   * 控えの世代。店舗情報の作り方を変えたら、この数字を1つ上げる。
+   *
+   * <p>キャッシュは再起動をまたいで残るので、直したはずの不具合が最大12時間そのまま
+   * 出続ける。実際に「価格不明の店に8,000円と出す」のを直した直後、控えのある地点だけ
+   * 古い値が返り、直っていないように見えた。
+   *
+   * <p>世代をキーに混ぜておけば、コードを直した時点で古い控えはどのキーとも一致しなくなり、
+   * 期限が来れば掃除で消える。手でDBを触る必要はない。
+   */
+  private static final int PAYLOAD_GENERATION = 2;
+
   private final SearchCacheRepository searchCacheRepository;
   private final ObjectMapper objectMapper;
   private final AtomicLong lastCleanupEpochMillis = new AtomicLong(0);
@@ -55,6 +67,7 @@ public class SearchCacheService {
       Double longitude,
       Integer range) {
     return String.join("|",
+        "v" + PAYLOAD_GENERATION,
         normalize(area),
         normalize(genre),
         budgetMin == null ? "" : budgetMin.toString(),
