@@ -12707,6 +12707,16 @@ function RouletteMapView({
   // 地図を手で動かせる状態かどうか。
   // 動かしている間はこちらのピンが追従できないので、そのときはピンを隠す。
   const [mapInteractive, setMapInteractive] = useState(false);
+  /**
+   * 埋め込み地図を読み直させるための番号。
+   *
+   * 円とピンは地図の上に重ねた別のレイヤーで、位置はこちらの投影計算で決めている。
+   * 一方で下の地図は別ドメインのiframeなので、指で動かされても今どこを映しているかを
+   * こちらから知る方法がない。動かしたあと重ねる側だけ元の中心に戻すと、
+   * 円だけが動かした先の真ん中に出ているように見える。
+   * 「候補に戻す」ときは地図そのものを元の中心で読み直し、両者を合わせ直す。
+   */
+  const [mapResetToken, setMapResetToken] = useState(0);
   // 候補一覧と同じ上限を使う。ここだけ別の数にすると「一覧12件なのにピンは8個」になる。
   const displayCandidates = useMemo(() => candidates.slice(0, MAX_VISIBLE_CANDIDATES), [candidates]);
   const showGenreEffect = genreFocused && (candidates.length > 0 || loading || status === 'searching' || status === 'spinning');
@@ -12941,6 +12951,8 @@ function RouletteMapView({
         </MapView>
       ) : rendersWebGoogleMap ? (
         createElement('iframe', {
+          // 「候補に戻す」たびに作り直して、元の中心を読み直させる。
+          key: `roulette-map-${mapResetToken}`,
           title: '抽選 Google Map',
           src: webGoogleMapUrl,
           loading: 'lazy',
@@ -13039,7 +13051,13 @@ function RouletteMapView({
       {Platform.OS === 'web' && rendersWebGoogleMap && (
         <Pressable
           style={[styles.rouletteMapDragToggle, mapInteractive && styles.rouletteMapDragToggleActive]}
-          onPress={() => setMapInteractive((current) => !current)}
+          onPress={() => {
+            // 戻すときだけ地図を読み直す。動かし始めるときは今の見た目のままでよい。
+            if (mapInteractive) {
+              setMapResetToken((token) => token + 1);
+            }
+            setMapInteractive((current) => !current);
+          }}
         >
           <Ionicons
             name={mapInteractive ? 'checkmark' : 'move-outline'}
