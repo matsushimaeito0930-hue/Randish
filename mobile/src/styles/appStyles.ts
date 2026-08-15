@@ -13170,18 +13170,6 @@ export const styles = StyleSheet.create({
     opacity: 0.16,
   },
   // 当選店の背後に敷く光。最後に1件だけ際立たせるための土台。
-  mapRouletteWinnerHalo: {
-    position: 'absolute',
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: 'rgba(239, 85, 46, 0.22)',
-    borderWidth: 2,
-    borderColor: 'rgba(239, 85, 46, 0.5)',
-    top: -12,
-    left: -17,
-  },
-
   // --- 開発者向けの診断パネル（dev権限のときだけ表示される） ---
   devPanel: {
     borderRadius: 18,

@@ -12626,7 +12626,8 @@ function RouletteMapPin({
         selected && styles.mapRoulettePinSelected,
       ]}
     >
-      {selected && <View style={styles.mapRouletteWinnerHalo} />}
+      {/* 当選ピンの周りに輪は描かない。範囲を示す円と同じ色の円が中に入って見え、
+          どちらが検索範囲なのか分からなくなる。目立たせるのは大きさと跳ねだけで足りる。 */}
       <Ionicons name="location" size={selected ? 34 : 26} color="#e3322b" />
     </Animated.View>
   );
