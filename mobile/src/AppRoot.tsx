@@ -1083,7 +1083,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     refreshCandidates: '候補更新',
     areaInputPlaceholder: '現在地エリア',
     areaSearchTitle: 'エリアを検索',
-    areaSearchPlaceholder: '例: 大阪 / 美郷町 / 北区 / 梅田',
+    areaSearchPlaceholder: '地名で検索',
     areaHiddenTitle: 'エリアは？',
     areaHiddenLead: 'ランダムを解除すると選べます',
     searchResults: '検索結果',
@@ -1268,7 +1268,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     refreshCandidates: 'Refresh',
     areaInputPlaceholder: 'Current area',
     areaSearchTitle: 'Search Area',
-    areaSearchPlaceholder: 'Osaka / Misato / Kita / Umeda',
+    areaSearchPlaceholder: 'Search by place name',
     areaHiddenTitle: 'Area is ?',
     areaHiddenLead: 'Turn off random to choose an area',
     searchResults: 'Search Results',
@@ -1453,7 +1453,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     refreshCandidates: '更新候选',
     areaInputPlaceholder: '当前位置区域',
     areaSearchTitle: '搜索区域',
-    areaSearchPlaceholder: '大阪 / 美乡町 / 北区 / 梅田',
+    areaSearchPlaceholder: '按地名搜索',
     areaHiddenTitle: '区域是？',
     areaHiddenLead: '关闭随机后可以选择区域',
     searchResults: '搜索结果',
@@ -1638,7 +1638,7 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     refreshCandidates: '후보 갱신',
     areaInputPlaceholder: '현재 위치 지역',
     areaSearchTitle: '지역 검색',
-    areaSearchPlaceholder: '오사카 / 미사토 / 기타구 / 우메다',
+    areaSearchPlaceholder: '지명으로 검색',
     areaHiddenTitle: '지역은 ?',
     areaHiddenLead: '랜덤을 끄면 지역을 선택할 수 있어요',
     searchResults: '검색 결과',
@@ -8987,6 +8987,7 @@ export default function App() {
             onRandomPress={prepareConditionDraw}
             onAllRandomPress={prepareEverythingDraw}
             onRestaurantSave={saveRestaurantToAlbum}
+            onRestaurantVisit={handleVisitRecommendation}
             isRestaurantSaved={isRestaurantSaved}
           />
         )}
@@ -12046,6 +12047,7 @@ function SearchTab({
   onRandomPress,
   onAllRandomPress,
   onRestaurantSave,
+  onRestaurantVisit,
   isRestaurantSaved,
 }: {
   uiText: Record<string, string>;
@@ -12080,6 +12082,8 @@ function SearchTab({
   onRandomPress: () => void;
   onAllRandomPress: () => void;
   onRestaurantSave: (restaurant: Restaurant) => void;
+  /** 一覧から直接「この店にいく」を選んだとき。抽選と同じく履歴と分析に残す。 */
+  onRestaurantVisit: (restaurant: Restaurant) => void;
   isRestaurantSaved: (restaurant: Restaurant) => boolean;
 }) {
   const isEverythingRandom = drawMode === 'everything';
@@ -12212,6 +12216,7 @@ function SearchTab({
           uiText={uiText}
           isSaved={isRestaurantSaved(restaurant)}
           onSavePress={() => onRestaurantSave(restaurant)}
+          onVisitPress={() => onRestaurantVisit(restaurant)}
         />
       ))}
       {/* 写真を表示している提供元のクレジット表記 */}
@@ -16195,16 +16200,23 @@ function MiniGoogleMap({
   );
 }
 
+/**
+ * @param onVisitPress この店に行くと決めたとき。
+ *   候補が数件しかないときにルーレットを回させても意味がないので、
+ *   一覧から直接決められるようにしておく。抽選と同じく履歴にも残す。
+ */
 function RestaurantCard({
   restaurant,
   uiText = UI_TEXT.ja,
   isSaved = false,
   onSavePress,
+  onVisitPress,
 }: {
   restaurant: Restaurant;
   uiText?: Record<string, string>;
   isSaved?: boolean;
   onSavePress?: () => void;
+  onVisitPress?: () => void;
 }) {
   return (
     <View style={styles.restaurantCard}>
@@ -16223,6 +16235,12 @@ function RestaurantCard({
           <Text style={styles.restaurantMetaPill}>{getStoredMinutesLabel(restaurant, uiText)}</Text>
           <Text style={styles.restaurantMetaPill}>{formatPrice(restaurant, uiText)}</Text>
         </View>
+        {!!onVisitPress && (
+          <Pressable style={styles.restaurantVisitButton} onPress={onVisitPress}>
+            <Ionicons name="navigate-outline" size={13} color="#ffffff" />
+            <Text style={styles.restaurantVisitButtonText}>この店にいく</Text>
+          </Pressable>
+        )}
       </View>
       {!!onSavePress && (
         <Pressable

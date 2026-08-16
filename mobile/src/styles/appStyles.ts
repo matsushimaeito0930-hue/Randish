@@ -11179,6 +11179,23 @@ export const styles = StyleSheet.create({
     gap: 6,
     marginTop: 9,
   },
+  // 一覧から直接この店に決めるボタン。候補が数件のときは抽選より速い。
+  restaurantVisitButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 13,
+    borderRadius: 999,
+    backgroundColor: ORANGE,
+  },
+  restaurantVisitButtonText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#ffffff',
+  },
   restaurantMetaPill: {
     overflow: 'hidden',
     paddingHorizontal: 8,
