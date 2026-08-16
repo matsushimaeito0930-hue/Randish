@@ -6765,8 +6765,11 @@ export default function App() {
         distanceBetweenLocationsMeters(origin, { latitude: place.latitude, longitude: place.longitude, label: '' })
           <= radiusMeters)
       : merged;
-    // 全部落ちてしまう場合だけは、絞り込み前の結果を残す（0件と誤解させないため）
-    const safeCandidates = withinRadius.length ? withinRadius : merged;
+    // 範囲内が0件でも、範囲外の店で埋めない。
+    // 以前は「0件と誤解させないため」に全部残していたが、そうすると地図に円を描いた
+    // 意味が消える。円の外にピンが並び、どこまでが対象なのか説明できなくなる。
+    // 0件のときは0件と言い、距離を広げる操作をその場に出すほうが筋が通る。
+    const safeCandidates = withinRadius;
     // 評価・営業状況の絞り込みは、一覧側だけに掛かっていた。
     // そのため一覧4件に対して地図のピンが6個、という食い違いが起きる。
     // ここで落ちるものは条件に合っていないのだから、地図にも抽選にも出してはいけない。
@@ -13312,9 +13315,16 @@ function RouletteMapView({
     const dy = rawY - centerY;
     const rotatedX = centerX + dx * Math.cos(headingRadians) - dy * Math.sin(headingRadians);
     const rotatedY = centerY + dx * Math.sin(headingRadians) + dy * Math.cos(headingRadians);
+    // 画面に収まらない点は端に押し込んでいた。地図の縁にピンが並ぶだけで、
+    // その場所に店があるわけではない。円の外にピンが出て見えるのもこれが一因。
+    // 押し込んだ位置は返しつつ、収まっていたかどうかも一緒に返して、
+    // 収まらなかったピンは描かないようにする。
+    const clampedX = clamp(rotatedX, width * 0.08, width * 0.92);
+    const clampedY = clamp(rotatedY, height * 0.12, height * 0.86);
     return {
-      x: clamp(rotatedX, width * 0.08, width * 0.92),
-      y: clamp(rotatedY, height * 0.12, height * 0.86),
+      x: clampedX,
+      y: clampedY,
+      withinCanvas: clampedX === rotatedX && clampedY === rotatedY,
     };
   }, [
 
@@ -13572,6 +13582,10 @@ function RouletteMapView({
             重ねると二重に見えるうえ、こちらの投影計算とわずかにずれて不自然になる。 */}
         {!rendersNativeMap && !mapInteractive && displayCandidates.map((candidate, index) => {
           const point = toPoint(candidate.latitude, candidate.longitude);
+          // 画面に収まらない店は描かない。端に押し込むと、そこに店があるように見える。
+          if (!point.withinCanvas) {
+            return null;
+          }
           const isActiveCandidate = activeCandidateId === candidate.id;
           const isSelectedCandidate = target?.id === candidate.id && (status === 'result' || eliminatedIds.length > 0);
           const isEliminated = eliminatedIds.includes(candidate.id);
