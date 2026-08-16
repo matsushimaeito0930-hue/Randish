@@ -272,6 +272,27 @@ public class AiReportProxyService {
         && !recommendation.path("comparison").asText("").isBlank();
   }
 
+  /**
+   * 実在しない機能を勧めさせないための制約。
+   *
+   * <p>月次レポートが「RANDISHのクーポンを活用するのもいいかもしれません」と書いてきたことがある。
+   * クーポンという機能は無い。読んだ人は探しにいって見つけられず、書いてあることを
+   * 信じなくなる。何ができるアプリなのかを明示して、そこから外れた提案を禁じる。
+   *
+   * <p>機能を増やしたらここも増やすこと。ここに書いていない機能は、AIから見れば
+   * 存在しないのと同じになる。
+   */
+  private static final String RANDISH_FEATURE_GUARDRAIL = """
+      Randish can only do these things: pick a restaurant at random from search conditions
+      (area, budget, distance, genre), keep a history of those picks, estimate monthly eating-out
+      spending from that history, save shops to an album with photos, show a daily recommendation,
+      and for Premium members filter by rating and open-now, use situation modes, and read this report.
+      Never suggest a feature outside that list. In particular Randish has no coupons, no discounts,
+      no points, no reservations, no delivery, no reviews the user can post, and no friend sharing.
+      Suggest only actions the user can actually take today, either inside Randish as described above
+      or in their own life such as cooking at home or setting a budget.
+      """;
+
   private String buildGeminiPrompt(String requestBody) {
     return """
         You write Randish Premium monthly food reports.
@@ -279,6 +300,7 @@ public class AiReportProxyService {
         Write every user-facing value in natural Japanese.
         The app is a restaurant roulette app, so use words like "gaisyoku", "omise erabi", and "chusen" instead of "draw".
         Keep numbers faithful to the input. Do not invent exact spending that is not implied by the input.
+        %s
         Required JSON fields:
         {
           "title": string,
@@ -293,7 +315,7 @@ public class AiReportProxyService {
         Tone: premium, warm, concise, specific, and useful enough that a user feels this was written for them.
         Input analytics JSON:
         %s
-        """.formatted(requestBody);
+        """.formatted(RANDISH_FEATURE_GUARDRAIL, requestBody);
   }
 
   private String buildFoodAiPrompt(String requestBody) {
@@ -306,6 +328,7 @@ public class AiReportProxyService {
         Do not claim that the user actually visited or paid unless the input explicitly says so.
         Candidate names and addresses are intentionally omitted. Do not invent a restaurant name, address, menu, facility or opening status.
         Prefer a useful balance between the user's established tastes, budget, distance and a small amount of discovery.
+        %s
         Required JSON fields:
         {
           "candidateId": string,
@@ -314,11 +337,16 @@ public class AiReportProxyService {
           "comparison": string
         }
         headline: a short invitation such as "今日はこの一店、どうですか？".
-        reason: 1-2 concise sentences explaining why this candidate fits today.
+        reason: 3-4 sentences, roughly 100-160 Japanese characters. Give the user something to weigh,
+          not a restatement of the genre and price. Build it from what the input actually contains:
+          how this genre sits against the months they have on record, where the estimated price falls
+          against their usual spending, how far it is, and what kind of day this suits.
+          Every clause must trace back to a field in the input. If the input is thin, say plainly what
+          is not known yet rather than padding with generic praise.
         comparison: one concise sentence comparing this month with last month. If either month has no data, say that the preference is still being learned without inventing numbers.
         Input JSON:
         %s
-        """.formatted(requestBody);
+        """.formatted(RANDISH_FEATURE_GUARDRAIL, requestBody);
   }
 
   private String serializePayload(JsonNode payload, String label) {
