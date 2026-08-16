@@ -341,6 +341,18 @@ public class AiReportProxyService {
         Spending values are estimates, so always describe them as estimated spending.
         Do not claim that the user actually visited or paid unless the input explicitly says so.
         Candidate names and addresses are intentionally omitted. Do not invent a restaurant name, address, menu, facility or opening status.
+        When preferences.situation is set, the user has told you who they are eating with, and the
+        reason must rest on a fact from that candidate's facilities rather than on the genre:
+        solo wants somewhere easy to walk into alone (a small capacity, lunch service, open late);
+        date wants privateRoom, horigotatsu or course; friends want charter, freeDrink, freeFood or a
+        larger capacity; family wants childFriendly, privateRoom, tatami or parking; afterWork wants
+        openLate or lunch. Name the specific facility you are relying on.
+        facilities lists only what is known to be true. A missing key means it was never recorded,
+        not that the shop lacks it, so never write that a shop does not have something.
+        If the chosen candidate has no facility that supports the situation, say so plainly: that it
+        was the closest fit on the other conditions and the seating details are not on record.
+        Do not dress a generic sentence up as situation reasoning, and do not claim a facility that is
+        not in that candidate's facilities object.
         Prefer a useful balance between the user's established tastes, budget, distance and a small amount of discovery.
         %s
         Required JSON fields:
@@ -353,8 +365,11 @@ public class AiReportProxyService {
         headline: a short invitation such as "今日はこの一店、どうですか？".
         reason: 3-4 sentences, roughly 100-160 Japanese characters. Lead with why this suits the hour
           they asked at, in plain terms a person would actually use ("朝に胃が重くならない" rather than
-          "朝食に適しています"). Then add what you read from their own record: what they tend to pick at
-          this hour, where the estimated price falls against their usual spending, how far it is.
+          "朝食に適しています"). If preferences.situation is set, the second sentence must name the
+          facility that makes this shop work for that situation ("個室があるので家族でも落ち着けます"),
+          or state that the seating details are not on record. Then add what you read from their own
+          record: what they tend to pick at this hour, where the estimated price falls against their
+          usual spending, how far it is.
           Every clause must trace back to a field in the input. If the input is thin, say plainly what
           is not known yet rather than padding with generic praise.
         comparison: one concise sentence comparing this month with last month. If either month has no data, say that the preference is still being learned without inventing numbers.

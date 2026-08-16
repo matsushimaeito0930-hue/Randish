@@ -4020,11 +4020,49 @@ const buildFoodAiMealSlotHistory = (
   });
 };
 
+/**
+ * AIへ渡す席・設備の事実。
+ *
+ * 分かっている項目だけを並べる。false と「情報が無い」を区別せずに渡すと、
+ * 「個室はありません」と断言されてしまう。ホットペッパーが持っていないだけの店を
+ * 「無い店」として説明するのは嘘になる。
+ */
+const buildFoodAiFacilityFacts = (facilities: Restaurant['facilities']) => {
+  if (!facilities) {
+    return null;
+  }
+  const facts: Record<string, boolean | number> = {};
+  const flags: Array<[string, boolean | null | undefined]> = [
+    ['privateRoom', facilities.privateRoom],
+    ['tatami', facilities.tatami],
+    ['horigotatsu', facilities.horigotatsu],
+    ['childFriendly', facilities.childFriendly],
+    ['charter', facilities.charter],
+    ['freeDrink', facilities.freeDrink],
+    ['freeFood', facilities.freeFood],
+    ['course', facilities.course],
+    ['lunch', facilities.lunch],
+    ['openLate', facilities.openLate],
+    ['parking', facilities.parking],
+    ['barrierFree', facilities.barrierFree],
+  ];
+  for (const [key, value] of flags) {
+    if (value === true) {
+      facts[key] = true;
+    }
+  }
+  const capacity = toOptionalNumber(facilities.capacity);
+  if (capacity != null && capacity > 0) {
+    facts.capacity = capacity;
+  }
+  return Object.keys(facts).length ? facts : null;
+};
+
 const buildFoodAiRecommendationPayload = (
   currentAnalytics: MonthlyAnalytics,
   previousAnalytics: MonthlyAnalytics,
   candidates: Restaurant[],
-  preferences: { genre: string; budgetMin: string; budgetMax: string; distance: string },
+  preferences: { genre: string; budgetMin: string; budgetMax: string; distance: string; situation: SituationMode },
   askedAt: Date,
 ) => ({
   // 何時に聞いたか。1日1回なので、この時刻はその人が自分で選んだもの。
@@ -4063,6 +4101,12 @@ const buildFoodAiRecommendationPayload = (
     budgetMin: parseBudgetNumber(preferences.budgetMin),
     budgetMax: parseBudgetNumber(preferences.budgetMax),
     rangeMeters: parseDistanceMeters(preferences.distance),
+    // 誰と行くか。これを渡していなかったので、シチュエーションを選んでも
+    // AIはそれを知らないまま選び、理由も一般論にしかならなかった。
+    situation: preferences.situation === 'none' ? null : preferences.situation,
+    situationLabel: preferences.situation === 'none'
+      ? null
+      : SITUATION_OPTIONS.find((option) => option.key === preferences.situation)?.label ?? null,
   },
   // 店名・住所は外部AIへ送らない。返却された candidateId を端末側の店舗情報へ結び直す。
   candidates: candidates.slice(0, 15).map((restaurant) => ({
@@ -4074,6 +4118,10 @@ const buildFoodAiRecommendationPayload = (
     rating: getRatingValue(restaurant),
     minutes: toOptionalNumber(restaurant.minutes),
     openNow: restaurant.openNow ?? null,
+    // 席と設備。ホットペッパーの検索結果に元から入っていて、追加のリクエストは要らない。
+    // 「ひとりならカウンター」「家族なら個室」を言うには、この事実が要る。
+    // 渡していなかったので、AIはジャンルと価格しか材料を持っていなかった。
+    facilities: buildFoodAiFacilityFacts(restaurant.facilities),
   })),
 });
 
@@ -7198,7 +7246,8 @@ export default function App() {
           currentAnalytics,
           previousAnalytics,
           usableCandidates,
-          { genre, budgetMin, budgetMax, distance },
+          // シチュエーションは Premium の条件なので、Premium でないときは渡さない。
+          { genre, budgetMin, budgetMax, distance, situation: subscription.isPro ? situation : 'none' },
           // 押した瞬間の時刻。1日1回なので、これはその人が選んだ時刻そのもの。
           new Date(),
         ),
