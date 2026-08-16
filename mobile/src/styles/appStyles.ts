@@ -5727,6 +5727,7 @@ export const styles = StyleSheet.create({
   },
   foodAiRestaurantCopy: {
     flex: 1,
+    minWidth: 0,
     marginLeft: 11,
   },
   foodAiRestaurantName: {
@@ -11128,12 +11129,21 @@ export const styles = StyleSheet.create({
     color: '#ffffff',
   },
   restaurantThumbWrap: {
+    // 中身は78x78で固定なのに、外側は高さを持っていなかった。
+    // 横並びの子は既定で親の高さまで伸びるため、カードが高くなるほど
+    // 写真の下に背景色（薄いピンク）の余りが伸びていた。
+    alignSelf: 'flex-start',
+    width: 78,
+    height: 78,
     overflow: 'hidden',
     borderRadius: 22,
     backgroundColor: '#fff1e8',
   },
   restaurantBody: {
     flex: 1,
+    // これが無いと、長い住所や店名のぶんだけ本文が縮まずカードからはみ出す
+    // （flexの子は既定で中身より小さくならない）。
+    minWidth: 0,
     justifyContent: 'center',
   },
   restaurantTitleRow: {
@@ -11143,6 +11153,7 @@ export const styles = StyleSheet.create({
   },
   restaurantName: {
     flex: 1,
+    minWidth: 0,
     fontSize: 17,
     fontWeight: '900',
     color: INK,
