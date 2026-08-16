@@ -14478,6 +14478,7 @@ function AiMonthlyReportEntryCard({
   isMonthEndUnlocked,
   deliveryLabel,
   countdownLabel,
+  isDelivered = false,
   onOpen,
 }: {
   analytics: MonthlyAnalytics;
@@ -14488,6 +14489,8 @@ function AiMonthlyReportEntryCard({
   isMonthEndUnlocked: boolean;
   deliveryLabel: string;
   countdownLabel: string;
+  /** 書き終わって控えにある状態。押せば待たずに読める。 */
+  isDelivered?: boolean;
   onOpen: () => void;
 }) {
   const isLoading = status === 'loading';
@@ -14521,7 +14524,11 @@ function AiMonthlyReportEntryCard({
     },
     {
       label: '月末に届ける',
-      detail: hasReport ? `${displayMonthLabel}を保存済み` : isMonthEndUnlocked ? '今月分を開封' : countdownLabel,
+      detail: hasReport
+        ? `${displayMonthLabel}を保存済み`
+        : isDelivered
+          ? '書き終わって届いています'
+          : isMonthEndUnlocked ? '受け取れます' : countdownLabel,
       icon: 'mail-unread-outline',
       color: '#8d86b4',
       backgroundColor: '#f7f6fb',
@@ -14530,10 +14537,10 @@ function AiMonthlyReportEntryCard({
   const canPlayOpenAnimation = (isPro || HIDE_PREMIUM) && envelopeDelivered && !hasReport && !isLoading;
   const actionLabel = openingEnvelope
     ? openingEnvelopeStep === 'seal'
-      ? '封を切っています'
+      ? '封を開けています'
       : openingEnvelopeStep === 'letter'
         ? 'レポートを取り出しています'
-        : 'AIが仕上げています'
+        : 'お届けの支度をしています'
     : isLoading
     ? '読み込み中'
     : !isPro
@@ -14543,10 +14550,14 @@ function AiMonthlyReportEntryCard({
         : !hasHistory
           ? '履歴を集める'
         : !isMonthEndUnlocked
-          ? '月末まで封印中'
-          : '封筒を開く';
+          ? '月末に届きます'
+          : 'レポートを受け取る';
   const disabled = isLoading || openingEnvelope || (!hasHistory && !hasReport) || (isPro && !isMonthEndUnlocked && !hasReport);
-  const title = hasReport ? '前回の月末レポートを見返せます' : envelopeDelivered ? '月末レポートが届きました' : '月末に封筒で届きます';
+  const title = hasReport
+    ? '前回の月末レポートを見返せます'
+    : isDelivered
+      ? `${displayMonthLabel}のレポートが届いています`
+      : envelopeDelivered ? '月末レポートが届きました' : '月末に封筒で届きます';
   const handleOpenPress = useCallback(() => {
     if (!canPlayOpenAnimation) {
       onOpen();
@@ -16088,11 +16099,103 @@ function AnalyticsTab({
     }
   }, [aiReportMonthEndUnlocked]);
 
+  /**
+   * 届く前に書いておく。
+   *
+   * 押してから生成すると、封を切ったあとに十数秒の空白ができる。手紙は届いた時点で
+   * 書き終わっているものなので、それでは受け取る体験にならない。
+   * 開封できる期間に入っていて、その月ぶんがまだ無ければ、静かに作って控えておく。
+   * 押したときには読むだけで済む。
+   *
+   * <p>1か月に1通しか作らないので、Geminiを呼ぶのも月1回。
+   * dev は押すたびに作り直す運用なので、ここでは何もしない。
+   */
+  const reportPrefetchedMonthRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isDev || !isPro || !aiReportMonthEndUnlocked) {
+      return;
+    }
+    if (aiReportStatus === 'loading' || reportAnalytics.drawCount === 0) {
+      return;
+    }
+    // すでにその月ぶんを持っているなら書く必要はない。
+    const alreadyStored = storedReports.some((item) => item.year === reportYear && item.month === reportMonth);
+    if (alreadyStored) {
+      return;
+    }
+    const monthKey = `${reportYear}-${reportMonth}`;
+    // 失敗した月に何度も投げない。次に開き直したときにもう一度だけ試す。
+    if (reportPrefetchedMonthRef.current === monthKey) {
+      return;
+    }
+    reportPrefetchedMonthRef.current = monthKey;
+    let cancelled = false;
+    void (async () => {
+      const generated = await requestAiMonthlyReport(reportAnalytics, savedAnalytics, apiBaseUrlCandidates, userId);
+      if (cancelled || generated.source !== 'gemini') {
+        return;
+      }
+      const graphAnalytics = {
+        genreAnalytics: reportAnalytics.genreAnalytics,
+        drawCount: reportAnalytics.drawCount,
+        estimatedSpend: reportAnalytics.estimatedSpend,
+        budgetSampleCount: reportAnalytics.budgetSampleCount,
+      };
+      await writeStoredAiMonthlyReport({
+        userId,
+        year: reportYear,
+        month: reportMonth,
+        monthLabel: reportAnalytics.monthLabel,
+        report: generated,
+        analytics: graphAnalytics,
+      });
+      if (cancelled) {
+        return;
+      }
+      // 控えに入れるだけで、画面の状態は変えない。
+      // ここで aiReport まで入れてしまうと、本人が受け取る前にボタンが
+      // 「レポートを見る」に変わり、届いた瞬間を奪うことになる。
+      setStoredReports((current) => sortStoredAiReports([
+        {
+          userId: normalizeAiReportStorageUserId(userId),
+          year: reportYear,
+          month: reportMonth,
+          monthLabel: reportAnalytics.monthLabel,
+          report: generated,
+          analytics: graphAnalytics,
+          savedAt: new Date().toISOString(),
+        },
+        ...current.filter((item) => !(item.year === reportYear && item.month === reportMonth)),
+      ]));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    aiReportMonthEndUnlocked,
+    aiReportStatus,
+    apiBaseUrlCandidates,
+    isDev,
+    isPro,
+    reportAnalytics,
+    reportMonth,
+    reportYear,
+    savedAnalytics,
+    storedReports,
+    userId,
+  ]);
+
   // いま画面に出している月は一覧から除く。同じものを2か所に出しても選べない。
   const pastReports = useMemo(
     () => storedReports.filter((stored) =>
       !(aiReportOpen && stored.year === aiReportPeriod?.year && stored.month === aiReportPeriod?.month)),
     [aiReportOpen, aiReportPeriod, storedReports],
+  );
+
+  /** 書き終わって控えにあるが、まだ本人が受け取っていない今月ぶん。 */
+  const deliveredReport = useMemo(
+    () => storedReports.find((item) => item.year === reportYear && item.month === reportMonth) ?? null,
+    [reportMonth, reportYear, storedReports],
   );
 
   const openStoredReport = useCallback((stored: StoredAiMonthlyReport) => {
@@ -16172,11 +16275,28 @@ function AnalyticsTab({
     if (!HIDE_PREMIUM && !aiReportMonthEndUnlocked) {
       return;
     }
+    // 届いているぶんは書き終わっているので、待たせずにそのまま開く。
+    if (deliveredReport) {
+      openStoredReport(deliveredReport);
+      return;
+    }
+    // まだ書けていない場合だけ、その場で作る（初回や、先に作るのに失敗したとき）。
     if (!aiReportUsed && aiReportStatus !== 'loading') {
       void loadAiReport();
       return;
     }
-  }, [aiReport, aiReportMonthEndUnlocked, aiReportStatus, aiReportUsed, isDev, isPro, loadAiReport, openPaywall]);
+  }, [
+    aiReport,
+    aiReportMonthEndUnlocked,
+    aiReportStatus,
+    aiReportUsed,
+    deliveredReport,
+    isDev,
+    isPro,
+    loadAiReport,
+    openPaywall,
+    openStoredReport,
+  ]);
 
   const aiReportMatchesCurrentAnalytics = aiReportPeriod?.year === reportYear && aiReportPeriod.month === reportMonth;
 
@@ -16262,6 +16382,7 @@ function AnalyticsTab({
         isMonthEndUnlocked={HIDE_PREMIUM ? true : aiReportMonthEndUnlocked}
         deliveryLabel={aiReportDeliveryLabel}
         countdownLabel={aiReportCountdownLabel}
+        isDelivered={deliveredReport != null}
         onOpen={openAiReport}
       />
 
