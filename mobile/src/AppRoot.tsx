@@ -3950,12 +3950,68 @@ const getAverageHistoryRangeMeters = (entries: DrawHistoryEntry[]) => {
     : null;
 };
 
+/**
+ * 時間帯ごとの選び方をまとめる。
+ *
+ * 「この人は夜によく引く」「昼はいつもラーメン」といった癖は、月合計の集計では消える。
+ * 時刻で束ね直して渡し、同じ時間帯に何を選んできたかを判断材料にできるようにする。
+ */
+const buildFoodAiMealSlotHistory = (
+  currentAnalytics: MonthlyAnalytics,
+  previousAnalytics: MonthlyAnalytics,
+) => {
+  const buckets = new Map<MealSlotKey, { drawCount: number; genres: Map<string, number> }>();
+  MEAL_TICKET_DEFINITIONS.forEach((definition) => {
+    buckets.set(definition.key, { drawCount: 0, genres: new Map<string, number>() });
+  });
+
+  [...currentAnalytics.draws, ...previousAnalytics.draws].forEach((entry) => {
+    const drawnAt = new Date(entry.createdAt);
+    if (Number.isNaN(drawnAt.getTime())) {
+      return;
+    }
+    const bucket = buckets.get(getMealTicketDefinitionForDate(drawnAt).key);
+    if (!bucket) {
+      return;
+    }
+    bucket.drawCount += 1;
+    const genre = (entry.genre ?? entry.restaurant?.genre ?? '').trim();
+    if (genre) {
+      bucket.genres.set(genre, (bucket.genres.get(genre) ?? 0) + 1);
+    }
+  });
+
+  return MEAL_TICKET_DEFINITIONS.map((definition) => {
+    const bucket = buckets.get(definition.key);
+    return {
+      mealSlot: definition.key,
+      drawCount: bucket?.drawCount ?? 0,
+      topGenres: Array.from(bucket?.genres ?? [])
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([label, count]) => ({ label, count })),
+    };
+  });
+};
+
 const buildFoodAiRecommendationPayload = (
   currentAnalytics: MonthlyAnalytics,
   previousAnalytics: MonthlyAnalytics,
   candidates: Restaurant[],
   preferences: { genre: string; budgetMin: string; budgetMax: string; distance: string },
+  askedAt: Date,
 ) => ({
+  // 何時に聞いたか。1日1回なので、この時刻はその人が自分で選んだもの。
+  askedAt: {
+    mealSlot: getFoodAiMealSlot(askedAt).key,
+    mealSlotLabel: getFoodAiMealSlot(askedAt).label,
+    mealSlotGuidance: getFoodAiMealSlot(askedAt).guidance,
+    localTime: `${padDatePart(askedAt.getHours())}:${padDatePart(askedAt.getMinutes())}`,
+    weekday: ['日', '月', '火', '水', '木', '金', '土'][askedAt.getDay()],
+    isWeekend: askedAt.getDay() === 0 || askedAt.getDay() === 6,
+  },
+  // 時間帯ごとの選び方の癖。「この人は夜によく引く」「朝はほぼ引かない」を読ませる。
+  mealSlotHistory: buildFoodAiMealSlotHistory(currentAnalytics, previousAnalytics),
   currentMonth: {
     monthLabel: currentAnalytics.monthLabel,
     drawCount: currentAnalytics.drawCount,
@@ -5318,8 +5374,65 @@ const getOptionalHapticsModule = () => {
  * 1回ごとにGeminiを呼ぶため、無制限だと原価が利用者ごとに青天井になる。
  * 日付が変わったら自動でリセットされる。
  */
-const FOOD_AI_DAILY_LIMIT = 4;
+/**
+ * 1日1回。回数ではなく「いつ聞くか」を選んでもらう機能にする。
+ *
+ * <p>何度も引き直せると、気に入った答えが出るまで回すだけの道具になる。
+ * 1回きりなら、朝に聞くか夜に聞くかがそのまま質問の中身になる。
+ */
+const FOOD_AI_DAILY_LIMIT = 1;
 const FOOD_AI_USAGE_STORAGE_KEY_PREFIX = 'randish.foodAi.usage.v1';
+
+/**
+ * 聞いた時刻から食事どきを決める。
+ *
+ * <p>朝9時に焼肉や寿司を出されても重い。深夜にハンバーガーも噛み合わない。
+ * 時刻はその人が選んだ唯一の入力なので、いちばん強い手がかりとして扱う。
+ *
+ * <p>区切りは食券（MEAL_TICKET_DEFINITIONS）と揃えてある。同じ「朝」が
+ * 画面によって違う時間を指すと、説明できない挙動になるため。
+ */
+type FoodAiMealSlot = {
+  key: MealSlotKey;
+  label: string;
+  timeLabel: string;
+  /** AIへ渡す、この時間帯に何が合って何が合わないかの説明。 */
+  guidance: string;
+};
+
+const FOOD_AI_MEAL_SLOTS: Record<MealSlotKey, FoodAiMealSlot> = {
+  morning: {
+    key: 'morning',
+    label: '朝食',
+    timeLabel: '5:00-10:59',
+    guidance: 'Morning. Favour light, quick food: cafes, bakeries, teishoku, noodles, coffee. '
+      + 'Avoid heavy or celebratory food such as yakiniku, sushi, izakaya and anything built around drinking.',
+  },
+  lunch: {
+    key: 'lunch',
+    label: '昼食',
+    timeLabel: '11:00-15:59',
+    guidance: 'Lunch. Favour food that can be eaten in a normal lunch break and at a lunch price: '
+      + 'teishoku, ramen, curry, pasta, cafes. Avoid places that only make sense at night, such as izakaya.',
+  },
+  dinner: {
+    key: 'dinner',
+    label: '夕食',
+    timeLabel: '16:00-23:59',
+    guidance: 'Dinner. The widest range fits here, including yakiniku, sushi, izakaya and a sit-down meal. '
+      + 'Fast food and cafes fit poorly unless the user clearly prefers them.',
+  },
+  midnight: {
+    key: 'midnight',
+    label: '深夜',
+    timeLabel: '0:00-4:59',
+    guidance: 'Late night. Favour places that are plausibly open late and suit a late meal: '
+      + 'ramen, izakaya, bars, gyudon. Avoid breakfast food, cafes, sweets and family restaurants aimed at daytime.',
+  },
+};
+
+const getFoodAiMealSlot = (date: Date): FoodAiMealSlot =>
+  FOOD_AI_MEAL_SLOTS[getMealTicketDefinitionForDate(date).key];
 
 /**
  * 使い終えた食券の控え。
@@ -5946,8 +6059,6 @@ export default function App() {
   const [foodAiSuggestion, setFoodAiSuggestion] = useState<FoodAiSuggestion | null>(null);
   // 今日の食AIの利用回数。日付が変わると自動で戻る。
   const [foodAiUsedToday, setFoodAiUsedToday] = useState(0);
-  // その日すでに自動で1回聞いたか。失敗した日に問い合わせ続けないための歯止め。
-  const foodAiAutoAskedDateRef = useRef<string | null>(null);
   // 検索結果から求めたエリアの中心。抽選の座標としても使う。
   // 計算は抽選タブ側で行うため、コールバックで受け取ってここに保持する。
   const searchResultOriginRef = useRef<UserLocation | null>(null);
@@ -6973,7 +7084,7 @@ export default function App() {
     // 1回ごとにGeminiを呼ぶため、回数を絞らないと利用者ごとの原価が青天井になる。
     // 開発者は検証のため対象外。
     if (!subscription.isDev && foodAiUsedToday >= FOOD_AI_DAILY_LIMIT) {
-      setMessage(`今日の食AIは${FOOD_AI_DAILY_LIMIT}回まで使えます。あと${formatTimeUntilNextDay(new Date())}で戻ります。`);
+      setMessage(`食AIは1日1回です。あと${formatTimeUntilNextDay(new Date())}で次の一店を聞けます。`);
       return;
     }
     const usableCandidates = recommendations
@@ -7024,6 +7135,8 @@ export default function App() {
           previousAnalytics,
           usableCandidates,
           { genre, budgetMin, budgetMax, distance },
+          // 押した瞬間の時刻。1日1回なので、これはその人が選んだ時刻そのもの。
+          new Date(),
         ),
       );
       syncWorkingApiBaseUrl();
@@ -7091,57 +7204,37 @@ export default function App() {
   }, [userId]);
 
   /**
-   * その日の提案を、開いた時点で出しておく。
+   * その日すでに聞いてあれば、開いた時点でそれを出す。
    *
-   * 押すまで空の箱が置いてあるだけの状態をやめる。まず控えを探し、
-   * 今日ぶんがあればそれを出す。無ければ1回だけ自分で問い合わせる。
-   * 開くたびに問い合わせると Gemini を1日に何度も呼ぶので、控えを先に見る。
+   * 自分から問い合わせることはしない。何時に開くかがその人の選択であり、
+   * 朝に開けば軽いもの、夜に開けば夜に合うものを返すのがこの機能なので、
+   * アプリが勝手に時刻を決めてしまってはいけない。控えを読むだけにする。
    */
   useEffect(() => {
-    if (!subscription.isPro || foodAiSuggestion || foodAiStatus === 'loading') {
-      return;
-    }
-    if (!recommendations.length) {
+    if (!subscription.isPro || foodAiSuggestion) {
       return;
     }
     let cancelled = false;
-    void (async () => {
-      const today = toLocalDateKey(new Date());
-      const stored = await readLocalValue(buildFoodAiDailySuggestionStorageKey(userId));
-      if (cancelled) {
+    void readLocalValue(buildFoodAiDailySuggestionStorageKey(userId)).then((stored) => {
+      if (cancelled || !stored) {
         return;
       }
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored) as { date?: string; suggestion?: FoodAiSuggestion };
-          if (parsed.date === today && parsed.suggestion?.restaurant?.id && parsed.suggestion.reason) {
-            setFoodAiSuggestion(parsed.suggestion);
-            setFoodAiStatus('ready');
-            return;
-          }
-        } catch {
-          // 控えが壊れていれば作り直す
+      try {
+        const parsed = JSON.parse(stored) as { date?: string; suggestion?: FoodAiSuggestion };
+        if (parsed.date === toLocalDateKey(new Date())
+          && parsed.suggestion?.restaurant?.id
+          && parsed.suggestion.reason) {
+          setFoodAiSuggestion(parsed.suggestion);
+          setFoodAiStatus('ready');
         }
+      } catch {
+        // 控えが壊れていれば、押されたときに作り直す
       }
-      // 失敗しても1日1回で止める。ここを無条件に繰り返すと、
-      // 候補が取れない間ずっと問い合わせ続けることになる。
-      if (foodAiAutoAskedDateRef.current === today) {
-        return;
-      }
-      foodAiAutoAskedDateRef.current = today;
-      await askFoodAiRecommendation();
-    })();
+    });
     return () => {
       cancelled = true;
     };
-  }, [
-    askFoodAiRecommendation,
-    foodAiStatus,
-    foodAiSuggestion,
-    recommendations.length,
-    subscription.isPro,
-    userId,
-  ]);
+  }, [foodAiSuggestion, subscription.isPro, userId]);
 
   // 今日その端末で使い終えた食券を読み直す。
   // これが無いと、読み込み直すたびに食券が全部戻り、上限が意味を持たなかった。
@@ -10013,12 +10106,13 @@ function FoodAiTodayCard({
             <View style={styles.foodAiLimitNotice}>
               <Ionicons name="time-outline" size={14} color="#7161f2" />
               <Text style={styles.foodAiLimitNoticeText}>
-                今日の分は使い切りました。あと{formatTimeUntilNextDay(new Date())}で{FOOD_AI_DAILY_LIMIT}回ぶん戻ります。
+                今日の一店はこれです。次に聞けるのはあと{formatTimeUntilNextDay(new Date())}。
+                聞く時間帯を変えると、その時間に合う店を選びます。
               </Text>
             </View>
           ) : remainingToday != null ? (
             <Text style={styles.foodAiRemainingText}>
-              今日はあと{remainingToday}回（1日{FOOD_AI_DAILY_LIMIT}回まで）
+              今日はあと{remainingToday}回聞けます
             </Text>
           ) : null}
           <View style={styles.foodAiActions}>
@@ -10031,7 +10125,7 @@ function FoodAiTodayCard({
                 ? <ActivityIndicator size="small" color="#7161f2" />
                 : <Ionicons name={remainingToday === 0 ? 'lock-closed-outline' : 'refresh'} size={16} color="#7161f2" />}
               <Text style={styles.foodAiSecondaryButtonText}>
-                {loading ? '考え中…' : remainingToday === 0 ? '明日また' : '別の提案'}
+                {loading ? '考え中…' : remainingToday === 0 ? '明日また' : 'もう一度'}
               </Text>
             </Pressable>
             <Pressable style={styles.foodAiPrimaryButtonCompact} onPress={() => onVisit(suggestion.restaurant)}>
@@ -10043,7 +10137,13 @@ function FoodAiTodayCard({
       ) : (
         <>
           <Text style={styles.foodAiLead}>
-            先月と今月の推定支出、よく選ぶジャンル、予算、検索範囲をまとめて、今日の候補を一店に絞ります。
+            聞いた時間に合う一店を選びます。いまは{getFoodAiMealSlot(new Date()).label}の時間帯です。
+            これまでの選び方も読んで、{getFoodAiMealSlot(new Date()).label}に合う重さのお店から一店に絞ります。
+          </Text>
+          {/* いつ押すかがそのまま質問になる、と先に伝える。
+              1日1回なので、押したあとで「夜に聞けばよかった」となるのを避けたい。 */}
+          <Text style={styles.foodAiLead}>
+            聞けるのは1日1回です。お腹が空いた時間に聞くと、その時間に合う店が出ます。
           </Text>
           <Text style={styles.foodAiPrivacyNote}>店名や住所はAIへ送らず、候補IDと集計値だけで判断します。</Text>
           <Pressable
