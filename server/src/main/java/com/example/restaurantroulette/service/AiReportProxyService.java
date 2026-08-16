@@ -300,6 +300,11 @@ public class AiReportProxyService {
         Write every user-facing value in natural Japanese.
         The app is a restaurant roulette app, so use words like "gaisyoku", "omise erabi", and "chusen" instead of "draw".
         Keep numbers faithful to the input. Do not invent exact spending that is not implied by the input.
+        estimatedSpend only covers the budgetSampleCount draws whose price was known, not all drawCount
+        draws. When budgetSampleCount is smaller than drawCount, never present estimatedSpend as the
+        month's total: say it covers budgetSampleCount of drawCount and that the rest had no price on
+        record. Presenting a partial figure as the whole is the one thing that makes this report useless,
+        because the reader compares it against what they actually spent and it is always too low.
         %s
         Required JSON fields:
         {

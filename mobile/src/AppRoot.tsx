@@ -204,7 +204,11 @@ type MonthlyAnalytics = {
   topArea: string;
 };
 
-type AiReportGraphAnalytics = Pick<MonthlyAnalytics, 'genreAnalytics' | 'drawCount' | 'estimatedSpend'>;
+// budgetSampleCount も持たせる。支出の円が「外食何回ぶんの数字か」を書くのに要る。
+type AiReportGraphAnalytics = Pick<
+  MonthlyAnalytics,
+  'genreAnalytics' | 'drawCount' | 'estimatedSpend' | 'budgetSampleCount'
+>;
 
 type SavedRestaurantAnalytics = {
   totalSaved: number;
@@ -3614,6 +3618,28 @@ const getGenreAnalytics = (entries: DrawHistoryEntry[]): AnalyticsTrendItem[] =>
   return [...counts.values()].sort((a, b) => b.count - a.count || b.estimatedSpend - a.estimatedSpend);
 };
 
+/**
+ * 支出の数字が何件ぶんなのかを一行で表す。
+ *
+ * 価格を持たない店（OpenStreetMap由来など）は支出0として扱われ、ジャンルごと円から消える。
+ * そのため外食32回でも、価格の分かるラーメン18回だけが残って「100%」と出る。
+ * 数字自体は正しいが、黙って出すと「上限で止まっている」ようにしか読めない。
+ */
+const buildSpendCoverageNote = (analytics: { drawCount: number; budgetSampleCount: number }) => {
+  if (analytics.drawCount === 0) {
+    return null;
+  }
+  const missing = analytics.drawCount - analytics.budgetSampleCount;
+  if (missing <= 0) {
+    return `外食${analytics.drawCount}回すべての推定です。`;
+  }
+  if (analytics.budgetSampleCount === 0) {
+    return `外食${analytics.drawCount}回はいずれも価格情報がなく、支出を推定できていません。`;
+  }
+  return `外食${analytics.drawCount}回のうち、価格が分かる${analytics.budgetSampleCount}回ぶんの推定です`
+    + `（残り${missing}回は価格情報なし）。`;
+};
+
 const getPriceRangeAnalytics = (entries: DrawHistoryEntry[]): AnalyticsTrendItem[] => {
   const counts = new Map<string, AnalyticsTrendItem>();
   entries.forEach((entry) => {
@@ -5567,7 +5593,8 @@ const isAiReportGraphAnalytics = (value: unknown): value is AiReportGraphAnalyti
   const analytics = value as Partial<AiReportGraphAnalytics>;
   return isAnalyticsTrendItemArray(analytics.genreAnalytics)
     && typeof analytics.drawCount === 'number'
-    && typeof analytics.estimatedSpend === 'number';
+    && typeof analytics.estimatedSpend === 'number'
+    && typeof analytics.budgetSampleCount === 'number';
 };
 
 const parseStoredAiMonthlyReport = (value: string | null): StoredAiMonthlyReport | null => {
@@ -6567,8 +6594,24 @@ export default function App() {
       : merged;
     // 全部落ちてしまう場合だけは、絞り込み前の結果を残す（0件と誤解させないため）
     const safeCandidates = withinRadius.length ? withinRadius : merged;
-    return safeCandidates.slice(0, MAX_VISIBLE_CANDIDATES);
-  }, [areaMatchedRestaurants, distance, mapCandidates, searchCircleOrigin]);
+    // 評価・営業状況の絞り込みは、一覧側だけに掛かっていた。
+    // そのため一覧4件に対して地図のピンが6個、という食い違いが起きる。
+    // ここで落ちるものは条件に合っていないのだから、地図にも抽選にも出してはいけない。
+    // ここは0件になっても戻さない。★4.0以上で探して1件も無いときに全部出すのは、
+    // 条件を無視して見せているのと同じになる。
+    const matchingConditions = subscription.isPro
+      ? safeCandidates.filter((place) => candidateMatchesPremiumConditions(place, minRating, openNowOnly))
+      : safeCandidates;
+    return matchingConditions.slice(0, MAX_VISIBLE_CANDIDATES);
+  }, [
+    areaMatchedRestaurants,
+    distance,
+    mapCandidates,
+    minRating,
+    openNowOnly,
+    searchCircleOrigin,
+    subscription.isPro,
+  ]);
 
   const visibleRestaurants = useMemo(() => {
     // 一覧側の店舗情報のほうが予算・所要時間などが揃っているので、同じ店なら一覧側を使う。
@@ -13144,6 +13187,8 @@ function RouletteMapView({
   const canRenderNativeMap = MapModule && Platform.OS !== 'web';
   const MapView = MapModule?.default;
   const Marker = MapModule?.Marker;
+  // 距離の範囲を描く円。Webでは自前で重ねているが、こちらは地図に実際の縮尺で描かせる。
+  const MapCircle = MapModule?.Circle;
   const rendersNativeMap = Boolean(canRenderNativeMap && MapView && Marker);
   const rendersWebGoogleMap = Platform.OS === 'web' && hasResolvedMapCenter;
   const webGoogleMapUrl = useMemo(() => {
@@ -13191,6 +13236,18 @@ function RouletteMapView({
           userLocationUpdateInterval={1000}
           loadingEnabled
         >
+          {/* 指定した距離の範囲。Web版だけに出ていて、アプリでは何も出ていなかった。
+              どこまでが対象なのかは、どちらで見ても同じように分かるべき。 */}
+          {!mapInteractive && MapCircle && circleRadiusMeters != null && circleRadiusMeters > 0 && (
+            <MapCircle
+              center={{ latitude: mapCenter.latitude, longitude: mapCenter.longitude }}
+              radius={circleRadiusMeters}
+              strokeWidth={2}
+              strokeColor="rgba(239, 85, 46, 0.55)"
+              fillColor="rgba(239, 85, 46, 0.07)"
+              zIndex={1}
+            />
+          )}
           {!useNativeUserLocationMarker && (
             <Marker coordinate={{ latitude: mapCenter.latitude, longitude: mapCenter.longitude }} anchor={{ x: 0.5, y: 1 }}>
               <View style={styles.mapRouletteOriginMarker}>
@@ -14789,6 +14846,7 @@ function AiMonthlyReportCard({
             summaryText="ジャンル → 推定支出の順で、どこに外食費が寄っているかを表示します。"
             emptyText="支出割合を出せる予算データがまだありません。"
             showSpendArrow
+            coverageNote={buildSpendCoverageNote(analytics) ?? undefined}
           />
         </View>
       ) : null}
@@ -15172,6 +15230,7 @@ function GenreSpendDonut({
   summaryText,
   emptyText = '推定できる予算データがまだありません。',
   showSpendArrow = false,
+  coverageNote,
 }: {
   items: AnalyticsTrendItem[];
   totalLabel: string;
@@ -15180,6 +15239,15 @@ function GenreSpendDonut({
   summaryText?: string;
   emptyText?: string;
   showSpendArrow?: boolean;
+  /**
+   * この円が「何件ぶんの数字なのか」。
+   *
+   * 支出の円は、価格の分かる店だけで割合を出している。価格を持たない店（OpenStreetMap由来など）は
+   * 支出0として扱われ、ジャンルごと円から消える。その結果、外食32回でもラーメンだけが残って
+   * 100%と出る。数字は正しいが、読む人には「上限で止まっている」ようにしか見えない。
+   * 何件が対象なのかを必ず添える。
+   */
+  coverageNote?: string;
 }) {
   const shouldUseSpend = metric === 'spend'
     || (metric === 'auto' && items.some((item) => item.estimatedSpend > 0));
@@ -15276,6 +15344,9 @@ function GenreSpendDonut({
           <Text style={styles.analysisDonutSummaryText}>
             {summaryText ?? '今月いちばん多いジャンル。ジャンルごとの回数・割合・支出目安をまとめます。'}
           </Text>
+          {!!coverageNote && (
+            <Text style={styles.analysisDonutCoverageNote}>{coverageNote}</Text>
+          )}
         </View>
       </View>
       <View style={styles.analysisDonutLegend}>
@@ -15852,6 +15923,7 @@ function AnalyticsTab({
       genreAnalytics: reportAnalytics.genreAnalytics,
       drawCount: reportAnalytics.drawCount,
       estimatedSpend: reportAnalytics.estimatedSpend,
+      budgetSampleCount: reportAnalytics.budgetSampleCount,
     };
     setAiReport(nextReport);
     setAiReportPeriod({ year: reportYear, month: reportMonth, monthLabel: reportAnalytics.monthLabel });

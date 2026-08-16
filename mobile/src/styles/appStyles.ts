@@ -10094,6 +10094,17 @@ export const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#756b60',
   },
+  // 支出の円が何件ぶんの数字なのか。100%の意味を取り違えさせないための一行。
+  analysisDonutCoverageNote: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#efe6db',
+    fontSize: 11,
+    lineHeight: 17,
+    fontWeight: '800',
+    color: '#8d8478',
+  },
   analysisDonutLegend: {
     marginTop: 12,
     gap: 8,
