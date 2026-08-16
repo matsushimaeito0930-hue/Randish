@@ -269,6 +269,14 @@ type StoredAiMonthlyReport = {
   report: AiMonthlyReport;
   analytics?: AiReportGraphAnalytics;
   savedAt: string;
+  /**
+   * その月が閉じたあとに書いたか。
+   *
+   * 月末の前日・当日に届けるぶんは最終日を含んでいない。false のものは、
+   * 月が明けてから一度だけ書き直す。項目が無い古い控えは完全版として扱う
+   * （以前は月が閉じてからしか作れなかったため）。
+   */
+  coversFullMonth?: boolean;
 };
 
 type AiReportStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -3573,17 +3581,27 @@ const AI_REPORT_GRACE_LAST_DAY = 10;
  * ここを取り違えると、まだ数日しか経っていない今月を集計して出してしまう。
  */
 const getOpenableReportMonth = (date: Date): Date | null => {
-  // 翌月の頭。前の月のぶんを開けられる。
-  // 月の最終日は28日より前には来ないので、下の月末判定と重なることはない。
+  // 翌月の頭。前の月のぶんを開けられる。この時点では月が閉じているので数字は完全。
+  // 月の最終日は28日より前には来ないので、下の判定と重なることはない。
   if (date.getDate() <= AI_REPORT_GRACE_LAST_DAY) {
     return addMonthsToStart(date, -1);
   }
-  // 月末当日。その月のぶんが届く。
-  if (date.getDate() === getMonthEndDate(date).getDate()) {
+  // 月末の前日と当日。まだ月は終わっていないので、届くのは最終日ぶんを欠いた暫定版。
+  const monthEndDay = getMonthEndDate(date).getDate();
+  if (date.getDate() >= monthEndDay - 1) {
     return getMonthStart(date);
   }
   return null;
 };
+
+/**
+ * その月がもう閉じているか。
+ *
+ * 月末の前日・当日に届けるレポートは、まだ終わっていない月を集計している。
+ * 最終日に食べたぶんが入らないので、月が明けたら一度だけ書き直す必要がある。
+ */
+const isReportMonthComplete = (reportMonthStart: Date, now: Date) =>
+  now.getTime() >= addMonthsToStart(reportMonthStart, 1).getTime();
 
 const isAiReportOpenable = (date: Date) => getOpenableReportMonth(date) != null;
 
@@ -5726,6 +5744,8 @@ const parseStoredAiMonthlyReport = (value: string | null): StoredAiMonthlyReport
         report: parsed.report,
         analytics: isAiReportGraphAnalytics(parsed.analytics) ? parsed.analytics : undefined,
         savedAt: parsed.savedAt,
+        // 項目が無い古い控えは完全版とみなす。当時は月が閉じてからしか作れなかった。
+        coversFullMonth: parsed.coversFullMonth !== false,
       }
       : null;
   } catch {
@@ -5787,6 +5807,7 @@ const writeStoredAiMonthlyReport = async ({
   monthLabel,
   report,
   analytics,
+  coversFullMonth,
 }: {
   userId: string;
   year: number;
@@ -5794,6 +5815,7 @@ const writeStoredAiMonthlyReport = async ({
   monthLabel: string;
   report: AiMonthlyReport;
   analytics?: AiReportGraphAnalytics;
+  coversFullMonth: boolean;
 }) => {
   const payload: StoredAiMonthlyReport = {
     userId: normalizeAiReportStorageUserId(userId),
@@ -5803,6 +5825,7 @@ const writeStoredAiMonthlyReport = async ({
     report,
     analytics,
     savedAt: new Date().toISOString(),
+    coversFullMonth,
   };
   try {
     const existing = await readStoredAiMonthlyReports(userId);
@@ -14479,6 +14502,7 @@ function AiMonthlyReportEntryCard({
   deliveryLabel,
   countdownLabel,
   isDelivered = false,
+  isProvisional = false,
   onOpen,
 }: {
   analytics: MonthlyAnalytics;
@@ -14491,6 +14515,8 @@ function AiMonthlyReportEntryCard({
   countdownLabel: string;
   /** 書き終わって控えにある状態。押せば待たずに読める。 */
   isDelivered?: boolean;
+  /** まだ月が終わっていない時点で書いたぶん。最終日が入っていない。 */
+  isProvisional?: boolean;
   onOpen: () => void;
 }) {
   const isLoading = status === 'loading';
@@ -14527,7 +14553,7 @@ function AiMonthlyReportEntryCard({
       detail: hasReport
         ? `${displayMonthLabel}を保存済み`
         : isDelivered
-          ? '書き終わって届いています'
+          ? (isProvisional ? '届いています（最終日ぶんは翌月に加算）' : '書き終わって届いています')
           : isMonthEndUnlocked ? '受け取れます' : countdownLabel,
       icon: 'mail-unread-outline',
       color: '#8d86b4',
@@ -16033,6 +16059,8 @@ function AnalyticsTab({
    * 期間外（および期限を持たない dev）は、これまでどおり今月を見る。
    */
   const reportMonthStart = useMemo(() => getOpenableReportMonth(now) ?? getMonthStart(now), [now]);
+  // 月末の前日・当日に届けるぶんは、まだ最終日が終わっていない暫定版になる。
+  const reportMonthComplete = useMemo(() => isReportMonthComplete(reportMonthStart, now), [now, reportMonthStart]);
   const reportAnalytics = useMemo(
     () => getMonthlyAnalytics(analyticsEntries, reportMonthStart),
     [analyticsEntries, reportMonthStart],
@@ -16118,12 +16146,14 @@ function AnalyticsTab({
     if (aiReportStatus === 'loading' || reportAnalytics.drawCount === 0) {
       return;
     }
-    // すでにその月ぶんを持っているなら書く必要はない。
-    const alreadyStored = storedReports.some((item) => item.year === reportYear && item.month === reportMonth);
-    if (alreadyStored) {
+    // すでに持っているぶんで足りるか。暫定版しか無く、月が閉じたなら書き直す。
+    // 最終日に食べたぶんが入っていないレポートを、月が明けても出し続けたくない。
+    const stored = storedReports.find((item) => item.year === reportYear && item.month === reportMonth);
+    if (stored && (stored.coversFullMonth !== false || !reportMonthComplete)) {
       return;
     }
-    const monthKey = `${reportYear}-${reportMonth}`;
+    // 暫定版と完全版で別の鍵にする。同じ鍵だと、書き直しが「もう試した」と判定される。
+    const monthKey = `${reportYear}-${reportMonth}-${reportMonthComplete ? 'final' : 'draft'}`;
     // 失敗した月に何度も投げない。次に開き直したときにもう一度だけ試す。
     if (reportPrefetchedMonthRef.current === monthKey) {
       return;
@@ -16148,6 +16178,7 @@ function AnalyticsTab({
         monthLabel: reportAnalytics.monthLabel,
         report: generated,
         analytics: graphAnalytics,
+        coversFullMonth: reportMonthComplete,
       });
       if (cancelled) {
         return;
@@ -16164,6 +16195,7 @@ function AnalyticsTab({
           report: generated,
           analytics: graphAnalytics,
           savedAt: new Date().toISOString(),
+          coversFullMonth: reportMonthComplete,
         },
         ...current.filter((item) => !(item.year === reportYear && item.month === reportMonth)),
       ]));
@@ -16180,6 +16212,7 @@ function AnalyticsTab({
     reportAnalytics,
     reportMonth,
     reportYear,
+    reportMonthComplete,
     savedAnalytics,
     storedReports,
     userId,
@@ -16249,9 +16282,10 @@ function AnalyticsTab({
         monthLabel: reportAnalytics.monthLabel,
         report: nextReport,
         analytics: nextReportGraphAnalytics,
+        coversFullMonth: reportMonthComplete,
       });
     }
-  }, [aiReportMonthEndUnlocked, aiReportStatus, apiBaseUrlCandidates, reportAnalytics, reportMonth, reportYear, savedAnalytics, userId]);
+  }, [aiReportMonthEndUnlocked, aiReportStatus, apiBaseUrlCandidates, reportAnalytics, reportMonth, reportMonthComplete, reportYear, savedAnalytics, userId]);
 
   const openAiReport = useCallback(() => {
     if (!HIDE_PREMIUM && !isPro) {
@@ -16383,6 +16417,7 @@ function AnalyticsTab({
         deliveryLabel={aiReportDeliveryLabel}
         countdownLabel={aiReportCountdownLabel}
         isDelivered={deliveredReport != null}
+        isProvisional={deliveredReport?.coversFullMonth === false}
         onOpen={openAiReport}
       />
 
