@@ -9219,6 +9219,114 @@ export const styles = StyleSheet.create({
     opacity: 0.45,
   },
 
+  // 年末まとめの月別グラフ。年カードは濃い背景なので、線と文字は明るい側で置く。
+  yearChartWrap: {
+    marginTop: 14,
+    padding: 13,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  yearChartHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 10,
+  },
+  yearChartTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#fff2df',
+  },
+  yearChartPeak: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#d8b77d',
+  },
+  yearChartRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 4,
+    height: 92,
+  },
+  yearChartColumn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 5,
+  },
+  yearChartBarTrack: {
+    width: '100%',
+    height: 68,
+    justifyContent: 'flex-end',
+    borderRadius: 5,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    overflow: 'hidden',
+  },
+  yearChartBar: {
+    width: '100%',
+    borderRadius: 5,
+    backgroundColor: '#f6b27d',
+  },
+  // 一番多い月だけ色を変える。どこが山だったかを探させない。
+  yearChartBarPeak: {
+    backgroundColor: '#ffd9a8',
+  },
+  yearChartMonthLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: 'rgba(255,242,223,0.65)',
+  },
+
+  // ジャンル・場所の上位。
+  yearRankWrap: {
+    marginTop: 14,
+    padding: 13,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    gap: 8,
+  },
+  yearRankRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  yearRankIndex: {
+    width: 16,
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#d8b77d',
+  },
+  yearRankLabel: {
+    width: 88,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#fff2df',
+  },
+  yearRankBarTrack: {
+    flex: 1,
+    minWidth: 0,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  yearRankBar: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#9bd37f',
+  },
+  yearRankCount: {
+    width: 40,
+    textAlign: 'right',
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#fff2df',
+  },
+
   // 開封済みの過去レポート。期限が切れても、受け取ったものはここから読み返せる。
   pastReportCard: {
     marginBottom: 13,

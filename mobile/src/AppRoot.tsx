@@ -15253,6 +15253,85 @@ function AiMonthlyReportCard({
   );
 }
 
+/**
+ * 一年の月別の推移。
+ *
+ * 合計だけ並べても、その年に何があったかは伝わらない。忙しかった月、
+ * 外食が止まった月、増え始めた時期は、月ごとに並べて初めて見える。
+ * 外部のグラフ部品は入れず、Viewの高さだけで描く。
+ */
+function YearlyMonthlyChart({ months, metric }: {
+  months: MonthlyAnalytics[];
+  metric: 'count' | 'spend';
+}) {
+  const values = months.map((month) => metric === 'count' ? month.drawCount : month.estimatedSpend);
+  const peak = Math.max(...values, 0);
+  if (peak <= 0) {
+    return null;
+  }
+  const peakIndex = values.indexOf(peak);
+  return (
+    <View style={styles.yearChartWrap}>
+      <View style={styles.yearChartHeader}>
+        <Text style={styles.yearChartTitle}>{metric === 'count' ? '月別の外食回数' : '月別の推定外食費'}</Text>
+        <Text style={styles.yearChartPeak}>
+          最多 {months[peakIndex]?.monthLabel ?? ''}
+          {metric === 'count' ? ` ${peak}回` : ` 約${formatYen(peak)}`}
+        </Text>
+      </View>
+      <View style={styles.yearChartRow}>
+        {months.map((month, index) => {
+          const value = values[index];
+          // 0の月も棒の跡だけ残す。抜けているのか0なのかが分からなくなるため。
+          const heightRatio = peak > 0 ? value / peak : 0;
+          return (
+            <View key={month.monthLabel} style={styles.yearChartColumn}>
+              <View style={styles.yearChartBarTrack}>
+                <View
+                  style={[
+                    styles.yearChartBar,
+                    { height: `${Math.max(3, Math.round(heightRatio * 100))}%` },
+                    index === peakIndex && styles.yearChartBarPeak,
+                  ]}
+                />
+              </View>
+              <Text style={styles.yearChartMonthLabel}>{index + 1}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+/** その年の上位を、順位つきで並べる。 */
+function YearlyRankList({ title, items, unit }: {
+  title: string;
+  items: AnalyticsTrendItem[];
+  unit: string;
+}) {
+  const ranked = items.filter((item) => item.count > 0).slice(0, 5);
+  if (!ranked.length) {
+    return null;
+  }
+  const top = ranked[0].count;
+  return (
+    <View style={styles.yearRankWrap}>
+      <Text style={styles.yearChartTitle}>{title}</Text>
+      {ranked.map((item, index) => (
+        <View key={item.label} style={styles.yearRankRow}>
+          <Text style={styles.yearRankIndex}>{index + 1}</Text>
+          <Text style={styles.yearRankLabel} numberOfLines={1}>{item.label}</Text>
+          <View style={styles.yearRankBarTrack}>
+            <View style={[styles.yearRankBar, { width: `${Math.max(4, Math.round((item.count / top) * 100))}%` }]} />
+          </View>
+          <Text style={styles.yearRankCount}>{item.count}{unit}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function YearlyWrappedCard({
   analytics,
   report,
@@ -15373,6 +15452,10 @@ function YearlyWrappedCard({
                 </View>
               </View>
 
+              <YearlyMonthlyChart months={analytics.monthlyAnalytics} metric="count" />
+              <YearlyRankList title="よく選んだジャンル" items={analytics.genreAnalytics} unit="回" />
+              <YearlyRankList title="よく行った場所" items={analytics.areaAnalytics} unit="回" />
+
               <Text style={styles.yearWrappedSectionTitle}>無料で見られるまとめ</Text>
               {freeHighlights.map((item, index) => (
                 <View key={`${item}-${index}`} style={styles.yearWrappedHighlightRow}>
@@ -15393,6 +15476,7 @@ function YearlyWrappedCard({
                       <Text style={styles.yearWrappedHighlightText}>{item}</Text>
                     </View>
                   ))}
+                  <YearlyMonthlyChart months={analytics.monthlyAnalytics} metric="spend" />
                   <View style={styles.yearWrappedMissionBox}>
                     <Ionicons name="flag-outline" size={18} color="#d8b77d" />
                     <Text style={styles.yearWrappedMissionText}>{report.nextYearMission}</Text>
