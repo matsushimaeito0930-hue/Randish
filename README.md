@@ -206,6 +206,19 @@ When the bridge is enabled, add the API callback URL to Supabase Auth redirect U
 http://YOUR-PC-IP:8080/api/auth/oauth/callback
 ```
 
+## Load Testing
+
+k6 scenarios live in `loadtest/`. Point them at a locally running server, not at
+production: Render's free plan runs a single instance, and `/api/restaurants` calls
+metered external APIs.
+
+```powershell
+k6 run loadtest/smoke.js
+k6 run loadtest/search-cache.js
+```
+
+See `loadtest/README.md` for what the numbers mean.
+
 ## Database
 
 Local development currently uses H2:
