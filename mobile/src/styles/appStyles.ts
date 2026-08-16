@@ -9219,6 +9219,49 @@ export const styles = StyleSheet.create({
     opacity: 0.45,
   },
 
+  // 開封済みの過去レポート。期限が切れても、受け取ったものはここから読み返せる。
+  pastReportCard: {
+    marginBottom: 13,
+    padding: 17,
+    borderRadius: 24,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#eadfd2',
+  },
+  pastReportTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: INK,
+  },
+  pastReportLead: {
+    marginTop: 4,
+    marginBottom: 6,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+    color: '#8d8478',
+  },
+  pastReportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 11,
+    borderTopWidth: 1,
+    borderTopColor: '#f2e9de',
+  },
+  pastReportRowLabel: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: INK,
+  },
+  pastReportRowMeta: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8d8478',
+  },
+
   // 候補が少ないときだけ出す、Premiumの案内。
   premiumCandidateHint: {
     flexDirection: 'row',

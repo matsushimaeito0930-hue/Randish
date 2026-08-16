@@ -3557,7 +3557,39 @@ const getAnalyticsMonthLabel = (date: Date) => `${date.getMonth() + 1}月`;
 
 const getMonthEndDate = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0);
 
-const isMonthEndReportDay = (date: Date) => date.getDate() === getMonthEndDate(date).getDate();
+/**
+ * 開封できる最終日。翌月のこの日を過ぎると、その月のレポートは作れなくなる。
+ *
+ * 以前は「月末の1日だけ」だった。その日にアプリを開かなかった人は、その月の
+ * レポートを永久に読めない。月額を払っている相手にそれはやりすぎる。
+ * かといって無期限にすると「月末に届く」という体験そのものが無くなる。
+ */
+const AI_REPORT_GRACE_LAST_DAY = 10;
+
+/**
+ * いま開封できるのは何月ぶんか。開封できる期間の外なら null。
+ *
+ * 月末当日から翌月10日までが窓。翌月の1〜10日にいるあいだは、対象は「前の月」になる。
+ * ここを取り違えると、まだ数日しか経っていない今月を集計して出してしまう。
+ */
+const getOpenableReportMonth = (date: Date): Date | null => {
+  // 翌月の頭。前の月のぶんを開けられる。
+  // 月の最終日は28日より前には来ないので、下の月末判定と重なることはない。
+  if (date.getDate() <= AI_REPORT_GRACE_LAST_DAY) {
+    return addMonthsToStart(date, -1);
+  }
+  // 月末当日。その月のぶんが届く。
+  if (date.getDate() === getMonthEndDate(date).getDate()) {
+    return getMonthStart(date);
+  }
+  return null;
+};
+
+const isAiReportOpenable = (date: Date) => getOpenableReportMonth(date) != null;
+
+/** 対象月のレポートが読めなくなる日。 */
+const getAiReportExpiryDate = (reportMonthStart: Date) =>
+  new Date(reportMonthStart.getFullYear(), reportMonthStart.getMonth() + 1, AI_REPORT_GRACE_LAST_DAY);
 
 const formatMonthEndDeliveryLabel = (date: Date) => {
   const monthEnd = getMonthEndDate(date);
@@ -3565,6 +3597,16 @@ const formatMonthEndDeliveryLabel = (date: Date) => {
 };
 
 const getMonthEndCountdownLabel = (date: Date) => {
+  const openableMonth = getOpenableReportMonth(date);
+  if (openableMonth) {
+    const expiry = getAiReportExpiryDate(openableMonth);
+    const today = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const dayDiff = Math.max(0, Math.ceil((expiry.getTime() - today.getTime()) / 86_400_000));
+    if (dayDiff === 0) {
+      return '今日が開封の最終日です';
+    }
+    return `あと${dayDiff}日で読めなくなります`;
+  }
   const monthEnd = getMonthEndDate(date);
   const today = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const target = new Date(monthEnd.getFullYear(), monthEnd.getMonth(), monthEnd.getDate());
@@ -5691,12 +5733,51 @@ const parseStoredAiMonthlyReport = (value: string | null): StoredAiMonthlyReport
   }
 };
 
-const readStoredAiMonthlyReport = async (userId: string) => {
+/**
+ * 残しておく月数。
+ *
+ * 開封できる期間には期限があるが、一度開けたレポートは残す。期限の意味は
+ * 「受け取り損ねる」ことであって、受け取ったものを取り上げることではない。
+ */
+const AI_REPORT_HISTORY_MONTHS = 12;
+
+/** 新しい月が先。同じ月は1件だけ持つ。 */
+const sortStoredAiReports = (reports: StoredAiMonthlyReport[]) =>
+  [...reports].sort((first, second) =>
+    second.year - first.year || second.month - first.month);
+
+/**
+ * 保存してあるレポートを全部読む。
+ *
+ * 以前は1件を上書きしていたので、今月を開いた時点で先月ぶんが消えていた。
+ * 配列で持つように変えたが、古い形（単体のオブジェクト）で保存された値も
+ * まだ端末に残っているので、そちらも読めるようにしてある。
+ */
+const readStoredAiMonthlyReports = async (userId: string): Promise<StoredAiMonthlyReport[]> => {
   try {
-    return parseStoredAiMonthlyReport(await readLocalValue(buildAiMonthlyReportStorageKey(userId)));
+    const raw = await readLocalValue(buildAiMonthlyReportStorageKey(userId));
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      const reports = parsed
+        .map((item) => parseStoredAiMonthlyReport(JSON.stringify(item)))
+        .filter((item): item is StoredAiMonthlyReport => item != null);
+      return sortStoredAiReports(reports);
+    }
+    // 旧形式。1件だけ入っている。
+    const single = parseStoredAiMonthlyReport(raw);
+    return single ? [single] : [];
   } catch {
-    return null;
+    return [];
   }
+};
+
+/** 開封できる期間の判定に使う「今月ぶん」だけを取り出す。 */
+const readStoredAiMonthlyReport = async (userId: string) => {
+  const reports = await readStoredAiMonthlyReports(userId);
+  return reports[0] ?? null;
 };
 
 const writeStoredAiMonthlyReport = async ({
@@ -5724,7 +5805,11 @@ const writeStoredAiMonthlyReport = async ({
     savedAt: new Date().toISOString(),
   };
   try {
-    await writeLocalValue(buildAiMonthlyReportStorageKey(userId), JSON.stringify(payload));
+    const existing = await readStoredAiMonthlyReports(userId);
+    // 同じ月をもう一度作った場合は差し替える。積み上げると同じ月が並ぶ。
+    const withoutSameMonth = existing.filter((item) => !(item.year === year && item.month === month));
+    const next = sortStoredAiReports([payload, ...withoutSameMonth]).slice(0, AI_REPORT_HISTORY_MONTHS);
+    await writeLocalValue(buildAiMonthlyReportStorageKey(userId), JSON.stringify(next));
   } catch {
     // A failed cache write should not block the report from opening.
   }
@@ -15894,11 +15979,13 @@ function AnalyticsTab({
   const [aiReportUsed, setAiReportUsed] = useState(false);
   const [aiReportPeriod, setAiReportPeriod] = useState<{ year: number; month: number; monthLabel: string } | null>(null);
   const [aiReportGraphAnalytics, setAiReportGraphAnalytics] = useState<AiReportGraphAnalytics | null>(null);
+  // 開封済みのレポート（最大12か月ぶん）。期限とは無関係に読み返せる。
+  const [storedReports, setStoredReports] = useState<StoredAiMonthlyReport[]>([]);
   const [yearlyWrappedOpen, setYearlyWrappedOpen] = useState(false);
   const now = useMemo(() => new Date(), []);
   // 開発者は月末を待たずに生成できる。Premium は「月末に届く」体験そのものが商品なので、
   // そこを緩めると Premium の確認にならない。だから dev だけ別扱いにする。
-  const aiReportMonthEndUnlocked = HIDE_PREMIUM || isDev ? true : isMonthEndReportDay(now);
+  const aiReportMonthEndUnlocked = HIDE_PREMIUM || isDev ? true : isAiReportOpenable(now);
   const aiReportDeliveryLabel = formatMonthEndDeliveryLabel(now);
   const aiReportCountdownLabel = getMonthEndCountdownLabel(now);
 
@@ -15927,7 +16014,18 @@ function AnalyticsTab({
   const yearlyAnalytics = useMemo(() => getYearlyAnalytics(analyticsEntries, now), [analyticsEntries, now]);
   const yearlyWrappedReport = useMemo(() => buildYearlyWrappedReport(yearlyAnalytics), [yearlyAnalytics]);
   const savedAnalytics = useMemo(() => getSavedRestaurantAnalytics(savedRestaurants), [savedRestaurants]);
-  const reportAnalytics = currentAnalytics;
+  /**
+   * どの月のレポートを作るか。
+   *
+   * 翌月1〜10日にいるあいだは、対象は「先月」になる。ここを今月のままにすると、
+   * まだ数日ぶんしか履歴が無い新しい月を集計して「今月のレポート」として出してしまう。
+   * 期間外（および期限を持たない dev）は、これまでどおり今月を見る。
+   */
+  const reportMonthStart = useMemo(() => getOpenableReportMonth(now) ?? getMonthStart(now), [now]);
+  const reportAnalytics = useMemo(
+    () => getMonthlyAnalytics(analyticsEntries, reportMonthStart),
+    [analyticsEntries, reportMonthStart],
+  );
   const reportYear = reportAnalytics.monthDate.getFullYear();
   const reportMonth = reportAnalytics.monthDate.getMonth();
   const localAiReportPreview = useMemo(() => buildLocalAiReport(reportAnalytics, savedAnalytics), [reportAnalytics, savedAnalytics]);
@@ -15952,8 +16050,14 @@ function AnalyticsTab({
     setAiReportPeriod(null);
     setAiReportGraphAnalytics(null);
 
-    void readStoredAiMonthlyReport(userId).then((storedReport) => {
-      if (cancelled || !storedReport) {
+    void readStoredAiMonthlyReports(userId).then((allReports) => {
+      if (cancelled) {
+        return;
+      }
+      // 期限が切れても、開封済みのものは読み返せるようにしておく。
+      setStoredReports(allReports);
+      const storedReport = allReports[0];
+      if (!storedReport) {
         return;
       }
       const isCurrentReport = storedReport.year === reportYear && storedReport.month === reportMonth;
@@ -15983,6 +16087,22 @@ function AnalyticsTab({
       setAiReportOpen(false);
     }
   }, [aiReportMonthEndUnlocked]);
+
+  // いま画面に出している月は一覧から除く。同じものを2か所に出しても選べない。
+  const pastReports = useMemo(
+    () => storedReports.filter((stored) =>
+      !(aiReportOpen && stored.year === aiReportPeriod?.year && stored.month === aiReportPeriod?.month)),
+    [aiReportOpen, aiReportPeriod, storedReports],
+  );
+
+  const openStoredReport = useCallback((stored: StoredAiMonthlyReport) => {
+    setAiReport(stored.report);
+    setAiReportPeriod({ year: stored.year, month: stored.month, monthLabel: stored.monthLabel });
+    setAiReportGraphAnalytics(stored.analytics ?? null);
+    setAiReportUsed(stored.report.source === 'gemini');
+    setAiReportStatus(stored.report.source === 'gemini' ? 'ready' : 'error');
+    setAiReportOpen(true);
+  }, []);
 
   const monthlyTotalLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.estimatedSpend)}` : '0円';
   const averageBudgetLabel = currentAnalytics.budgetSampleCount ? `約${formatYen(currentAnalytics.averageBudget)}` : '0円';
@@ -16154,6 +16274,33 @@ function AnalyticsTab({
           canRefresh={aiReport?.source !== 'gemini'}
           limitNotice={AI_REPORT_MONTHLY_NOTICE}
         />
+      )}
+
+      {/* 開封済みのレポートは、期限とは関係なく読み返せる。
+          期限があるのは「受け取り」のほうで、受け取ったものを取り上げる理由はない。 */}
+      {pastReports.length > 0 && (
+        <View style={styles.pastReportCard}>
+          <Text style={styles.pastReportTitle}>過去のレポート</Text>
+          <Text style={styles.pastReportLead}>
+            開封済みのぶんは{AI_REPORT_HISTORY_MONTHS}か月ぶんまで残ります。
+          </Text>
+          {pastReports.map((stored) => (
+            <Pressable
+              key={`${stored.year}-${stored.month}`}
+              style={styles.pastReportRow}
+              onPress={() => openStoredReport(stored)}
+            >
+              <Ionicons name="mail-open-outline" size={16} color={ORANGE} />
+              <Text style={styles.pastReportRowLabel}>
+                {stored.year}年{stored.monthLabel}
+              </Text>
+              <Text style={styles.pastReportRowMeta} numberOfLines={1}>
+                {stored.report.title}
+              </Text>
+              <Ionicons name="chevron-forward" size={15} color="#b3aaa0" />
+            </Pressable>
+          ))}
+        </View>
       )}
 
       <YearlyWrappedCard
