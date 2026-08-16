@@ -3595,6 +3595,29 @@ const getOpenableReportMonth = (date: Date): Date | null => {
 };
 
 /**
+ * 年末まとめを受け取れる期間。月次と同じ考え方で、12/30から翌年1/10まで。
+ *
+ * 以前は12/31の1日だけだった。その日に開かなければ二度と読めないうえ、
+ * 年が明けると集計が新しい年に切り替わるので、前年ぶんを取り戻す手段も無かった。
+ */
+const YEARLY_WRAPPED_GRACE_LAST_DAY = 10;
+
+const getOpenableWrappedYear = (date: Date): number | null => {
+  // 年が明けてから10日まで。対象は前の年で、数字はもう動かない。
+  if (date.getMonth() === 0 && date.getDate() <= YEARLY_WRAPPED_GRACE_LAST_DAY) {
+    return date.getFullYear() - 1;
+  }
+  // 12/30と12/31。まだ年は終わっていないので、届くのは最終日ぶんを欠いた暫定版。
+  if (date.getMonth() === 11 && date.getDate() >= 30) {
+    return date.getFullYear();
+  }
+  return null;
+};
+
+/** その年がもう閉じているか。閉じる前に書いたぶんは、年が明けてから書き直す。 */
+const isWrappedYearComplete = (year: number, now: Date) => now.getFullYear() > year;
+
+/**
  * その月がもう閉じているか。
  *
  * 月末の前日・当日に届けるレポートは、まだ終わっていない月を集計している。
@@ -3874,10 +3897,57 @@ const buildYearlyWrappedReport = (analytics: YearlyAnalytics): YearlyWrappedRepo
   };
 };
 
+/**
+ * 年末まとめをAIに書かせるための材料。
+ *
+ * 返ってくるJSONの形は月次と同じにしてある。年専用の形を足すとサーバー側の
+ * 検証も分岐も増えるが、得られるものは文面の差だけなので、割に合わない。
+ * 受け取ったあとに年末まとめの項目へ移し替える。
+ */
+const buildYearlyAiReportPayload = (
+  analytics: YearlyAnalytics,
+  savedAnalytics: SavedRestaurantAnalytics,
+) => ({
+  period: 'year',
+  periodLabel: analytics.yearLabel,
+  monthLabel: analytics.yearLabel,
+  drawCount: analytics.drawCount,
+  mealDecisionCount: analytics.drawCount,
+  terminology: {
+    countLabel: '外食回数',
+    preferredActionWords: ['外食', 'お店選び', '抽選'],
+    forbiddenWords: ['ドロー'],
+  },
+  estimatedSpend: analytics.estimatedSpend,
+  averageBudget: analytics.averageBudget,
+  budgetSampleCount: analytics.budgetSampleCount,
+  topGenre: analytics.topGenre,
+  topArea: analytics.topArea,
+  genreAnalytics: analytics.genreAnalytics.slice(0, 8),
+  areaAnalytics: analytics.areaAnalytics.slice(0, 8),
+  priceRangeAnalytics: analytics.priceRangeAnalytics.slice(0, 4),
+  // 年ぶんならではの材料。月ごとの波が見えないと、年のまとめにする意味が薄い。
+  monthlyBreakdown: analytics.monthlyAnalytics.map((month) => ({
+    monthLabel: month.monthLabel,
+    drawCount: month.drawCount,
+    estimatedSpend: month.estimatedSpend,
+    topGenre: month.genreAnalytics[0]?.label ?? null,
+  })),
+  activeMonthCount: analytics.activeMonthCount,
+  saved: {
+    total: savedAnalytics.totalSaved,
+    topGenre: savedAnalytics.genreAnalytics[0]?.label ?? 'まだなし',
+    topPriceRange: savedAnalytics.priceRangeAnalytics[0]?.label ?? 'まだなし',
+  },
+});
+
 const buildAiReportPayload = (
   currentAnalytics: MonthlyAnalytics,
   savedAnalytics: SavedRestaurantAnalytics,
 ) => ({
+  // 月のぶんか年のぶんか。返ってくるJSONの形は同じにして、文面だけ書き分けさせる。
+  period: 'month',
+  periodLabel: currentAnalytics.monthLabel,
   monthLabel: currentAnalytics.monthLabel,
   drawCount: currentAnalytics.drawCount,
   mealDecisionCount: currentAnalytics.drawCount,
@@ -4024,6 +4094,56 @@ const requestAiMonthlyReport = async (
     };
   } catch {
     return { ...fallback, source: 'fallback' };
+  }
+};
+
+/**
+ * 年末まとめの文面をAIに書かせる。
+ *
+ * 返ってくるのは月次と同じ形なので、年末まとめの項目へ移し替える。
+ * 生成できなかったときは、これまで通りテンプレートの文面をそのまま使う。
+ * 数字（回数・支出・トップジャンル）は端末の集計をそのまま出す。AIに数え直させると
+ * 表と本文で食い違う。
+ */
+const requestYearlyWrappedReport = async (
+  analytics: YearlyAnalytics,
+  savedAnalytics: SavedRestaurantAnalytics,
+  apiBaseUrlCandidates: readonly string[],
+  userId: string,
+): Promise<{ report: YearlyWrappedReport; source: 'gemini' | 'fallback' }> => {
+  const fallback = buildYearlyWrappedReport(analytics);
+  if (!apiBaseUrlCandidates.length || userId === APP_USER_ID) {
+    return { report: fallback, source: 'fallback' };
+  }
+  try {
+    const data = await randishApi.generateAiReport(
+      apiBaseUrlCandidates,
+      userId,
+      buildYearlyAiReportPayload(analytics, savedAnalytics),
+    );
+    if (data.source !== 'gemini') {
+      return { report: fallback, source: 'fallback' };
+    }
+    const highlights = Array.isArray(data.highlights)
+      ? data.highlights.map(String).filter((item) => item.trim().length > 0)
+      : [];
+    return {
+      report: {
+        ...fallback,
+        heroLine: typeof data.summary === 'string' && data.summary.trim()
+          ? data.summary
+          : fallback.heroLine,
+        // 足りないぶんはテンプレートで埋める。5枠のうち後ろはPremium側に出るため、
+        // 空白のまま出すと有料側だけが薄く見える。
+        highlights: [...highlights, ...fallback.highlights].slice(0, fallback.highlights.length),
+        nextYearMission: typeof data.nextAction === 'string' && data.nextAction.trim()
+          ? data.nextAction
+          : fallback.nextYearMission,
+      },
+      source: 'gemini',
+    };
+  } catch {
+    return { report: fallback, source: 'fallback' };
   }
 };
 
@@ -15139,6 +15259,7 @@ function YearlyWrappedCard({
   open,
   now,
   isPro,
+  isProvisional = false,
   onToggle,
   onOpenPro,
 }: {
@@ -15147,17 +15268,23 @@ function YearlyWrappedCard({
   open: boolean;
   now: Date;
   isPro: boolean;
+  /** まだ年が終わっていない時点のぶん。大晦日が入っていない。 */
+  isProvisional?: boolean;
   onToggle: () => void;
   onOpenPro: () => void;
 }) {
-  const isYearEndWindow = now.getMonth() === 11 && now.getDate() >= 31;
+  // 12/30から翌年1/10まで受け取れる。1日だけだと、その日に開かなかった人が
+  // 前年ぶんを永久に読めなくなる。
+  const isYearEndWindow = getOpenableWrappedYear(now) != null;
   const isReleased = isYearEndWindow;
-  const releaseLabel = isYearEndWindow ? '公開中' : '12/31開封';
+  const releaseLabel = isYearEndWindow
+    ? (isProvisional ? '届いています（大晦日ぶんは年明けに加算）' : '受け取れます')
+    : '12/30から';
   const activeMonthsLabel = isReleased
     ? analytics.activeMonthCount ? `${analytics.activeMonthCount}か月分` : '記録待ち'
     : '育成中';
   const genreCountLabel = isReleased ? `${analytics.genreAnalytics.length}ジャンル` : 'お楽しみ';
-  const areaCountLabel = isReleased ? `${analytics.areaAnalytics.length}県` : '12/31';
+  const areaCountLabel = isReleased ? `${analytics.areaAnalytics.length}県` : '12/30';
   const freeHighlights = report.highlights.slice(0, 3);
   const proHighlights = report.highlights.slice(3);
   const proFeatureLines = [
@@ -15183,7 +15310,7 @@ function YearlyWrappedCard({
       <Text style={styles.yearWrappedSourceText}>
         {isReleased
           ? '実際のルーレット履歴から年末まとめを作成します。'
-          : '外食ログ・推定外食費・トップジャンルは、12/31まで封印して育てます。'}
+          : '外食ログ・推定外食費・トップジャンルは、12/30まで封印して育てます。'}
       </Text>
 
       <View style={styles.yearWrappedMiniRow}>
@@ -16062,8 +16189,23 @@ function AnalyticsTab({
   }, [drawHistories, history]);
 
   const currentAnalytics = useMemo(() => getCurrentMonthAnalytics(analyticsEntries, now), [analyticsEntries, now]);
-  const yearlyAnalytics = useMemo(() => getYearlyAnalytics(analyticsEntries, now), [analyticsEntries, now]);
-  const yearlyWrappedReport = useMemo(() => buildYearlyWrappedReport(yearlyAnalytics), [yearlyAnalytics]);
+  /**
+   * どの年のまとめを出すか。
+   *
+   * 1/1〜1/10にいるあいだは前の年。ここを今年のままにすると、始まったばかりの年を
+   * 集計して「今年のまとめ」として出してしまう。期間外は今年を見る（育っている途中の姿）。
+   */
+  const wrappedYear = useMemo(() => getOpenableWrappedYear(now) ?? now.getFullYear(), [now]);
+  const wrappedYearComplete = useMemo(() => isWrappedYearComplete(wrappedYear, now), [now, wrappedYear]);
+  const isYearEndWindowOpen = useMemo(() => getOpenableWrappedYear(now) != null, [now]);
+  const yearlyAnalytics = useMemo(
+    () => getYearlyAnalytics(analyticsEntries, new Date(wrappedYear, 0, 1)),
+    [analyticsEntries, wrappedYear],
+  );
+  const localYearlyWrappedReport = useMemo(() => buildYearlyWrappedReport(yearlyAnalytics), [yearlyAnalytics]);
+  // AIが書いたぶん。受け取り期間に入ったら裏で用意する。無ければテンプレートのまま。
+  const [aiYearlyWrappedReport, setAiYearlyWrappedReport] = useState<YearlyWrappedReport | null>(null);
+  const yearlyWrappedReport = aiYearlyWrappedReport ?? localYearlyWrappedReport;
   const savedAnalytics = useMemo(() => getSavedRestaurantAnalytics(savedRestaurants), [savedRestaurants]);
   /**
    * どの月のレポートを作るか。
@@ -16140,6 +16282,49 @@ function AnalyticsTab({
       setAiReportOpen(false);
     }
   }, [aiReportMonthEndUnlocked]);
+
+  /**
+   * 年末まとめも、受け取れる期間に入ったら先に書いておく。
+   *
+   * 月次と同じ理由で、押してから待たせない。年に1〜2回しか呼ばないので、
+   * 原価はほぼ増えない（年が明けたら大晦日ぶんを足して一度だけ書き直す）。
+   */
+  const wrappedPrefetchedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isPro || !isYearEndWindowOpen || yearlyAnalytics.drawCount === 0) {
+      return;
+    }
+    const key = `${wrappedYear}-${wrappedYearComplete ? 'final' : 'draft'}`;
+    if (wrappedPrefetchedRef.current === key) {
+      return;
+    }
+    wrappedPrefetchedRef.current = key;
+    let cancelled = false;
+    void (async () => {
+      const result = await requestYearlyWrappedReport(
+        yearlyAnalytics,
+        savedAnalytics,
+        apiBaseUrlCandidates,
+        userId,
+      );
+      if (cancelled || result.source !== 'gemini') {
+        return;
+      }
+      setAiYearlyWrappedReport(result.report);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    apiBaseUrlCandidates,
+    isPro,
+    isYearEndWindowOpen,
+    savedAnalytics,
+    userId,
+    wrappedYear,
+    wrappedYearComplete,
+    yearlyAnalytics,
+  ]);
 
   /**
    * 届く前に書いておく。
@@ -16479,6 +16664,7 @@ function AnalyticsTab({
         open={yearlyWrappedOpen}
         now={now}
         isPro={isPro}
+        isProvisional={isYearEndWindowOpen && !wrappedYearComplete}
         onToggle={toggleYearlyWrapped}
         onOpenPro={() => openPaywall('年末まとめの詳しい分析はPremium機能です。', '無料では年1回の基本まとめまで。Premiumなら節約のコツ、月別比較、アルバム写真、過去年度保存まで見られます。')}
       />

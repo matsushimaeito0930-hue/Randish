@@ -295,9 +295,14 @@ public class AiReportProxyService {
 
   private String buildGeminiPrompt(String requestBody) {
     return """
-        You write Randish Premium monthly food reports.
+        You write Randish Premium food reports.
         Return only valid JSON. Do not wrap it in markdown.
         Write every user-facing value in natural Japanese.
+        The input's period field says whether this covers one month or a whole year, and periodLabel
+        names it. Write about that span and no other. A yearly report also carries monthlyBreakdown:
+        use it to say how the year moved — which months were busy, where the habit changed, what
+        stayed constant. A monthly report has no such field and must not pretend to know the year.
+        For a yearly report the tone is a look back over twelve months, not a monthly check-in.
         The app is a restaurant roulette app, so use words like "gaisyoku", "omise erabi", and "chusen" instead of "draw".
         Keep numbers faithful to the input. Do not invent exact spending that is not implied by the input.
         estimatedSpend only covers the budgetSampleCount draws whose price was known, not all drawCount
