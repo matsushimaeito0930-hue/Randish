@@ -4377,6 +4377,23 @@ const SITUATION_EVIDENCE_HINTS: Record<Exclude<SituationMode, 'none'>, { label: 
   ],
 };
 
+/**
+ * Premiumの案内を出す件数のしきい値。これ未満のときだけ出す。
+ *
+ * 十分に候補が出ているときに広告を挟んでも、邪魔なだけで意味がない。
+ * 出すのは、少なくて困っている瞬間だけにする。
+ */
+const PREMIUM_CANDIDATE_HINT_THRESHOLD = 10;
+
+/**
+ * Premiumのとき Google Places から足す件数の上限。
+ *
+ * サーバーの MAX_FALLBACK_FILL_COUNT と同じ値。ここを変えるときは向こうも変える。
+ * 「あと○件増えます」という具体的な数は書けない（無料枠ではGoogleを呼んでいないので、
+ * 増える数は誰にも分からない）。書けるのはこの上限だけ。
+ */
+const PREMIUM_GOOGLE_FILL_LIMIT = 30;
+
 /** 「今日のおすすめ」を1日固定するための保存先。 */
 const DAILY_RECOMMENDATION_STORAGE_KEY_PREFIX = 'randish.dailyRecommendations.v1';
 
@@ -12401,6 +12418,26 @@ function SearchTab({
         </Pressable>
       </View>
       <SectionHeader title={uiText.candidateList} action={`${restaurants.length}件`} />
+      {/* 候補が少ないときだけ、探す先が増えることを伝える。
+          「あと何件増えるか」は書かない。無料枠ではGoogleを呼んでいないので、
+          増える数はサーバーにも分からず、書けば推測になる。
+          出せるのは今の実数と、コード上の実際の上限だけ。 */}
+      {!isLoading && !isPro && restaurants.length > 0 && restaurants.length < PREMIUM_CANDIDATE_HINT_THRESHOLD && (
+        <Pressable style={styles.premiumCandidateHint} onPress={onRequirePremium}>
+          <View style={styles.premiumCandidateHintIcon}>
+            <Ionicons name="sparkles" size={15} color="#ffffff" />
+          </View>
+          <View style={styles.premiumCandidateHintCopy}>
+            <Text style={styles.premiumCandidateHintTitle}>
+              この条件では{restaurants.length}件です
+            </Text>
+            <Text style={styles.premiumCandidateHintText}>
+              PremiumならGoogleマップからも探して、最大{PREMIUM_GOOGLE_FILL_LIMIT}件まで候補を足します。
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={ORANGE} />
+        </Pressable>
+      )}
       {/* 0件のときに何も出ないと、条件が厳しいのか通信に失敗したのかが分からない。
           どの条件で絞られたのかと、広げるための操作をその場に出す。 */}
       {!isLoading && restaurants.length === 0 && (

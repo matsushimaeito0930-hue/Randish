@@ -9219,6 +9219,44 @@ export const styles = StyleSheet.create({
     opacity: 0.45,
   },
 
+  // 候補が少ないときだけ出す、Premiumの案内。
+  premiumCandidateHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    marginBottom: 13,
+    padding: 13,
+    borderRadius: 20,
+    backgroundColor: '#fff7f0',
+    borderWidth: 1,
+    borderColor: '#ffdcc9',
+  },
+  premiumCandidateHintIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: ORANGE,
+  },
+  premiumCandidateHintCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  premiumCandidateHintTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '900',
+    color: INK,
+  },
+  premiumCandidateHintText: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+    color: '#7d6a5d',
+  },
+
   // ゲストに分析タブを開かれたときの案内。
   guestLockCard: {
     padding: 20,
