@@ -6487,7 +6487,11 @@ export default function App() {
           ? { latitude: areaCoordinatePreset.preset.latitude, longitude: areaCoordinatePreset.preset.longitude }
           : useCurrentLocationCoordinates
             ? userLocation
-            : null;
+            // 端末に座標を持たない市区町村は、サーバーが解決した中心を使う。
+            // ここが null のままだと座標なしで問い合わせることになり、
+            // 円で絞る Geoapify が1件も返せない。エリア名で探すと実質
+            // ホットペッパーのキーワード検索だけになっていた。
+            : (serverAreaCenter?.area === cleanArea ? serverAreaCenter.center : null);
 
       return {
         area: buildAreaSearchKeyword(area),
@@ -6503,7 +6507,7 @@ export default function App() {
         userId,
       };
     },
-    [area, budgetMax, budgetMin, distance, genre, userLocation, userId],
+    [area, budgetMax, budgetMin, distance, genre, userLocation, userId, serverAreaCenter],
   );
 
   const previewApiParams = useMemo(

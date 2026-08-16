@@ -186,14 +186,23 @@ public class GeoapifyRestaurantMapper {
     return true;
   }
 
+  /**
+   * 店のジャンル。
+   *
+   * <p>以前は、ジャンルを指定して検索したときにその指定をそのまま店のジャンルとして返していた。
+   * 「うどん」で探すと『ラーメン屋 紅龍』のジャンルが「うどん」と表示される、という嘘になる。
+   * まず店側の情報から判断し、何も分からなかったときだけ、探していたジャンルを当てる。
+   */
   private String restaurantGenre(String requestedGenre, List<String> categories, String name, String address) {
-    if (!isAllGenre(requestedGenre)) {
-      return requestedGenre.trim();
-    }
-
     String source = normalizeText(String.join(" ", name, address, String.join(" ", categories)));
     if (categories.stream().anyMatch(category -> category.contains(".ramen")) || source.contains("ラーメン") || source.contains("ramen")) {
       return "ラーメン";
+    }
+    if (source.contains("うどん") || source.contains("udon")) {
+      return "うどん";
+    }
+    if (source.contains("そば") || source.contains("蕎麦") || source.contains("soba")) {
+      return "そば";
     }
     if (categories.stream().anyMatch(category -> category.contains(".noodle")) || source.contains("noodle") || source.contains("麺")) {
       return "麺類";
@@ -201,7 +210,8 @@ public class GeoapifyRestaurantMapper {
     if (categories.stream().anyMatch(category -> category.contains(".japanese"))) {
       return "和食";
     }
-    return "飲食店";
+    // 店側から何も分からなかったときだけ、探していたジャンルを当てる。
+    return isAllGenre(requestedGenre) ? "飲食店" : requestedGenre.trim();
   }
 
 
