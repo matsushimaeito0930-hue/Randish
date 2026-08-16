@@ -15259,6 +15259,7 @@ function YearlyWrappedCard({
   open,
   now,
   isPro,
+  isDev = false,
   isProvisional = false,
   onToggle,
   onOpenPro,
@@ -15268,6 +15269,8 @@ function YearlyWrappedCard({
   open: boolean;
   now: Date;
   isPro: boolean;
+  /** 年末を待たずに中身を確かめられる。 */
+  isDev?: boolean;
   /** まだ年が終わっていない時点のぶん。大晦日が入っていない。 */
   isProvisional?: boolean;
   onToggle: () => void;
@@ -15275,11 +15278,13 @@ function YearlyWrappedCard({
 }) {
   // 12/30から翌年1/10まで受け取れる。1日だけだと、その日に開かなかった人が
   // 前年ぶんを永久に読めなくなる。
-  const isYearEndWindow = getOpenableWrappedYear(now) != null;
+  const isYearEndWindow = isDev || getOpenableWrappedYear(now) != null;
   const isReleased = isYearEndWindow;
-  const releaseLabel = isYearEndWindow
-    ? (isProvisional ? '届いています（大晦日ぶんは年明けに加算）' : '受け取れます')
-    : '12/30から';
+  const releaseLabel = !isYearEndWindow
+    ? '12/30から'
+    : isDev && getOpenableWrappedYear(now) == null
+      ? 'DEV表示'
+      : isProvisional ? '届いています（大晦日ぶんは年明けに加算）' : '受け取れます';
   const activeMonthsLabel = isReleased
     ? analytics.activeMonthCount ? `${analytics.activeMonthCount}か月分` : '記録待ち'
     : '育成中';
@@ -16197,7 +16202,12 @@ function AnalyticsTab({
    */
   const wrappedYear = useMemo(() => getOpenableWrappedYear(now) ?? now.getFullYear(), [now]);
   const wrappedYearComplete = useMemo(() => isWrappedYearComplete(wrappedYear, now), [now, wrappedYear]);
-  const isYearEndWindowOpen = useMemo(() => getOpenableWrappedYear(now) != null, [now]);
+  // dev は年末を待たずに確かめられる。年に2回しか出番が無い機能を、
+  // 12月末まで一度も動かせないままにしておくと、壊れていても気づけない。
+  const isYearEndWindowOpen = useMemo(
+    () => isDev || getOpenableWrappedYear(now) != null,
+    [isDev, now],
+  );
   const yearlyAnalytics = useMemo(
     () => getYearlyAnalytics(analyticsEntries, new Date(wrappedYear, 0, 1)),
     [analyticsEntries, wrappedYear],
@@ -16664,6 +16674,7 @@ function AnalyticsTab({
         open={yearlyWrappedOpen}
         now={now}
         isPro={isPro}
+        isDev={isDev}
         isProvisional={isYearEndWindowOpen && !wrappedYearComplete}
         onToggle={toggleYearlyWrapped}
         onOpenPro={() => openPaywall('年末まとめの詳しい分析はPremium機能です。', '無料では年1回の基本まとめまで。Premiumなら節約のコツ、月別比較、アルバム写真、過去年度保存まで見られます。')}
