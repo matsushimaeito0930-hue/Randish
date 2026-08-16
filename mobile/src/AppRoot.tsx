@@ -5342,6 +5342,21 @@ const buildMealTicketUsageStorageKey = (userId: string) =>
 const buildFoodAiUsageStorageKey = (userId: string) =>
   `${FOOD_AI_USAGE_STORAGE_KEY_PREFIX}:${encodeURIComponent(userId.trim() || APP_USER_ID)}`;
 
+/**
+ * その日の食AIの提案。
+ *
+ * <p>開くたびにボタンを押させると、押すまで何も出ていない箱を見せることになる。
+ * かといって開くたびに問い合わせると、Geminiを1日に何度も呼ぶ。
+ * 1日1回だけ作って控え、その日はそれを出す。
+ *
+ * <p>店舗そのものを控える。IDだけだと、候補の顔ぶれが変わったときに
+ * 手元で見つけられず、提案の文章だけが残って店が消える。
+ */
+const FOOD_AI_DAILY_SUGGESTION_STORAGE_KEY_PREFIX = 'randish.foodAi.daily.v1';
+
+const buildFoodAiDailySuggestionStorageKey = (userId: string) =>
+  `${FOOD_AI_DAILY_SUGGESTION_STORAGE_KEY_PREFIX}:${encodeURIComponent(userId.trim() || APP_USER_ID)}`;
+
 /** 端末のローカル日付。日付が変わった時点で回数が戻る。 */
 const toLocalDateKey = (date: Date) =>
   `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
@@ -5931,6 +5946,8 @@ export default function App() {
   const [foodAiSuggestion, setFoodAiSuggestion] = useState<FoodAiSuggestion | null>(null);
   // 今日の食AIの利用回数。日付が変わると自動で戻る。
   const [foodAiUsedToday, setFoodAiUsedToday] = useState(0);
+  // その日すでに自動で1回聞いたか。失敗した日に問い合わせ続けないための歯止め。
+  const foodAiAutoAskedDateRef = useRef<string | null>(null);
   // 検索結果から求めたエリアの中心。抽選の座標としても使う。
   // 計算は抽選タブ側で行うため、コールバックで受け取ってここに保持する。
   const searchResultOriginRef = useRef<UserLocation | null>(null);
@@ -7012,13 +7029,19 @@ export default function App() {
       syncWorkingApiBaseUrl();
       const selected = usableCandidates.find((restaurant) => restaurant.id === response.candidateId);
       if (response.source === 'gemini' && selected && response.headline && response.reason && response.comparison) {
-        setFoodAiSuggestion({
+        const suggestion: FoodAiSuggestion = {
           restaurant: selected,
           headline: response.headline,
           reason: response.reason,
           comparison: response.comparison,
           source: 'gemini',
-        });
+        };
+        setFoodAiSuggestion(suggestion);
+        // その日ぶんを控える。次に開いたときはボタンを押さずにこれを出す。
+        void writeLocalValue(
+          buildFoodAiDailySuggestionStorageKey(userId),
+          JSON.stringify({ date: toLocalDateKey(new Date()), suggestion }),
+        );
       }
     } catch (error) {
       console.warn('[RANDISH FOOD AI] AI提案に失敗したため端末内の提案を表示します。', error);
@@ -7066,6 +7089,59 @@ export default function App() {
       cancelled = true;
     };
   }, [userId]);
+
+  /**
+   * その日の提案を、開いた時点で出しておく。
+   *
+   * 押すまで空の箱が置いてあるだけの状態をやめる。まず控えを探し、
+   * 今日ぶんがあればそれを出す。無ければ1回だけ自分で問い合わせる。
+   * 開くたびに問い合わせると Gemini を1日に何度も呼ぶので、控えを先に見る。
+   */
+  useEffect(() => {
+    if (!subscription.isPro || foodAiSuggestion || foodAiStatus === 'loading') {
+      return;
+    }
+    if (!recommendations.length) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const today = toLocalDateKey(new Date());
+      const stored = await readLocalValue(buildFoodAiDailySuggestionStorageKey(userId));
+      if (cancelled) {
+        return;
+      }
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as { date?: string; suggestion?: FoodAiSuggestion };
+          if (parsed.date === today && parsed.suggestion?.restaurant?.id && parsed.suggestion.reason) {
+            setFoodAiSuggestion(parsed.suggestion);
+            setFoodAiStatus('ready');
+            return;
+          }
+        } catch {
+          // 控えが壊れていれば作り直す
+        }
+      }
+      // 失敗しても1日1回で止める。ここを無条件に繰り返すと、
+      // 候補が取れない間ずっと問い合わせ続けることになる。
+      if (foodAiAutoAskedDateRef.current === today) {
+        return;
+      }
+      foodAiAutoAskedDateRef.current = today;
+      await askFoodAiRecommendation();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    askFoodAiRecommendation,
+    foodAiStatus,
+    foodAiSuggestion,
+    recommendations.length,
+    subscription.isPro,
+    userId,
+  ]);
 
   // 今日その端末で使い終えた食券を読み直す。
   // これが無いと、読み込み直すたびに食券が全部戻り、上限が意味を持たなかった。
