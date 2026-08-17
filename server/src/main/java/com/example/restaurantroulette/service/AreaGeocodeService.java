@@ -30,6 +30,18 @@ public class AreaGeocodeService {
   private static final Duration CACHE_TTL = Duration.ofDays(30);
   /** 中心を信頼するために最低限必要な店舗数。1件だけだとその店の位置に寄ってしまう。 */
   private static final int MIN_SAMPLE_COUNT = 2;
+
+  /**
+   * 中心から見て、この距離より遠い店は同じ市町村のものとして数えない。
+   *
+   * <p>中心は「見つかった店の平均」で出している。1軒でも遠い店が混ざると、平均は
+   * その方向へ引っ張られる。広島の店と東京の店が混ざったとき、中心は瀬戸内海に落ちた。
+   * 海に円を描いて、その中から飲食店を探すことになる。
+   *
+   * <p>60kmにしているのは、日本で一番広い市町村でも中心から端まではその程度に収まるため
+   * （高山市や足寄町のような例でも約25km）。県をまたぐような外れ値だけを落とす。
+   */
+  private static final int MAX_AREA_RADIUS_METERS = 60_000;
   private static final int MAX_CACHE_ENTRIES = 2000;
 
   private final RestaurantQueryService restaurantQueryService;
@@ -103,18 +115,42 @@ public class AreaGeocodeService {
       return Optional.empty();
     }
 
+    // まず中央値を取る。平均と違って、遠い1軒に引きずられない。
+    // ここを平均から始めると、外れ値を落とすための基準そのものが既にずれている。
+    double medianLatitude = median(points, 0);
+    double medianLongitude = median(points, 1);
+
+    // 中央値から離れすぎている店は、同じ市町村のものとして扱わない。
+    List<double[]> nearby = new ArrayList<>();
+    for (double[] point : points) {
+      if (distanceMeters(medianLatitude, medianLongitude, point[0], point[1]) <= MAX_AREA_RADIUS_METERS) {
+        nearby.add(point);
+      }
+    }
+    if (nearby.size() < MIN_SAMPLE_COUNT) {
+      // まとまりが無いということは、この地名で引いた結果が一つの場所を指していない。
+      // 中心を決められないので何も返さない。海の真ん中を返すよりましである。
+      logger.info("[RANDISH_AREA] points are scattered; refusing to guess a center area={} points={}",
+          area, points.size());
+      return Optional.empty();
+    }
+    if (nearby.size() < points.size()) {
+      logger.info("[RANDISH_AREA] dropped far outliers area={} kept={} of={}",
+          area, nearby.size(), points.size());
+    }
+
     double latitudeSum = 0;
     double longitudeSum = 0;
-    for (double[] point : points) {
+    for (double[] point : nearby) {
       latitudeSum += point[0];
       longitudeSum += point[1];
     }
-    double centerLatitude = latitudeSum / points.size();
-    double centerLongitude = longitudeSum / points.size();
+    double centerLatitude = latitudeSum / nearby.size();
+    double centerLongitude = longitudeSum / nearby.size();
 
     // 中心からいちばん離れた店までの距離。エリアの広がりの目安として返す。
     int spreadMeters = 0;
-    for (double[] point : points) {
+    for (double[] point : nearby) {
       spreadMeters = Math.max(spreadMeters, distanceMeters(centerLatitude, centerLongitude, point[0], point[1]));
     }
 
@@ -122,9 +158,18 @@ public class AreaGeocodeService {
         area,
         centerLatitude,
         centerLongitude,
-        points.size(),
+        nearby.size(),
         spreadMeters,
         "RESTAURANT_CENTROID"));
+  }
+
+  /** index番目の成分（0=緯度, 1=経度）の中央値。 */
+  private double median(List<double[]> points, int index) {
+    double[] values = points.stream().mapToDouble(point -> point[index]).sorted().toArray();
+    int middle = values.length / 2;
+    return values.length % 2 == 1
+        ? values[middle]
+        : (values[middle - 1] + values[middle]) / 2;
   }
 
   private int distanceMeters(double fromLatitude, double fromLongitude, double toLatitude, double toLongitude) {

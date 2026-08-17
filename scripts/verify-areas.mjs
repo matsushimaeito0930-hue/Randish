@@ -68,6 +68,31 @@ const prefectureOf = (address) => {
   return PREFECTURES.find((prefecture) => address.includes(prefecture)) ?? null;
 };
 
+/** 地図の中心がここより遠いなら、誰もいない場所を指している疑いがある。 */
+const CENTER_WARN_METERS = 30_000;
+
+const fetchAreaCenter = async (area) => {
+  try {
+    const response = await fetch(`${BASE_URL}/api/places/area-center?area=${encodeURIComponent(area)}`);
+    if (response.status !== 200) {
+      return null;
+    }
+    const body = await response.json();
+    return typeof body?.latitude === 'number' ? body : null;
+  } catch {
+    return null;
+  }
+};
+
+const distanceMeters = (fromLat, fromLng, toLat, toLng) => {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const dLat = toRad(toLat - fromLat);
+  const dLng = toRad(toLng - fromLng);
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(fromLat)) * Math.cos(toRad(toLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
+};
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const main = async () => {
@@ -84,6 +109,7 @@ const main = async () => {
   let mismatched = 0;
   let empty = 0;
   let failed = 0;
+  let strandedCenters = 0;
 
   for (const [index, area] of areas.entries()) {
     const wanted = area.split(/\s+/)[0];
@@ -105,6 +131,24 @@ const main = async () => {
       shops.forEach((shop) => {
         providers[shop.externalProvider] = (providers[shop.externalProvider] ?? 0) + 1;
       });
+
+      // 地図の中心が、返ってきた店から離れていないか。
+      // 中心は「見つかった店の平均」で出しているので、遠い店が1軒混ざると
+      // 誰もいない場所へ落ちる。実際に瀬戸内海の真ん中に円が描かれたことがある。
+      let centerIssue = null;
+      const center = await fetchAreaCenter(area);
+      if (center) {
+        const located = shops.filter((shop) => shop.latitude != null && shop.longitude != null);
+        if (located.length) {
+          const nearest = Math.min(...located.map((shop) =>
+            distanceMeters(center.latitude, center.longitude, shop.latitude, shop.longitude)));
+          if (nearest > CENTER_WARN_METERS) {
+            centerIssue = { nearestShopMeters: Math.round(nearest), center };
+            strandedCenters += 1;
+            console.log(`  ✗ ${area}: 地図の中心が最寄りの店から ${(nearest / 1000).toFixed(1)}km`);
+          }
+        }
+      }
       if (!shops.length) {
         empty += 1;
       }
@@ -118,6 +162,7 @@ const main = async () => {
         count: shops.length,
         wrongCount: wrong.length,
         providers,
+        centerIssue,
         wrongSamples: wrong.slice(0, 3).map((shop) => ({ name: shop.name, address: shop.address })),
       });
     } catch (error) {
@@ -126,18 +171,19 @@ const main = async () => {
     }
 
     if ((index + 1) % 50 === 0) {
-      console.log(`  ${index + 1}/${areas.length} 件 … 他県混入 ${mismatched} / 0件 ${empty} / 失敗 ${failed}`);
-      writeOut(results, { mismatched, empty, failed });
+      console.log(`  ${index + 1}/${areas.length} 件 … 他県混入 ${mismatched} / 中心ずれ ${strandedCenters} / 0件 ${empty} / 失敗 ${failed}`);
+      writeOut(results, { mismatched, empty, failed, strandedCenters });
     }
     await sleep(DELAY_MS);
   }
 
-  writeOut(results, { mismatched, empty, failed });
+  writeOut(results, { mismatched, empty, failed, strandedCenters });
 
   const withResults = results.filter((item) => (item.count ?? 0) > 0);
   console.log('\n================ 結果 ================');
   console.log(`検証した市区町村      ${results.length}`);
   console.log(`他県の店が混ざった数  ${mismatched}`);
+  console.log(`中心が店から離れた数  ${strandedCenters}`);
   console.log(`0件だった市区町村     ${empty}`);
   console.log(`リクエスト失敗        ${failed}`);
   if (withResults.length) {
@@ -146,7 +192,7 @@ const main = async () => {
     console.log(`件数の中央値          ${median}（最小 ${counts[0]} / 最大 ${counts[counts.length - 1]}）`);
   }
   console.log(`詳細                  ${path.relative(repoRoot, OUT_PATH)}`);
-  process.exitCode = mismatched > 0 ? 1 : 0;
+  process.exitCode = mismatched > 0 || strandedCenters > 0 ? 1 : 0;
 };
 
 const writeOut = (results, summary) => {
