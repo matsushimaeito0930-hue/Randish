@@ -49,10 +49,18 @@ public class RestaurantController {
       @RequestParam(required = false) Double longitude,
       @RequestParam(required = false) Integer range,
       @RequestParam(required = false) Integer radius,
-      @RequestParam(required = false) Integer distanceMeters) {
+      @RequestParam(required = false) Integer distanceMeters,
+      @RequestParam(required = false) Boolean excludeGoogle) {
     Double effectiveLatitude = latitude == null ? lat : latitude;
     Double effectiveLongitude = longitude == null ? lng : longitude;
     Integer effectiveRange = range == null && radius != null ? radiusToHotPepperRange(radius) : range;
+    // excludeGoogle は、全市区町村を一括で確かめるときのためにある。
+    // 検証で回りたいのは田舎で、そこはホットペッパーが0件になりやすい。つまり
+    // 救済経路の Google が一番呼ばれる。従量課金なので、確かめるたびに金がかかる。
+    // 返す件数が減るだけで増えることは無いので、誰が呼んでも危険は無い。
+    GooglePlacesUsage usage = Boolean.TRUE.equals(excludeGoogle)
+        ? GooglePlacesUsage.NONE
+        : resolveGooglePlacesUsage(authorizationHeader, requestUserId);
     List<RestaurantResponse> restaurants = restaurantQueryService.search(
         area,
         genre,
@@ -61,7 +69,7 @@ public class RestaurantController {
         effectiveLatitude,
         effectiveLongitude,
         effectiveRange,
-        resolveGooglePlacesUsage(authorizationHeader, requestUserId));
+        usage);
     if (effectiveLatitude == null || effectiveLongitude == null || distanceMeters == null || distanceMeters <= 0) {
       return restaurants;
     }

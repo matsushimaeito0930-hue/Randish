@@ -225,7 +225,11 @@ public class RestaurantQueryService {
     }
 
     if (!externalOnlyRestaurants.isEmpty()) {
-      return limitedCandidates(externalOnlyRestaurants, desiredCandidateCount);
+      // 一覧と同じ照合を抽選側にも掛ける。ここを抜かすと、一覧には出ない東京の店が
+      // 抽選で当たることになる。
+      return limitedCandidates(
+          keepInsideRequestedArea(externalOnlyRestaurants, area, latitude, longitude),
+          desiredCandidateCount);
     }
 
     if (hasCoordinates(latitude, longitude)) {
@@ -336,7 +340,9 @@ public class RestaurantQueryService {
     }
 
     if (!externalOnlyRestaurants.isEmpty()) {
-      return limitedCandidates(externalOnlyRestaurants, targetResultCount);
+      return limitedCandidates(
+          keepInsideRequestedArea(externalOnlyRestaurants, area, latitude, longitude),
+          targetResultCount);
     }
 
     if (hasCoordinates(latitude, longitude)) {
@@ -344,6 +350,49 @@ public class RestaurantQueryService {
     }
 
     return restaurantRepository.search(area, genre, budgetMin, budgetMax);
+  }
+
+  /**
+   * 頼まれた市区町村の外にある店を落とす。
+   *
+   * <p>ホットペッパーのキーワード検索は住所だけを見ていない。店名や紹介文にも当たるので、
+   * 「広島県 府中市」で引くと、葛飾区にある広島風お好み焼きの店が返ってくる。実際に返ってきた。
+   * 利用者からすれば、広島の町を選んだのに東京の店が出ているようにしか見えない。
+   *
+   * <p>座標で引いているときは距離で絞れているので触らない。ここが効くのは地名で引いたときだけ。
+   *
+   * <p>住所が読めない店は落とさない。提供元によっては住所が空のことがあり、
+   * 「確かめられない」を「外にある」と同じ扱いにすると、正しい店まで消える。
+   */
+  private Map<String, Restaurant> keepInsideRequestedArea(
+      Map<String, Restaurant> restaurants,
+      String area,
+      Double latitude,
+      Double longitude) {
+    if (hasCoordinates(latitude, longitude) || area == null || area.isBlank()) {
+      return restaurants;
+    }
+    List<String> tokens = List.of(area.trim().split("[\\s/、,]+")).stream()
+        .map(String::trim)
+        .filter(token -> token.length() >= 2)
+        .toList();
+    if (tokens.isEmpty()) {
+      return restaurants;
+    }
+    Map<String, Restaurant> kept = new LinkedHashMap<>();
+    restaurants.forEach((key, restaurant) -> {
+      String address = restaurant.address();
+      if (address == null || address.isBlank()) {
+        kept.put(key, restaurant);
+        return;
+      }
+      if (tokens.stream().allMatch(address::contains)) {
+        kept.put(key, restaurant);
+      }
+    });
+    // 全部落ちるのは、地名の書き方が住所と噛み合っていないとき。
+    // その場合はこちらの照合が外れているのであって、店が悪いわけではない。
+    return kept.isEmpty() ? restaurants : kept;
   }
 
   private List<ExternalRestaurantProvider> primaryProviders() {
