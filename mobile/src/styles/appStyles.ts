@@ -9390,6 +9390,21 @@ export const styles = StyleSheet.create({
     color: '#8d8478',
   },
 
+  // 絞り込む材料そのものが無いときの注意書き。押してから0件になるのを防ぐ。
+  premiumConditionCaution: {
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 11,
+    borderRadius: 12,
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#f2ddc0',
+    fontSize: 11,
+    lineHeight: 17,
+    fontWeight: '800',
+    color: '#8a6b3d',
+  },
+
   excludedUndoButton: {
     paddingVertical: 6,
     paddingHorizontal: 11,

@@ -5106,7 +5106,38 @@ const candidateMatchesPremiumResult = (candidate: CandidatePlace, minRating: num
   candidateHasPremiumPhoto(candidate)
   && candidateMatchesPremiumConditions(candidate, minRating, openNowOnly);
 
-const buildPremiumConditionNoMatchMessage = (area: string, minRating: number, openNowOnly: boolean) => {
+/**
+ * 候補のうち、評価と営業状況が分かっているものを数える。
+ *
+ * この2つは Google Places しか持っていない。ホットペッパーと OpenStreetMap の店は
+ * 評価0・営業状況なしで返るので、絞り込みをかけると全部落ちる。
+ * 「条件に合う店が無い」のではなく「そもそも確かめられない」のであって、
+ * その違いを利用者に伝えないと、条件を広げても直らない理由が分からない。
+ */
+const countKnownPremiumSignals = (restaurants: Restaurant[]) => ({
+  withRating: restaurants.filter((restaurant) => getRatingValue(restaurant) != null).length,
+  withOpenNow: restaurants.filter((restaurant) => restaurant.openNow != null).length,
+  total: restaurants.length,
+});
+
+const buildPremiumConditionNoMatchMessage = (
+  area: string,
+  minRating: number,
+  openNowOnly: boolean,
+  signals?: { withRating: number; withOpenNow: number; total: number },
+) => {
+  // 絞り込む材料そのものが無いときは、それを先に言う。
+  // 「条件を広げてください」と言われても、広げようがない。
+  if (signals && signals.total > 0) {
+    if (openNowOnly && signals.withOpenNow === 0) {
+      return `${area || '選択したエリア'}の候補${signals.total}件は、いずれも営業時間を確認できませんでした。`
+        + '「現在営業中のお店だけ」を外すと候補が戻ります。';
+    }
+    if (minRating > 0 && signals.withRating === 0) {
+      return `${area || '選択したエリア'}の候補${signals.total}件は、いずれも評価を取得できていません。`
+        + '最低評価を「指定なし」にすると候補が戻ります。';
+    }
+  }
   const conditions = [
     '写真あり',
     minRating > 0 ? `★${minRating.toFixed(1)}以上` : null,
@@ -8344,7 +8375,8 @@ export default function App() {
         ? await loadGenreDiagnosticMessage()
         : null;
       const premiumConditionMessage = subscription.isPro
-        ? buildPremiumConditionNoMatchMessage(area, minRating, openNowOnly)
+        ? buildPremiumConditionNoMatchMessage(
+          area, minRating, openNowOnly, countKnownPremiumSignals(areaMatchedRestaurants))
         : null;
       const messageText = premiumConditionMessage ?? noMatchDiagnosis?.message ?? diagnosticMessage ?? API_DRAW_MESSAGE;
       setDrawFailureDetails(noMatchDiagnosis?.details ?? buildDrawFailureDetails({
@@ -8656,7 +8688,8 @@ export default function App() {
       const cacheEntry = await loadCandidatePool(query);
       if (cacheEntry.candidates.length === 0) {
         const premiumConditionMessage = subscription.isPro
-          ? buildPremiumConditionNoMatchMessage(areaRef.current, minRating, openNowOnly)
+          ? buildPremiumConditionNoMatchMessage(
+            areaRef.current, minRating, openNowOnly, countKnownPremiumSignals(restaurantsRef.current))
           : null;
         const diagnosis = await loadDrawNoMatchDiagnosis({
           ...drawApiParams,
@@ -8750,7 +8783,8 @@ export default function App() {
           return;
         }
         if (!finalCandidate || !normalized) {
-          const noMatchMessage = buildPremiumConditionNoMatchMessage(areaRef.current, minRating, openNowOnly);
+          const noMatchMessage = buildPremiumConditionNoMatchMessage(
+            areaRef.current, minRating, openNowOnly, countKnownPremiumSignals(restaurantsRef.current));
           setMapRouletteStatus('empty');
           setMapRouletteTarget(null);
         setEliminatedCandidateIds([]);
@@ -12205,6 +12239,7 @@ function FilterPanel({
   onRequirePremium,
   isRegisteredUser,
   currentPrefecture,
+  premiumSignals,
   onRandomized,
   onUseCurrentLocation,
   onSubmit,
@@ -12237,6 +12272,8 @@ function FilterPanel({
   isRegisteredUser: boolean;
   /** いまいる都道府県。エリア一覧の既定を決めるのに使う。 */
   currentPrefecture?: string | null;
+  /** いまの候補のうち、評価と営業状況が分かっている件数。 */
+  premiumSignals: { withRating: number; withOpenNow: number; total: number };
   onRandomized?: (field: ConditionRandomField) => void;
   onUseCurrentLocation?: () => void | Promise<unknown>;
   onSubmit: () => void;
@@ -12442,6 +12479,19 @@ function FilterPanel({
             actionLabel={isRegisteredUser ? '見てみる' : '会員登録する'}
             onPress={onRequirePremium}
           />
+        )}
+        {/* 評価と営業状況を持っているのは Google 由来の店だけ。
+            いまの候補に材料が無いなら、押す前にそう言う。押してから0件になると、
+            条件が厳しいのか壊れているのかが分からない。 */}
+        {isPro && premiumSignals.total > 0 && premiumSignals.withRating === 0 && (
+          <Text style={styles.premiumConditionCaution}>
+            いまの候補{premiumSignals.total}件は評価を取得できていません。絞り込むと0件になります。
+          </Text>
+        )}
+        {isPro && premiumSignals.total > 0 && premiumSignals.withOpenNow === 0 && (
+          <Text style={styles.premiumConditionCaution}>
+            いまの候補{premiumSignals.total}件は営業時間を確認できていません。「現在営業中」で絞ると0件になります。
+          </Text>
         )}
       </View>
       <View style={styles.genreSectionHeader}>
@@ -12947,6 +12997,9 @@ function SearchTab({
   const summarySituation = SITUATION_OPTIONS.find((option) => option.key === situation)?.label ?? '指定なし';
   const summaryRating = minRating > 0 ? `★${minRating.toFixed(1)}以上` : '指定なし';
 
+  // 評価と営業状況を持っている候補が何件あるか。絞り込みの注意書きに使う。
+  const premiumSignals = useMemo(() => countKnownPremiumSignals(restaurants), [restaurants]);
+
   return (
     <View>
       <PageIntro title={uiText.pageConditionsTitle} lead={uiText.pageConditionsLead} />
@@ -12976,6 +13029,7 @@ function SearchTab({
         onRequirePremium={onRequirePremium}
         isRegisteredUser={isRegisteredUser}
         currentPrefecture={currentPrefecture}
+        premiumSignals={premiumSignals}
         onRandomized={onConditionRandomize}
         onSubmit={onSearch}
       />
