@@ -6921,22 +6921,50 @@ export default function App() {
    * 中心を候補側から決めていたため、距離を変えて候補が入れ替わるたびに
    * 地図がその方向へずれていた。
    */
-  const searchCircleOrigin = useMemo(() => {
-    const cleanArea = area.trim();
-    if (!cleanArea || cleanArea === '現在地') {
-      return userLocation;
-    }
-    return getSearchOriginForArea(cleanArea, null)
-      ?? (serverAreaCenter?.area === cleanArea ? serverAreaCenter.center : null)
-      ?? userLocation;
-  }, [area, serverAreaCenter, userLocation]);
-
   // エリアを切り替えた直後は、前の街の候補をいっさい使わない。
   // 「江東区を選んでいるのに地図が大阪（＝現在地）」を根本から防ぐ。
   const areaMatchedRestaurants = useMemo(
     () => (restaurantsArea === area.trim() ? restaurants : []),
     [area, restaurants, restaurantsArea],
   );
+
+  /**
+   * 見つかった店そのものから中心を出す。
+   *
+   * 地名の位置が分からないときの最後の頼り。中央値を使うのは、遠い1軒に
+   * 引きずられないため（平均だと瀬戸内海の真ん中に落ちたことがある）。
+   */
+  const candidateCenter = useMemo(() => {
+    const located = areaMatchedRestaurants.filter((restaurant) =>
+      restaurant.latitude != null && restaurant.longitude != null);
+    if (located.length < 2) {
+      return null;
+    }
+    const middle = (values: number[]) => {
+      const sorted = [...values].sort((first, second) => first - second);
+      const index = Math.floor(sorted.length / 2);
+      return sorted.length % 2 === 1 ? sorted[index] : (sorted[index - 1] + sorted[index]) / 2;
+    };
+    return {
+      latitude: middle(located.map((restaurant) => Number(restaurant.latitude))),
+      longitude: middle(located.map((restaurant) => Number(restaurant.longitude))),
+      label: area.trim(),
+    };
+  }, [area, areaMatchedRestaurants]);
+
+  const searchCircleOrigin = useMemo(() => {
+    const cleanArea = area.trim();
+    if (!cleanArea || cleanArea === '現在地') {
+      return userLocation;
+    }
+    // 場所を指定しているのに現在地へ落とさない。
+    // 福岡県を選んで島根にいる自分の周りが映るのは、間違った地図を見せているのと同じ。
+    // 位置が分からないなら、見つかった店の位置から決める。それも無ければ何も映さず、
+    // 「地図を準備しています」を出したままにする。
+    return getSearchOriginForArea(cleanArea, null)
+      ?? (serverAreaCenter?.area === cleanArea ? serverAreaCenter.center : null)
+      ?? candidateCenter;
+  }, [area, candidateCenter, serverAreaCenter, userLocation]);
 
   const unifiedCandidates = useMemo(() => {
     const fromSearchList = areaMatchedRestaurants
