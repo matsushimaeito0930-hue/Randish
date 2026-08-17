@@ -9405,6 +9405,15 @@ export const styles = StyleSheet.create({
     color: '#8a6b3d',
   },
 
+  // 詳細情報が取れなかったとき。黙って消すと、Premiumの差が無いように見える。
+  premiumPlaceDetailsEmpty: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#8d8478',
+  },
+
   excludedUndoButton: {
     paddingVertical: 6,
     paddingHorizontal: 11,

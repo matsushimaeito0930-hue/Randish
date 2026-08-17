@@ -17509,7 +17509,22 @@ function PremiumPlaceDetailsPanel({ restaurant }: { restaurant: Restaurant }) {
   const groups = getPremiumDetailGroups(restaurant);
   const ratingCount = restaurant.premiumDetails?.googleUserRatingCount;
   if (!groups.length && !ratingCount) {
-    return null;
+    // 何も出さないと、Premiumなのに差が無いように見える。
+    // Googleに情報が無い店は実際にあるので、そう言う。
+    return (
+      <View style={styles.premiumPlaceDetailsPanel}>
+        <View style={styles.premiumPlaceDetailsHeader}>
+          <View style={styles.premiumPlaceDetailsTitleRow}>
+            <Ionicons name="diamond" size={15} color="#a7651b" />
+            <Text style={styles.premiumPlaceDetailsTitle}>Premium 店舗情報</Text>
+          </View>
+        </View>
+        <Text style={styles.premiumPlaceDetailsEmpty}>
+          この店の詳細情報（予約・支払い方法・駐車場・子ども連れ）は見つかりませんでした。
+          Googleマップに登録が無い店では出せません。
+        </Text>
+      </View>
+    );
   }
 
   return (
