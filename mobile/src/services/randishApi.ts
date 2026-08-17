@@ -292,6 +292,25 @@ export type Favorite = {
   createdAt: string;
 };
 
+/** 出したくない店。店の情報そのものは持たず、どの店かと理由だけ。 */
+export type ExcludedRestaurant = {
+  id: string;
+  userId: string;
+  provider: string;
+  providerPlaceId: string;
+  restaurantName: string | null;
+  reason: string | null;
+  createdAt: string;
+};
+
+export type ExcludedRestaurantCreateParams = {
+  userId: string;
+  provider: string;
+  providerPlaceId: string;
+  restaurantName?: string | null;
+  reason?: string | null;
+};
+
 export type FavoriteCreateParams = {
   userId: string;
   restaurantId?: string | null;
@@ -684,6 +703,18 @@ export const randishApi = {
       method: 'PATCH',
       body: { actualSpend },
     }),
+
+  getExcludedRestaurants: (baseUrl: ApiBaseUrlInput, userId: string) =>
+    request<ExcludedRestaurant[]>(baseUrl, `api/excluded-restaurants/user/${userId}`),
+
+  addExcludedRestaurant: (baseUrl: ApiBaseUrlInput, params: ExcludedRestaurantCreateParams) =>
+    request<ExcludedRestaurant>(baseUrl, 'api/excluded-restaurants', undefined, {
+      method: 'POST',
+      body: params,
+    }),
+
+  removeExcludedRestaurant: (baseUrl: ApiBaseUrlInput, id: string) =>
+    request<void>(baseUrl, `api/excluded-restaurants/${id}`, undefined, { method: 'DELETE' }),
 
   addFavorite: (baseUrl: ApiBaseUrlInput, favorite: FavoriteCreateParams) =>
     request<Favorite>(baseUrl, 'api/favorites', undefined, {

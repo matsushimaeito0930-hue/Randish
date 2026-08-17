@@ -282,6 +282,19 @@ CREATE TABLE IF NOT EXISTS restaurant_enrichments (
   CONSTRAINT ck_restaurant_enrichments_rating CHECK (rating IS NULL OR (rating >= 0 AND rating <= 5))
 );
 
+-- 出したくない店。候補・地図・抽選から外す。
+-- お気に入りと違い、店の情報そのものは持たない（二重に持つと片方だけ古くなる）。
+CREATE TABLE IF NOT EXISTS excluded_restaurants (
+  id VARCHAR(120) PRIMARY KEY,
+  user_id VARCHAR(120) NOT NULL,
+  provider VARCHAR(80) NOT NULL DEFAULT 'RANDISH_SEED',
+  provider_place_id VARCHAR(255) NOT NULL DEFAULT '',
+  restaurant_name VARCHAR(255),
+  reason VARCHAR(255),
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_excluded_restaurants UNIQUE (user_id, provider, provider_place_id)
+);
+
 CREATE TABLE IF NOT EXISTS random_histories (
   id VARCHAR(120) PRIMARY KEY,
   user_id VARCHAR(120) NOT NULL,

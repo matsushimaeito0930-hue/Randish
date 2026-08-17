@@ -9390,6 +9390,20 @@ export const styles = StyleSheet.create({
     color: '#8d8478',
   },
 
+  excludedUndoButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: '#fff1e8',
+    borderWidth: 1,
+    borderColor: '#ffd6c4',
+  },
+  excludedUndoText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: ORANGE,
+  },
+
   // 候補が少ないときだけ出す、Premiumの案内。
   premiumCandidateHint: {
     flexDirection: 'row',
@@ -11450,6 +11464,30 @@ export const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
     marginTop: 9,
+  },
+  restaurantActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  // 「もう出さない」。決めるボタンと並ぶが、主役ではないので枠線だけにする。
+  restaurantExcludeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: '#f7f3ee',
+    borderWidth: 1,
+    borderColor: '#e6dccf',
+  },
+  restaurantExcludeButtonText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#8d8478',
   },
   // 一覧から直接この店に決めるボタン。候補が数件のときは抽選より速い。
   restaurantVisitButton: {

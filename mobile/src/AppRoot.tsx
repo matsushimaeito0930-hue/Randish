@@ -24,7 +24,7 @@ import {
   View,
 } from 'react-native';
 import { isApiConnectivityError, RandishApiError, randishApi, Restaurant as ApiRestaurant } from './services/randishApi';
-import type { ApiUsageResponse, AuthResponse, CandidatePlace, Favorite as ApiFavorite, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory, RestaurantSearchParams } from './services/randishApi';
+import type { ApiUsageResponse, AuthResponse, CandidatePlace, ExcludedRestaurant as ApiExcludedRestaurant, Favorite as ApiFavorite, PremiumStatus as ApiPremiumStatus, RandomHistory as ApiRandomHistory, RestaurantSearchParams } from './services/randishApi';
 import { sendManagementDrawEvent } from './services/managementEvents';
 import {
   getNativeBillingSetupMessage,
@@ -3335,6 +3335,21 @@ const shouldPersistRestaurantId = (restaurant: Restaurant) =>
 
 const SYNCABLE_HISTORY_PROVIDERS = new Set(['RANDISH_SEED', 'HOTPEPPER', 'GEOAPIFY', 'GOOGLE_PLACES']);
 
+/**
+ * 除外した店を見分けるための鍵。
+ *
+ * 提供元と、その提供元での識別子を組にする。同じ店が複数の提供元から返ることがあり、
+ * 名前だけで照合すると別の店まで消える（「まる」のような短い店名は各地にある）。
+ */
+const excludedKeyOf = (provider: string | null | undefined, providerPlaceId: string | null | undefined) =>
+  `${(provider ?? '').toUpperCase()}:${(providerPlaceId ?? '').trim()}`;
+
+const excludedKeyForRestaurant = (restaurant: Restaurant) =>
+  excludedKeyOf(restaurant.externalProvider, getProviderPlaceId(restaurant));
+
+const excludedKeyForCandidate = (place: CandidatePlace) =>
+  excludedKeyOf(place.provider, place.providerPlaceId ?? place.id);
+
 const canSyncDrawHistoryProvider = (provider: string) =>
   SYNCABLE_HISTORY_PROVIDERS.has(provider.toUpperCase());
 
@@ -6397,6 +6412,17 @@ export default function App() {
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   /** いまいる市区町村。「今日のおすすめ」をこの単位で探すために持つ。 */
   const [currentCity, setCurrentCity] = useState<{ city: string; prefecture: string | null } | null>(null);
+  /**
+   * 出したくない店。
+   *
+   * 「同じ店ばかり当たる」を本人の側から断てるようにする。抽選の重み付けを
+   * こちらで勝手にいじるより、外せるほうが何が起きているか分かる。
+   */
+  const [excludedRestaurants, setExcludedRestaurants] = useState<ApiExcludedRestaurant[]>([]);
+  const excludedKeys = useMemo(
+    () => new Set(excludedRestaurants.map((item) => excludedKeyOf(item.provider, item.providerPlaceId))),
+    [excludedRestaurants],
+  );
   // 保存済みのプロフィールを読み終えたか。読み込む前に書き戻して消してしまうのを防ぐ。
   const profileLoadedRef = useRef(false);
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('ja');
@@ -6696,6 +6722,82 @@ export default function App() {
       // Keep the current in-app session history when the API is not reachable yet.
     }
   }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl, userId]);
+
+  const loadExcludedRestaurants = useCallback(async () => {
+    if (userId === APP_USER_ID) {
+      setExcludedRestaurants([]);
+      return;
+    }
+    const requestedUserId = userId;
+    try {
+      const data = await randishApi.getExcludedRestaurants(apiBaseUrlCandidates, userId);
+      if (userIdRef.current !== requestedUserId) {
+        return;
+      }
+      syncWorkingApiBaseUrl();
+      setExcludedRestaurants(data);
+    } catch {
+      // 取れなくても検索そのものは続けられる。除外が効かないだけ。
+    }
+  }, [apiBaseUrlCandidates, syncWorkingApiBaseUrl, userId]);
+
+  /**
+   * この店を出さないようにする。
+   *
+   * 画面はサーバーの返事を待たずに更新する。押してから候補が消えるまで数秒かかると、
+   * 効いたのか分からず何度も押される。失敗したら戻す。
+   */
+  const excludeRestaurant = useCallback(async (restaurant: Restaurant, reason?: string) => {
+    // Premium 限定。ここで案内を開くのは呼び出し側に任せる
+    // （startPremiumPurchase はこの下で宣言されており、依存配列に書くと描画時に落ちる）。
+    if (!subscription.isPro) {
+      return;
+    }
+    const provider = (restaurant.externalProvider || '').toUpperCase();
+    const providerPlaceId = getProviderPlaceId(restaurant);
+    const optimistic: ApiExcludedRestaurant = {
+      id: `local-${provider}-${providerPlaceId}`,
+      userId,
+      provider,
+      providerPlaceId,
+      restaurantName: restaurant.name,
+      reason: reason ?? null,
+      createdAt: new Date().toISOString(),
+    };
+    setExcludedRestaurants((current) => [
+      optimistic,
+      ...current.filter((item) => excludedKeyOf(item.provider, item.providerPlaceId) !== excludedKeyOf(provider, providerPlaceId)),
+    ]);
+    setMessage(`${restaurant.name} を候補から外しました。`);
+    try {
+      const saved = await randishApi.addExcludedRestaurant(apiBaseUrlCandidates, {
+        userId,
+        provider,
+        providerPlaceId,
+        restaurantName: restaurant.name,
+        reason: reason ?? null,
+      });
+      setExcludedRestaurants((current) => [
+        saved,
+        ...current.filter((item) => item.id !== optimistic.id
+          && excludedKeyOf(item.provider, item.providerPlaceId) !== excludedKeyOf(provider, providerPlaceId)),
+      ]);
+    } catch {
+      setExcludedRestaurants((current) => current.filter((item) => item.id !== optimistic.id));
+      setMessage('候補から外せませんでした。通信を確かめてもう一度お試しください。');
+    }
+  }, [apiBaseUrlCandidates, subscription.isPro, userId]);
+
+  const unexcludeRestaurant = useCallback(async (excludedId: string) => {
+    const previous = excludedRestaurants;
+    setExcludedRestaurants((current) => current.filter((item) => item.id !== excludedId));
+    try {
+      await randishApi.removeExcludedRestaurant(apiBaseUrlCandidates, excludedId);
+    } catch {
+      setExcludedRestaurants(previous);
+      setMessage('除外を解除できませんでした。');
+    }
+  }, [apiBaseUrlCandidates, excludedRestaurants]);
 
   const loadSavedRestaurants = useCallback(async () => {
     const requestedUserId = userId;
@@ -7012,15 +7114,21 @@ export default function App() {
     // ここで落ちるものは条件に合っていないのだから、地図にも抽選にも出してはいけない。
     // ここは0件になっても戻さない。★4.0以上で探して1件も無いときに全部出すのは、
     // 条件を無視して見せているのと同じになる。
-    const matchingConditions = subscription.isPro
-      ? safeCandidates.filter((place) => candidateMatchesPremiumConditions(place, minRating, openNowOnly))
+    // 除外した店は、一覧にも地図にも抽選にも出さない。
+    // ここで落とせば3か所すべてに効く。別々に落とすと必ずどこかが漏れる。
+    const withoutExcluded = excludedKeys.size
+      ? safeCandidates.filter((place) => !excludedKeys.has(excludedKeyForCandidate(place)))
       : safeCandidates;
+    const matchingConditions = subscription.isPro
+      ? withoutExcluded.filter((place) => candidateMatchesPremiumConditions(place, minRating, openNowOnly))
+      : withoutExcluded;
     // ここは一覧の上限で切る。地図側はこの中からさらに60件だけ打つ。
     return matchingConditions.slice(0, MAX_CANDIDATE_LIST_COUNT);
   }, [
     areaMatchedRestaurants,
     distance,
     mapCandidates,
+    excludedKeys,
     minRating,
     openNowOnly,
     searchCircleOrigin,
@@ -7829,7 +7937,8 @@ export default function App() {
     }
     loadDrawHistories();
     loadSavedRestaurants();
-  }, [loadDrawHistories, loadSavedRestaurants, stage]);
+    loadExcludedRestaurants();
+  }, [loadDrawHistories, loadExcludedRestaurants, loadSavedRestaurants, stage]);
 
   useEffect(() => {
     if (activeTab === 'random' || mapRouletteStatus !== 'spinning') {
@@ -9625,6 +9734,7 @@ export default function App() {
             onAllRandomPress={prepareEverythingDraw}
             onRestaurantSave={saveRestaurantToAlbum}
             onRestaurantVisit={handleVisitRecommendation}
+            onRestaurantExclude={excludeRestaurant}
             isRestaurantSaved={isRestaurantSaved}
           />
         )}
@@ -9732,6 +9842,8 @@ export default function App() {
             onAreaPress={() => setActiveTab('home')}
             onRegister={openRegistration}
             onSpendChange={updateHistoryActualSpend}
+            excludedRestaurants={excludedRestaurants}
+            onUnexclude={unexcludeRestaurant}
           />
         )}
       </ScrollView>
@@ -12785,6 +12897,7 @@ function SearchTab({
   onAllRandomPress,
   onRestaurantSave,
   onRestaurantVisit,
+  onRestaurantExclude,
   isRestaurantSaved,
 }: {
   uiText: Record<string, string>;
@@ -12823,6 +12936,8 @@ function SearchTab({
   onRestaurantSave: (restaurant: Restaurant) => void;
   /** 一覧から直接「この店にいく」を選んだとき。抽選と同じく履歴と分析に残す。 */
   onRestaurantVisit: (restaurant: Restaurant) => void;
+  /** この店を今後出さないようにする（Premium限定）。 */
+  onRestaurantExclude: (restaurant: Restaurant) => void;
   isRestaurantSaved: (restaurant: Restaurant) => boolean;
 }) {
   const isEverythingRandom = drawMode === 'everything';
@@ -12977,6 +13092,7 @@ function SearchTab({
           isSaved={isRestaurantSaved(restaurant)}
           onSavePress={() => onRestaurantSave(restaurant)}
           onVisitPress={() => onRestaurantVisit(restaurant)}
+          onExcludePress={isPro ? () => onRestaurantExclude(restaurant) : undefined}
         />
       ))}
       {/* 写真を表示している提供元のクレジット表記 */}
@@ -16469,6 +16585,8 @@ function AnalyticsTab({
   onAreaPress,
   onRegister,
   onSpendChange,
+  excludedRestaurants,
+  onUnexclude,
 }: {
   uiText: Record<string, string>;
   userId: string;
@@ -16488,6 +16606,9 @@ function AnalyticsTab({
   onRegister: () => void;
   /** 実際に払った額が変わったことを上へ伝える。集計はそちらが持っている。 */
   onSpendChange: (historyId: string, actualSpend: number | null) => void;
+  /** 出さないようにした店。解除できないと片道になるので、ここから戻せるようにする。 */
+  excludedRestaurants: ApiExcludedRestaurant[];
+  onUnexclude: (excludedId: string) => void;
 }) {
   const [paywallContext, setPaywallContext] = useState<{ title: string; message: string } | null>(null);
   const [spendOpen, setSpendOpen] = useState(false);
@@ -17129,6 +17250,25 @@ function AnalyticsTab({
           })
         )}
       </View>
+      {/* 出さないようにした店。登録できても解除できないと、間違えた時に戻せない。 */}
+      {excludedRestaurants.length > 0 && (
+        <View style={styles.pastReportCard}>
+          <Text style={styles.pastReportTitle}>出さない店（{excludedRestaurants.length}件）</Text>
+          <Text style={styles.pastReportLead}>候補・地図・抽選のすべてから外しています。</Text>
+          {excludedRestaurants.map((item) => (
+            <View key={item.id} style={styles.pastReportRow}>
+              <Ionicons name="eye-off-outline" size={15} color="#8d8478" />
+              <Text style={styles.pastReportRowMeta} numberOfLines={1}>
+                {item.restaurantName ?? '名前の記録なし'}
+              </Text>
+              <Pressable style={styles.excludedUndoButton} onPress={() => onUnexclude(item.id)}>
+                <Text style={styles.excludedUndoText}>戻す</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      )}
+
       <ProPaywall
         visible={paywallContext != null}
         title={paywallContext?.title}
@@ -17466,12 +17606,15 @@ function RestaurantCard({
   isSaved = false,
   onSavePress,
   onVisitPress,
+  onExcludePress,
 }: {
   restaurant: Restaurant;
   uiText?: Record<string, string>;
   isSaved?: boolean;
   onSavePress?: () => void;
   onVisitPress?: () => void;
+  /** この店を今後出さないようにする。渡されないときはボタンを出さない。 */
+  onExcludePress?: () => void;
 }) {
   return (
     <View style={styles.restaurantCard}>
@@ -17490,12 +17633,21 @@ function RestaurantCard({
           <Text style={styles.restaurantMetaPill}>{getStoredMinutesLabel(restaurant, uiText)}</Text>
           <Text style={styles.restaurantMetaPill}>{formatPrice(restaurant, uiText)}</Text>
         </View>
-        {!!onVisitPress && (
-          <Pressable style={styles.restaurantVisitButton} onPress={onVisitPress}>
-            <Ionicons name="navigate-outline" size={13} color="#ffffff" />
-            <Text style={styles.restaurantVisitButtonText}>この店にいく</Text>
-          </Pressable>
-        )}
+        <View style={styles.restaurantActionRow}>
+          {!!onVisitPress && (
+            <Pressable style={styles.restaurantVisitButton} onPress={onVisitPress}>
+              <Ionicons name="navigate-outline" size={13} color="#ffffff" />
+              <Text style={styles.restaurantVisitButtonText}>この店にいく</Text>
+            </Pressable>
+          )}
+          {/* 「もう出さない」。同じ店ばかり当たるのを本人の側から断てるようにする。 */}
+          {!!onExcludePress && (
+            <Pressable style={styles.restaurantExcludeButton} onPress={onExcludePress}>
+              <Ionicons name="eye-off-outline" size={13} color="#8d8478" />
+              <Text style={styles.restaurantExcludeButtonText}>出さない</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
       {!!onSavePress && (
         <Pressable

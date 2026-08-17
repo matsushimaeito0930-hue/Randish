@@ -313,6 +313,25 @@ public final class ApiDtos {
       boolean isDev) {
   }
 
+  /** 出したくない店の登録。店の情報そのものは持たず、どの店かと理由だけ。 */
+  public record ExcludedRestaurantCreateRequest(
+      String userId,
+      String provider,
+      String providerPlaceId,
+      String restaurantName,
+      String reason) {
+  }
+
+  public record ExcludedRestaurantResponse(
+      String id,
+      String userId,
+      String provider,
+      String providerPlaceId,
+      String restaurantName,
+      String reason,
+      Instant createdAt) {
+  }
+
   public record FavoriteCreateRequest(
       String userId,
       String restaurantId,
