@@ -296,6 +296,8 @@ CREATE TABLE IF NOT EXISTS random_histories (
   longitude DOUBLE PRECISION,
   range_meters INT,
   user_rating INT,
+  -- 本人が入力した実際の支払額。NULL は未入力で、そのときは予算帯からの推定を使う。
+  actual_spend INT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL,
   CONSTRAINT fk_random_histories_restaurant
     FOREIGN KEY (restaurant_id) REFERENCES restaurants(id),
