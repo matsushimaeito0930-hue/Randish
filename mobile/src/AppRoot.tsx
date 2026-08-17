@@ -837,7 +837,17 @@ const pickNextDrawAnimation = (current: DrawAnimationKey) => {
   return candidates[Math.floor(Math.random() * candidates.length)] ?? current;
 };
 
-const DISTANCE_OPTIONS = ['100m', '500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km'];
+/**
+ * 「指定なし」は市全体を見るための選択肢。
+ *
+ * 距離を持たない検索にはできない。Geoapify は中心と半径での指定が必須で、
+ * 半径が無いと1件も返さない。表示上は距離を外し、内部では市がまるごと入る
+ * 大きさで引く。
+ */
+const DISTANCE_ANY = '指定なし';
+const DISTANCE_ANY_METERS = 20000;
+
+const DISTANCE_OPTIONS = ['100m', '500m', '800m', '1km', '1.5km', '2km', '3km', '5km', '10km', DISTANCE_ANY];
 const BUDGET_MAX_OPTIONS = ['1000', '1500', '2000', '3000', '4000', '5000', '8000'];
 const FREE_MEAL_TICKET_COUNT = 4;
 
@@ -3014,9 +3024,15 @@ const getEstimatedBudget = (restaurant: Restaurant) => {
 
 const formatYen = (value: number) => `${Math.round(value).toLocaleString()}円`;
 
+/**
+ * 画面に出す距離。「指定なし」は円を描かないので null を返す。
+ *
+ * 問い合わせに使う半径は buildSearchRadiusMeters のほうを使うこと。
+ * ここで20kmを返してしまうと、市全体を指定したのに20kmの円が描かれる。
+ */
 const parseDistanceMeters = (value?: string | null) => {
   const normalized = value?.trim().toLowerCase();
-  if (!normalized) {
+  if (!normalized || normalized === DISTANCE_ANY) {
     return null;
   }
   if (normalized.endsWith('km')) {
@@ -3029,6 +3045,13 @@ const parseDistanceMeters = (value?: string | null) => {
   }
   return null;
 };
+
+/**
+ * 検索に渡す半径。「指定なし」でも半径そのものは必要になる。
+ * 円を描くかどうかは parseDistanceMeters のほうで決まる。
+ */
+const buildSearchRadiusMeters = (distance: string) =>
+  distance.trim() === DISTANCE_ANY ? DISTANCE_ANY_METERS : parseDistanceMeters(distance);
 
 const formatDistanceMeters = (meters?: number | null) => {
   if (meters == null || !Number.isFinite(meters) || meters <= 0) {
@@ -3142,7 +3165,20 @@ const restaurantToCandidatePlace = (restaurant: Restaurant): CandidatePlace | nu
  * 一覧に出す候補と地図のピンの上限。
  * 一覧とピンで別々の上限を持つと件数が食い違って見えるため、必ず同じ値を使う。
  */
+/**
+ * 地図に打つピンの上限。
+ *
+ * 一覧と同じ数にはしない。300件をWebの重ねレイヤーで描くと、指を動かすたびに
+ * 全部を打ち直すことになって目に見えて重くなる。数が違って見えるぶんは、
+ * 地図に「300件中60件を表示」と書いて埋める。
+ */
 const MAX_VISIBLE_CANDIDATES = 60;
+
+/**
+ * 候補一覧に載せる上限。サーバー側の PREMIUM_TARGET_RESULT_COUNT と揃えてある。
+ * 片方を変えるときはもう片方も見ること。
+ */
+const MAX_CANDIDATE_LIST_COUNT = 300;
 
 const candidatePlaceKey = (place: CandidatePlace) =>
   `${(place.name ?? '').trim().toLowerCase()}@${place.latitude.toFixed(4)},${place.longitude.toFixed(4)}`;
@@ -6821,7 +6857,9 @@ export default function App() {
         latitude: coordinateSource?.latitude,
         longitude: coordinateSource?.longitude,
         range: coordinateSource ? toHotPepperRange(distance) : undefined,
-        distanceMeters: coordinateSource ? parseDistanceMeters(distance) ?? undefined : undefined,
+        // 「指定なし」でも半径そのものは必要（Geoapifyは円が必須）。
+        // 円を描くかどうかとは別の話なので、こちらは検索用の半径を使う。
+        distanceMeters: coordinateSource ? buildSearchRadiusMeters(distance) ?? undefined : undefined,
         // 誰の検索かを伝える。Premium と dev のときだけサーバーが Google Places も引く。
         // ゲストは付けなくてよい（サーバー側で無料枠として扱われる）。
         userId,
@@ -6898,7 +6936,8 @@ export default function App() {
     const matchingConditions = subscription.isPro
       ? safeCandidates.filter((place) => candidateMatchesPremiumConditions(place, minRating, openNowOnly))
       : safeCandidates;
-    return matchingConditions.slice(0, MAX_VISIBLE_CANDIDATES);
+    // ここは一覧の上限で切る。地図側はこの中からさらに60件だけ打つ。
+    return matchingConditions.slice(0, MAX_CANDIDATE_LIST_COUNT);
   }, [
     areaMatchedRestaurants,
     distance,
@@ -7859,7 +7898,7 @@ export default function App() {
         latitude: latestLocation.latitude,
         longitude: latestLocation.longitude,
         range: toHotPepperRange(distance),
-        distanceMeters: parseDistanceMeters(distance) ?? undefined,
+        distanceMeters: buildSearchRadiusMeters(distance) ?? undefined,
       }
       : drawApiParams;
     const recentIds = new Set([selectedRestaurant?.id, ...randomHistory.map((item) => item.id)].filter((id): id is string => Boolean(id)));
@@ -8262,7 +8301,7 @@ export default function App() {
       return null;
     }
 
-    const radius = parseDistanceMeters(distance) ?? 1500;
+    const radius = buildSearchRadiusMeters(distance) ?? 1500;
     const category = genre === 'すべて' || conditionRandom.genre ? undefined : genre;
     const priceRange = conditionRandom.budget ? undefined : budgetMax || undefined;
     const effectiveOpenNow = subscription.isPro && openNowOnly ? true : undefined;
@@ -13345,8 +13384,11 @@ function RouletteMapView({
         longitudeDelta: latitudeDelta / longitudeScale,
       };
     }
-    const latitudes = [mapCenter.latitude, ...candidates.map((candidate) => candidate.latitude)];
-    const longitudes = [mapCenter.longitude, ...candidates.map((candidate) => candidate.longitude)];
+    // 円が無いとき（距離の指定なし）は、実際に打つピンが収まる大きさに合わせる。
+    // 一覧の300件に合わせて引くと、ピンの無い余白まで映すことになる。
+    const pinned = candidates.slice(0, MAX_VISIBLE_CANDIDATES);
+    const latitudes = [mapCenter.latitude, ...pinned.map((candidate) => candidate.latitude)];
+    const longitudes = [mapCenter.longitude, ...pinned.map((candidate) => candidate.longitude)];
     const latitudeDelta = Math.max(0.008, (Math.max(...latitudes) - Math.min(...latitudes)) * 1.7 || 0.008);
     const longitudeDelta = Math.max(0.008, (Math.max(...longitudes) - Math.min(...longitudes)) * 1.7 || 0.008);
     return {
@@ -13370,7 +13412,8 @@ function RouletteMapView({
    * 「候補に戻す」ときは地図そのものを元の中心で読み直し、両者を合わせ直す。
    */
   const [mapResetToken, setMapResetToken] = useState(0);
-  // 候補一覧と同じ上限を使う。ここだけ別の数にすると「一覧12件なのにピンは8個」になる。
+  // ピンは60件まで。一覧はもっと長いことがあるので、上のラベルで
+  // 「300件中60件を表示」と断っている。黙って数が食い違うのだけは避ける。
   const displayCandidates = useMemo(() => candidates.slice(0, MAX_VISIBLE_CANDIDATES), [candidates]);
   const showGenreEffect = genreFocused && (candidates.length > 0 || loading || status === 'searching' || status === 'spinning');
   const activeCandidateId = useMemo(() => {
@@ -13506,7 +13549,11 @@ function RouletteMapView({
       : status === 'result'
         ? '一店決定'
         : candidates.length
-          ? `${candidates.length}件の候補`
+          // 一覧は300件でも、地図に出すのは60件まで。数が食い違って見えるので、
+          // 出しているのが一部だと分かるようにしておく。
+          ? (candidates.length > MAX_VISIBLE_CANDIDATES
+            ? `${candidates.length}件中${MAX_VISIBLE_CANDIDATES}件を表示`
+            : `${candidates.length}件の候補`)
           : '候補待ち';
   const canRenderNativeMap = MapModule && Platform.OS !== 'web';
   const MapView = MapModule?.default;

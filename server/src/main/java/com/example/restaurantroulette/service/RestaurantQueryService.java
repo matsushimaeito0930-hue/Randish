@@ -35,7 +35,20 @@ public class RestaurantQueryService {
     FILL_SHORTFALL
   }
 
+  /**
+   * 無料枠で返す件数の上限。
+   *
+   * 「距離の指定なし」で市全体を引くと、都市部では数百件になる。無料はここで止める。
+   */
   private static final int HYBRID_TARGET_RESULT_COUNT = 100;
+
+  /**
+   * Premium と dev で返す件数の上限。
+   *
+   * 「上限なし」にはできない。ホットペッパーが1条件あたり300件までしか返さないので、
+   * それ以上を約束しても提供元が持っていない。天井をそのまま上限にする。
+   */
+  private static final int PREMIUM_TARGET_RESULT_COUNT = 300;
   /** ホットペッパーの距離指定の最大値（約3km）。近くに無いときはここまでは広げる。 */
   private static final int WIDEST_RANGE = 5;
   private static final int MAX_FALLBACK_FILL_COUNT = 30;
@@ -301,8 +314,9 @@ public class RestaurantQueryService {
           externalOnlyRestaurants) || hasAvailableProvider;
     }
 
+    int targetResultCount = targetResultCount(googlePlacesUsage);
     int fallbackLimit = googlePlacesFetchLimit(
-        googlePlacesUsage, externalOnlyRestaurants.size(), HYBRID_TARGET_RESULT_COUNT);
+        googlePlacesUsage, externalOnlyRestaurants.size(), targetResultCount);
     if (fallbackLimit > 0) {
       hasAvailableProvider = queryRandomProviders(
           fallbackProviders(),
@@ -322,7 +336,7 @@ public class RestaurantQueryService {
     }
 
     if (!externalOnlyRestaurants.isEmpty()) {
-      return limitedCandidates(externalOnlyRestaurants, HYBRID_TARGET_RESULT_COUNT);
+      return limitedCandidates(externalOnlyRestaurants, targetResultCount);
     }
 
     if (hasCoordinates(latitude, longitude)) {
@@ -450,6 +464,18 @@ public class RestaurantQueryService {
         .filter(Optional::isPresent)
         .map(Optional::get)
         .findFirst();
+  }
+
+  /**
+   * 何件まで返すか。
+   *
+   * <p>Google をどう使うかと同じ区分で決めている。FILL_SHORTFALL は Premium と dev だけなので、
+   * 判定をもう一本増やさずに済む。区分の意味を変えるときは、こちらも一緒に見ること。
+   */
+  private int targetResultCount(GooglePlacesUsage usage) {
+    return usage == GooglePlacesUsage.FILL_SHORTFALL
+        ? PREMIUM_TARGET_RESULT_COUNT
+        : HYBRID_TARGET_RESULT_COUNT;
   }
 
   /**
