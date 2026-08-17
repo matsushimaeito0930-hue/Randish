@@ -1008,6 +1008,9 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     profilePlaceholder: '表示名',
     changeImage: '画像を変更',
     save: '保存',
+    saved: '保存済み',
+    savedJustNow: '保存しました',
+    unsavedName: '名前が未保存です',
     language: '言語',
     notifications: '通知',
     notificationsValue: '食券リマインド',
@@ -1193,6 +1196,9 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     profilePlaceholder: 'Display name',
     changeImage: 'Change Photo',
     save: 'Save',
+    saved: 'Saved',
+    savedJustNow: 'Saved',
+    unsavedName: 'Name not saved yet',
     language: 'Language',
     notifications: 'Notifications',
     notificationsValue: 'Meal ticket reminders',
@@ -1378,6 +1384,9 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     profilePlaceholder: '显示名称',
     changeImage: '更改头像',
     save: '保存',
+    saved: '已保存',
+    savedJustNow: '已保存',
+    unsavedName: '名称尚未保存',
     language: '语言',
     notifications: '通知',
     notificationsValue: '餐券提醒',
@@ -1563,6 +1572,9 @@ const UI_TEXT: Record<AppLanguage, Record<string, string>> = {
     profilePlaceholder: '표시 이름',
     changeImage: '사진 변경',
     save: '저장',
+    saved: '저장됨',
+    savedJustNow: '저장했습니다',
+    unsavedName: '이름이 저장되지 않았습니다',
     language: '언어',
     notifications: '알림',
     notificationsValue: '식권 리마인드',
@@ -10803,6 +10815,16 @@ function HomeLocationPanel({
   const [contactSucceeded, setContactSucceeded] = useState(false);
   const [contactSending, setContactSending] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState(profileName);
+  /**
+   * 直前に保存したかどうか。
+   *
+   * 押しても何も起きないように見えるボタンだった。実際には保存しているのに、
+   * 画面が何も言わないので、閉じるボタンを押すまで保存できたか分からない。
+   */
+  const [profileSavedFlash, setProfileSavedFlash] = useState(false);
+  // 入力欄の中身が、保存済みの名前と違うか。
+  const profileNameDirty = profileNameDraft.trim() !== profileName.trim()
+    && profileNameDraft.trim().length > 0;
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [adminUsage, setAdminUsage] = useState<ApiUsageResponse | null>(null);
@@ -10892,6 +10914,8 @@ function HomeLocationPanel({
 
   useEffect(() => {
     setProfileNameDraft(profileName);
+    // 保存が反映されたら、その時点で「保存しました」を出す。
+    setProfileSavedFlash(true);
   }, [profileName]);
 
   const searchResults = useMemo(() => {
@@ -10939,10 +10963,22 @@ function HomeLocationPanel({
       return;
     }
     onProfileNameChange(nextName || 'RANDISH Guest');
+    setProfileSavedFlash(true);
   };
 
   const closeAccountMenu = () => {
     Keyboard.dismiss();
+    // 名前を書き換えたまま閉じられたら、そのぶんを保存してから閉じる。
+    // 以前は黙って捨てていた。利用者からすれば入力した名前が消えるだけで、
+    // 保存ボタンを押し忘れたせいだとは分からない。
+    const pendingName = profileNameDraft.trim();
+    if (isRegisteredUser
+      && pendingName
+      && pendingName !== profileName
+      && normalizeHiddenProfileCommand(pendingName) !== HIDDEN_OPS_PROFILE_NAME) {
+      onProfileNameChange(pendingName);
+    }
+    setProfileSavedFlash(false);
     setProfileEditorOpen(false);
     setLanguageMenuOpen(false);
     setNotificationSheetOpen(false);
@@ -11116,6 +11152,9 @@ function HomeLocationPanel({
         ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
         : asset.uri;
       onProfileImageChange(dataUrl);
+      // 画像は選んだ時点で保存される。保存ボタンを押していないので、
+      // 何も言わないと「まだ保存していない」と思われる。
+      setProfileSavedFlash(true);
     }
   };
 
@@ -11574,10 +11613,32 @@ function HomeLocationPanel({
                       <Ionicons name="image-outline" size={16} color={INK} />
                       <Text style={styles.homeProfileImageButtonText}>{t.changeImage}</Text>
                     </Pressable>
-                    <Pressable style={styles.homeProfileSaveButton} onPress={saveProfileName}>
-                      <Text style={styles.homeProfileSaveText}>{t.save}</Text>
+                    {/* 状態をボタン自身に出す。押せるのか、もう保存済みなのかが
+                        見た目で分からないと、押しても何も起きていないように見える。 */}
+                    <Pressable
+                      style={[
+                        styles.homeProfileSaveButton,
+                        !profileNameDirty && styles.homeProfileSaveButtonDone,
+                      ]}
+                      onPress={saveProfileName}
+                      disabled={!profileNameDirty}
+                    >
+                      {!profileNameDirty && (
+                        <Ionicons name="checkmark" size={14} color="#3f8f63" />
+                      )}
+                      <Text
+                        style={[
+                          styles.homeProfileSaveText,
+                          !profileNameDirty && styles.homeProfileSaveTextDone,
+                        ]}
+                      >
+                        {profileNameDirty ? t.save : profileSavedFlash ? t.savedJustNow : t.saved}
+                      </Text>
                     </Pressable>
                   </View>
+                  {profileNameDirty && (
+                    <Text style={styles.homeProfileHint}>{t.unsavedName}</Text>
+                  )}
                 </View>
               )}
               <Pressable style={styles.homeAccountMenuItem} onPress={() => setLanguageMenuOpen((current) => !current)}>

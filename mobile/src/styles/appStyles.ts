@@ -1843,17 +1843,37 @@ export const styles = StyleSheet.create({
     color: INK,
   },
   homeProfileSaveButton: {
-    minWidth: 72,
-    minHeight: 38,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 4,
+    minWidth: 72,
+    minHeight: 38,
+    paddingHorizontal: 12,
     borderRadius: 13,
     backgroundColor: INK,
+  },
+  // 保存するものが無い状態。押せないことと、保存済みであることを同時に示す。
+  homeProfileSaveButtonDone: {
+    backgroundColor: '#eef6f0',
+    borderWidth: 1,
+    borderColor: '#cfe6d8',
   },
   homeProfileSaveText: {
     fontSize: 12,
     fontWeight: '900',
     color: '#ffffff',
+  },
+  homeProfileSaveTextDone: {
+    color: '#3f8f63',
+  },
+  // 未保存であることを言葉でも置く。ボタンの色だけだと気づかれない。
+  homeProfileHint: {
+    marginTop: 8,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '800',
+    color: ORANGE,
   },
   homeLanguagePicker: {
     flexDirection: 'row',
