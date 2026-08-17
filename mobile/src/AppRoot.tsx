@@ -9568,6 +9568,7 @@ export default function App() {
             // 「会員登録が必要です」の警告が出るだけの行き止まりだった。
             onRequirePremium={startPremiumPurchase}
             isRegisteredUser={isRegisteredUser}
+            currentPrefecture={currentCity?.prefecture ?? null}
             onConditionRandomize={markConditionRandom}
             onRequestCurrentLocation={requestCurrentLocation}
             onSearch={loadRestaurants}
@@ -12041,6 +12042,7 @@ function FilterPanel({
   onOpenNowOnlyChange,
   onRequirePremium,
   isRegisteredUser,
+  currentPrefecture,
   onRandomized,
   onUseCurrentLocation,
   onSubmit,
@@ -12071,6 +12073,8 @@ function FilterPanel({
   onRequirePremium: () => void;
   /** ゲストかどうか。案内の文言を「会員登録」に変えるために使う。 */
   isRegisteredUser: boolean;
+  /** いまいる都道府県。エリア一覧の既定を決めるのに使う。 */
+  currentPrefecture?: string | null;
   onRandomized?: (field: ConditionRandomField) => void;
   onUseCurrentLocation?: () => void | Promise<unknown>;
   onSubmit: () => void;
@@ -12181,7 +12185,7 @@ function FilterPanel({
               <Text style={styles.areaRandomHiddenLead}>{uiText.areaHiddenLead}</Text>
             </View>
           ) : (
-            <AreaPresetPicker selectedArea={area} distance={distance} presets={areaPresets} onSelect={selectArea} onUseCurrentLocation={onUseCurrentLocation} uiText={uiText} />
+            <AreaPresetPicker selectedArea={area} distance={distance} presets={areaPresets} currentPrefecture={currentPrefecture} onSelect={selectArea} onUseCurrentLocation={onUseCurrentLocation} uiText={uiText} />
           )}
         </>
       )}
@@ -12330,6 +12334,7 @@ function AreaPresetPicker({
   selectedArea,
   distance,
   presets,
+  currentPrefecture,
   onSelect,
   onUseCurrentLocation,
   uiText = UI_TEXT.ja,
@@ -12337,6 +12342,11 @@ function AreaPresetPicker({
   selectedArea: string;
   distance: string;
   presets: AreaPreset[];
+  /**
+   * いまいる都道府県。「現在地」を選んでいるときは、エリア名から県を読めない。
+   * これが無いと一覧の既定が大阪府になり、富山にいる人に大阪の市が並ぶ。
+   */
+  currentPrefecture?: string | null;
   onSelect: (value: string) => void;
   onUseCurrentLocation?: () => void | Promise<unknown>;
   uiText?: Record<string, string>;
@@ -12348,11 +12358,36 @@ function AreaPresetPicker({
     : isPrefectureName(selectedArea)
       ? selectedArea
       : getPrefectureFromText(selectedArea);
+  /**
+   * 最初に開く県。
+   *
+   * 選んでいるエリアの県 → いまいる県 → 一覧の先頭、の順に決める。
+   * 以前は最後の「一覧の先頭」しか実質使われておらず、それが大阪府だった。
+   */
   const fallbackPrefecture = selectedAreaPrefecture && prefectures.includes(selectedAreaPrefecture)
     ? selectedAreaPrefecture
-    : prefectures[0] ?? '大阪府';
+    : currentPrefecture && prefectures.includes(currentPrefecture)
+      ? currentPrefecture
+      : prefectures[0] ?? '大阪府';
   const [areaQuery, setAreaQuery] = useState('');
   const [selectedPrefecture, setSelectedPrefecture] = useState(fallbackPrefecture);
+  /**
+   * エリアを変えたら、開いている県もそちらへ移す。
+   *
+   * useState の初期値はマウント時に一度しか読まれない。ホームで富山を選んでも、
+   * 条件画面の県は最初に決まった大阪府のままだった。「なぜ大阪？」となる。
+   *
+   * 追従するのは、エリア側から決まる県が変わったときだけ。毎回書き戻すと、
+   * 県のチップを自分で押しても弾かれる。
+   */
+  const lastAreaPrefectureRef = useRef(fallbackPrefecture);
+  useEffect(() => {
+    if (lastAreaPrefectureRef.current === fallbackPrefecture) {
+      return;
+    }
+    lastAreaPrefectureRef.current = fallbackPrefecture;
+    setSelectedPrefecture(fallbackPrefecture);
+  }, [fallbackPrefecture]);
   const [areaMode, setAreaMode] = useState<AreaPickerMode>('popular');
   const [showAllPopularAreas, setShowAllPopularAreas] = useState(false);
   const [showAllOtherAreas, setShowAllOtherAreas] = useState(false);
@@ -12692,6 +12727,7 @@ function SearchTab({
   onOpenNowOnlyChange,
   onRequirePremium,
   isRegisteredUser,
+  currentPrefecture,
   onConditionRandomize,
   onRequestCurrentLocation,
   onSearch,
@@ -12727,6 +12763,8 @@ function SearchTab({
   onRequirePremium: () => void;
   /** ゲストかどうか。Premiumの案内を「会員登録」に切り替えるために下へ渡す。 */
   isRegisteredUser: boolean;
+  /** いまいる都道府県。エリア一覧の既定を決めるのに使う。 */
+  currentPrefecture?: string | null;
   onConditionRandomize: (field: ConditionRandomField) => void;
   onRequestCurrentLocation: () => void | Promise<unknown>;
   onSearch: () => void;
@@ -12772,6 +12810,7 @@ function SearchTab({
         onOpenNowOnlyChange={onOpenNowOnlyChange}
         onRequirePremium={onRequirePremium}
         isRegisteredUser={isRegisteredUser}
+        currentPrefecture={currentPrefecture}
         onRandomized={onConditionRandomize}
         onSubmit={onSearch}
       />
