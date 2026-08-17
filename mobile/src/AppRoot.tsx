@@ -4698,6 +4698,19 @@ const DAILY_RECOMMENDATION_RESELECT_METERS = 1500;
  * ジャンルが偏らないように選ぶ。
  * 同じジャンルが5つ並ぶと「おすすめ」というより検索結果の先頭5件に見えてしまう。
  */
+/**
+ * 並びを混ぜる。同じ配列を返さないので、呼ぶたびに違う結果になる。
+ * 「その日のうちは同じ」は控え（保存）のほうで担保している。
+ */
+const shuffleArray = <T,>(items: T[]): T[] => {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return result;
+};
+
 const pickVariedRecommendations = (
   candidates: Restaurant[],
   count = DAILY_RECOMMENDATION_COUNT,
@@ -4706,10 +4719,13 @@ const pickVariedRecommendations = (
   if (count <= 0) {
     return [];
   }
-  const usable = candidates.filter((restaurant) =>
+  const filtered = candidates.filter((restaurant) =>
     Boolean(restaurant?.name?.trim())
     && (restaurant.externalProvider ?? '').toLowerCase() !== 'mock'
     && !excludeIds?.has(restaurant.id));
+  // 並び順のまま上から取ると、市の中で毎日同じ数店が出続ける。
+  // 一度混ぜてから選ぶ。日ごとの固定は呼び出し側（控え）が受け持つ。
+  const usable = shuffleArray(filtered);
   if (usable.length <= count) {
     return usable;
   }
@@ -6370,6 +6386,8 @@ export default function App() {
   const [locationIntroState, setLocationIntroState] = useState<LocationIntroState>('loading');
   const [profileName, setProfileName] = useState('RANDISH Guest');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
+  /** いまいる市区町村。「今日のおすすめ」をこの単位で探すために持つ。 */
+  const [currentCity, setCurrentCity] = useState<{ city: string; prefecture: string | null } | null>(null);
   // 保存済みのプロフィールを読み終えたか。読み込む前に書き戻して消してしまうのを防ぐ。
   const profileLoadedRef = useRef(false);
   const [appLanguage, setAppLanguage] = useState<AppLanguage>('ja');
@@ -7332,10 +7350,26 @@ export default function App() {
   // 「今日のおすすめ」は条件から切り離す。
   // ジャンルも予算も外し、範囲は常に現在地から1.5km。条件をいじるたびに
   // 顔ぶれが変わると「今日のおすすめ」ではなく検索結果の別名になってしまう。
-  const recommendationOrigin = userLocation;
-  const recommendationScopeKey = recommendationOrigin
-    ? `here:${recommendationOrigin.latitude.toFixed(3)},${recommendationOrigin.longitude.toFixed(3)}`
-    // 位置情報が使えない端末では、せめて選んだエリアで出す。
+  /**
+   * 「今日のおすすめ」を探す範囲。いまいる市区町村ぜんぶ。
+   *
+   * 半径で探していたころは、条件画面で同じ距離を指定したときと同じ顔ぶれが出ていた。
+   * それでは条件検索の使い回しでしかない。市の単位にすると、歩いて行ける範囲の外にある
+   * 知らない店が入ってくる。
+   */
+  const recommendationArea = useMemo(() => {
+    if (!currentCity) {
+      return null;
+    }
+    // 都道府県まで付ける。「府中市」のように同名の市がある。
+    return currentCity.prefecture
+      ? `${currentCity.prefecture} ${currentCity.city}`
+      : currentCity.city;
+  }, [currentCity]);
+
+  const recommendationScopeKey = recommendationArea
+    ? `city:${recommendationArea}`
+    // 市が分からない端末では、せめて選んだエリアで出す。
     : `area:${previewApiParams.area ?? ''}`;
 
   /**
@@ -7409,49 +7443,32 @@ export default function App() {
     return filled;
   }, [userId]);
   useEffect(() => {
-    const hasScope = recommendationOrigin != null || Boolean(previewApiParams.area);
-    if (!hasScope) {
+    const searchArea = recommendationArea ?? previewApiParams.area;
+    if (!searchArea) {
       return;
     }
-    const origin = recommendationOrigin;
     let cancelled = false;
     void (async () => {
       try {
-        const data = await randishApi.getRestaurants(apiBaseUrlCandidates, origin
-          ? {
-            latitude: origin.latitude,
-            longitude: origin.longitude,
-            range: DAILY_RECOMMENDATION_RANGE,
-            distanceMeters: DAILY_RECOMMENDATION_RADIUS_METERS,
-            userId: previewApiParams.userId,
-          }
-          : { area: previewApiParams.area, userId: previewApiParams.userId });
+        // 市の名前だけで引く。座標を渡すとホットペッパーが半径3kmまでしか見ないので、
+        // 市の端にある店が入らない。キーワード検索なら市の全域が対象になる。
+        const data = await randishApi.getRestaurants(apiBaseUrlCandidates, {
+          area: searchArea,
+          userId: previewApiParams.userId,
+        });
+        if (cancelled) {
+          return;
+        }
+        const normalized = data.map(normalizeRestaurant);
+        // ホットペッパーの店だけにする。
+        // 写真と価格帯が揃っているのはここだけで、おすすめとして並べるには
+        // 見て決められることが要る。OpenStreetMap由来は名前しか無いことが多い。
+        const fromHotPepper = normalized.filter((restaurant) =>
+          (restaurant.externalProvider ?? '').toUpperCase() === 'HOTPEPPER'
+          && Boolean(restaurant.photoUrl?.trim()));
+        const daily = await resolveDailyRecommendations(fromHotPepper, recommendationScopeKey, null);
         if (!cancelled) {
-          // 写真のある店だけに絞ると、写真を持たない提供元しかない地域で
-          // 1件しか出せなくなる。写真つきを前に並べたうえで、写真なしも残す。
-          const normalized = data.map(normalizeRestaurant);
-          // サーバー側でも1.5kmで絞っているが、座標を持たない店は素通りする。
-          // ここで落としておかないと「1.5km以内」と言いながら遠い店が混じる。
-          const withinRadius = origin
-            ? normalized.filter((restaurant) => {
-              if (restaurant.latitude == null || restaurant.longitude == null) {
-                return false;
-              }
-              return distanceBetweenLocationsMeters(origin, {
-                latitude: restaurant.latitude,
-                longitude: restaurant.longitude,
-                label: '',
-              }) <= DAILY_RECOMMENDATION_RADIUS_METERS;
-            })
-            : normalized;
-          // 写真の無い店は出さない。「おすすめ」として並べるのに、
-          // 世界地図のアイコンと店名だけでは行きたいかどうか判断できない。
-          // 件数が減っても、見て決められる店だけを出す。
-          const withPhoto = withinRadius.filter((restaurant) => Boolean(restaurant.photoUrl?.trim()));
-          const daily = await resolveDailyRecommendations(withPhoto, recommendationScopeKey, origin);
-          if (!cancelled) {
-            setRecommendations(daily);
-          }
+          setRecommendations(daily);
         }
       } catch {
         // おすすめは補助的な表示なので、失敗しても何もしない。
@@ -7700,10 +7717,11 @@ export default function App() {
       };
       let label = areaRef.current;
       let prefecture: string | undefined;
+      let place: Awaited<ReturnType<typeof Location.reverseGeocodeAsync>>[number] | undefined;
 
       try {
         const places = await Location.reverseGeocodeAsync(coords);
-        const place = places[0];
+        place = places[0];
         label = place?.district || place?.city || place?.subregion || place?.name || area;
         prefecture =
           getPrefectureFromText(place?.region) ||
@@ -7715,6 +7733,10 @@ export default function App() {
       const nextLocation = { ...coords, label };
       userLocationRef.current = nextLocation;
       setUserLocation(nextLocation);
+      // 「今日のおすすめ」は市の単位で探すので、市区町村と都道府県を控えておく。
+      // 半径で探すと、条件を変えて探すのと同じものが出てきてしまう。
+      const cityName = place?.city || place?.subregion || place?.district || null;
+      setCurrentCity(cityName ? { city: cityName, prefecture: prefecture ?? null } : null);
       void writeLocalValue(LOCATION_CACHE_STORAGE_KEY, JSON.stringify({ ...nextLocation, updatedAt: Date.now() } satisfies StoredUserLocation));
       if (mode === 'sync-search') {
         setArea('現在地');
@@ -9512,6 +9534,7 @@ export default function App() {
             foodAiRemainingToday={foodAiRemainingToday}
             onAskFoodAi={askFoodAiRecommendation}
             onVisitRecommendation={handleVisitRecommendation}
+            recommendationAreaLabel={currentCity?.city ?? null}
           />
         )}
         {activeTab === 'search' && (
@@ -10283,6 +10306,7 @@ function HomeTab({
   foodAiRemainingToday,
   onAskFoodAi,
   onVisitRecommendation,
+  recommendationAreaLabel,
 }: {
   apiBaseUrlCandidates: readonly string[];
   area: string;
@@ -10328,6 +10352,8 @@ function HomeTab({
   foodAiRemainingToday: number | null;
   onAskFoodAi: () => void;
   onVisitRecommendation: (restaurant: Restaurant) => void;
+  /** 「今日のおすすめ」を探した市の名前。 */
+  recommendationAreaLabel?: string | null;
 }) {
   return (
     <View>
@@ -10374,6 +10400,7 @@ function HomeTab({
       <HomeRecommendationCarousel
         restaurants={recommendations}
         isLoading={isLoading}
+        areaLabel={recommendationAreaLabel}
         onVisit={onVisitRecommendation}
       />
     </View>
@@ -10562,10 +10589,13 @@ function FoodAiTodayCard({
 function HomeRecommendationCarousel({
   restaurants,
   isLoading,
+  areaLabel,
   onVisit,
 }: {
   restaurants: Restaurant[];
   isLoading: boolean;
+  /** どの市のお店なのか。分からないときは省く。 */
+  areaLabel?: string | null;
   onVisit: (restaurant: Restaurant) => void;
 }) {
   // 出す店は resolveDailyRecommendations が1日1回決めて保存している。
@@ -10587,7 +10617,8 @@ function HomeRecommendationCarousel({
         {isLoading && <ActivityIndicator color={ORANGE} />}
       </View>
       <Text style={styles.homeRecommendLead}>
-        現在地から1.5km以内のお店です。今日はこの顔ぶれのまま変わりません。
+        {areaLabel ? `${areaLabel}のお店から5軒。` : '今いる市のお店から5軒。'}
+        今日はこの顔ぶれのまま変わりません。
       </Text>
       <ScrollView
         horizontal
