@@ -13730,11 +13730,31 @@ function RouletteMapView({
     // 地図の1pxあたりのメートルはズームが1上がるごとに半分になるので、対数で求める。
     // 切り捨てにするのは、四捨五入だと5km・10kmで円がわずかにはみ出すため。
     // 少し引きすぎるほうが、範囲が伝わらないより良い。
+    // 距離を指定していないときは、円の半径が無いのでそこからは決められない。
+    // 以前は z=16 に固定していたが、ピンの位置は visibleRegion（候補全体の広がり）で
+    // 計算している。距離「指定なし」で候補が20kmに散ると、地図は0.66km四方を映しつつ
+    // ピンは34km四方の想定で置かれ、50倍ずれる。10km先の店が家の前に描かれた。
+    // 映している範囲そのものからズームを出して、両者を同じ縮尺に揃える。
+    const visibleWidthMeters = Math.max(
+      1,
+      visibleRegion.longitudeDelta * Math.cos((visibleRegion.latitude * Math.PI) / 180) * 111_320,
+    );
     const zoom = circleRadiusMeters
       ? Math.max(10, Math.min(17, Math.floor(24 - Math.log2(circleRadiusMeters))))
-      : 16;
+      // 画面の幅にこの範囲が収まるズーム。Web Mercator の1pxあたりのメートルから逆算する。
+      : Math.max(6, Math.min(17, Math.floor(Math.log2(
+        (156543.03392 * Math.cos((visibleRegion.latitude * Math.PI) / 180)
+          * Math.max(canvasSize.width, 1)) / visibleWidthMeters,
+      ))));
     return `https://www.google.com/maps?q=${query}&z=${zoom}&output=embed`;
-  }, [circleRadiusMeters, mapCenter.latitude, mapCenter.longitude]);
+  }, [
+    canvasSize.width,
+    circleRadiusMeters,
+    mapCenter.latitude,
+    mapCenter.longitude,
+    visibleRegion.latitude,
+    visibleRegion.longitudeDelta,
+  ]);
 
   return (
     <View
