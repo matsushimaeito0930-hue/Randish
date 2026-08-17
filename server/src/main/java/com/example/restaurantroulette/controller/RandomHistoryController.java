@@ -2,6 +2,7 @@ package com.example.restaurantroulette.controller;
 
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryRatingRequest;
+import com.example.restaurantroulette.dto.ApiDtos.RandomHistorySpendRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryResponse;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.service.AuthenticatedUserService;
@@ -50,6 +51,15 @@ public class RandomHistoryController {
       @RequestBody RandomHistoryRatingRequest request) {
     authenticatedUserService.requireSameUser(authorizationHeader, randomHistoryService.findOwnerUserId(id));
     return randomHistoryService.updateRating(id, request);
+  }
+
+  @PatchMapping("/{id}/spend")
+  public RandomHistoryResponse updateSpend(
+      @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+      @PathVariable String id,
+      @RequestBody RandomHistorySpendRequest request) {
+    authenticatedUserService.requireSameUser(authorizationHeader, randomHistoryService.findOwnerUserId(id));
+    return randomHistoryService.updateActualSpend(id, request);
   }
 
   @GetMapping("/{id}/restaurant")

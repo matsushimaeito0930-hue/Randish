@@ -76,6 +76,14 @@ public class RandomHistoryRepository {
         .update();
   }
 
+  /** 実際に払った額を書き込む。null を渡すと未入力に戻る。 */
+  public void updateActualSpend(String id, Integer actualSpend) {
+    jdbcClient.sql("UPDATE random_histories SET actual_spend = :actualSpend WHERE id = :id")
+        .param("id", id)
+        .param("actualSpend", actualSpend)
+        .update();
+  }
+
   private RandomHistory mapHistory(ResultSet resultSet, int rowNumber) throws SQLException {
     return new RandomHistory(
         resultSet.getString("id"),
@@ -89,6 +97,7 @@ public class RandomHistoryRepository {
         getNullableInteger(resultSet, "budget_max"),
         getNullableInteger(resultSet, "range_meters"),
         getNullableInteger(resultSet, "user_rating"),
+        getNullableInteger(resultSet, "actual_spend"),
         resultSet.getTimestamp("created_at").toInstant());
   }
 

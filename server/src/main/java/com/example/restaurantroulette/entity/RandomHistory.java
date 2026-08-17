@@ -14,5 +14,7 @@ public record RandomHistory(
     Integer budgetMax,
     Integer rangeMeters,
     Integer userRating,
+    /** 本人が入力した実際の支払額。未入力なら null で、そのときは予算帯から推定する。 */
+    Integer actualSpend,
     Instant createdAt) {
 }

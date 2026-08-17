@@ -119,6 +119,8 @@ type DrawHistoryEntry = {
   budgetMax: number | null;
   rangeMeters: number | null;
   userRating: number | null;
+  /** 本人が入力した実際の支払額。入っていればこちらを集計に使う。 */
+  actualSpend: number | null;
   createdAt: string;
 };
 
@@ -3311,6 +3313,7 @@ const toDrawHistoryEntry = (history: ApiRandomHistory): DrawHistoryEntry => ({
   budgetMax: history.budgetMax,
   rangeMeters: history.rangeMeters,
   userRating: history.userRating ?? null,
+  actualSpend: history.actualSpend ?? null,
   createdAt: history.createdAt,
 });
 
@@ -3726,6 +3729,11 @@ const getHistoryGenreLabel = (entry: DrawHistoryEntry) =>
   entry.genre?.trim() || entry.restaurant?.genre?.trim() || 'ジャンル未分類';
 
 const getHistoryEstimatedBudget = (entry: DrawHistoryEntry) => {
+  // 本人が入れた額があれば、推定より優先する。
+  // 推定はあくまで店の価格帯からの当て推量で、実際に払った額とは別物。
+  if (entry.actualSpend != null && entry.actualSpend > 0) {
+    return entry.actualSpend;
+  }
   if (entry.budgetMin != null || entry.budgetMax != null) {
     const min = entry.budgetMin ?? entry.budgetMax ?? 0;
     const max = entry.budgetMax ?? entry.budgetMin ?? min;
@@ -4472,6 +4480,7 @@ const getSavedRestaurantAnalytics = (savedRestaurants: SavedRestaurant[]): Saved
       budgetMax: favorite.savedBudgetMax,
       rangeMeters: favorite.savedRangeMeters,
       userRating: null,
+      actualSpend: null,
       createdAt: favorite.createdAt,
     };
   });
@@ -6718,6 +6727,7 @@ export default function App() {
       budgetMax: parseBudgetNumber(budgetMax),
       rangeMeters: parseDistanceMeters(distance),
       userRating: null,
+      actualSpend: null,
       createdAt,
     };
     setDrawHistories((current) => [
@@ -6755,6 +6765,17 @@ export default function App() {
 
   // ホームの「今日のおすすめ」から店を選んだとき。
   // 抽選と同じように履歴へ残して分析（推定外食費・ジャンル傾向）に反映する。
+  /**
+   * 履歴の金額を差し替える。
+   *
+   * 集計（推定外食費・平均単価・ジャンル別の支出）は drawHistories から毎回作り直しているので、
+   * ここを書き換えれば分析はそのまま追従する。別に合計を持っていると、片方だけ古くなる。
+   */
+  const updateHistoryActualSpend = useCallback((historyId: string, actualSpend: number | null) => {
+    setDrawHistories((current) => current.map((entry) =>
+      entry.id === historyId ? { ...entry, actualSpend } : entry));
+  }, []);
+
   const handleVisitRecommendation = useCallback((restaurant: Restaurant) => {
     setSelectedRestaurant(restaurant);
     setRandomHistory((current) => [
@@ -9710,6 +9731,7 @@ export default function App() {
             onRestorePro={restorePremiumPurchase}
             onAreaPress={() => setActiveTab('home')}
             onRegister={openRegistration}
+            onSpendChange={updateHistoryActualSpend}
           />
         )}
       </ScrollView>
@@ -16446,6 +16468,7 @@ function AnalyticsTab({
   onRestorePro,
   onAreaPress,
   onRegister,
+  onSpendChange,
 }: {
   uiText: Record<string, string>;
   userId: string;
@@ -16463,6 +16486,8 @@ function AnalyticsTab({
   onRestorePro: () => void;
   onAreaPress: () => void;
   onRegister: () => void;
+  /** 実際に払った額が変わったことを上へ伝える。集計はそちらが持っている。 */
+  onSpendChange: (historyId: string, actualSpend: number | null) => void;
 }) {
   const [paywallContext, setPaywallContext] = useState<{ title: string; message: string } | null>(null);
   const [spendOpen, setSpendOpen] = useState(false);
@@ -16474,6 +16499,42 @@ function AnalyticsTab({
   const [aiReportGraphAnalytics, setAiReportGraphAnalytics] = useState<AiReportGraphAnalytics | null>(null);
   // 開封済みのレポート（最大12か月ぶん）。期限とは無関係に読み返せる。
   const [storedReports, setStoredReports] = useState<StoredAiMonthlyReport[]>([]);
+  // 金額を直している行と、その入力中の値。
+  const [editingSpendId, setEditingSpendId] = useState<string | null>(null);
+  const [spendDraft, setSpendDraft] = useState('');
+
+  const beginSpendEdit = useCallback((historyId: string, current: number | null) => {
+    setEditingSpendId(historyId);
+    setSpendDraft(current != null && current > 0 ? String(current) : '');
+  }, []);
+
+  /**
+   * 実際に払った額を記録する。
+   *
+   * 分析に出していたのは店の予算帯からの推定だけで、価格を持たない提供元の店は
+   * 推定すらできず「未計測」のまま集計から外れていた。本人が入れた額があれば
+   * そちらを使う。
+   *
+   * 画面はサーバーの返事を待たずに更新する。数字が数秒遅れて変わると、
+   * 入力できたのかどうか分からない。失敗したら元に戻す。
+   */
+  const commitSpend = useCallback(async (historyId: string) => {
+    const digits = spendDraft.replace(/[^0-9]/g, '');
+    const nextSpend = digits ? Math.min(1_000_000, Number(digits)) : null;
+    const previous = drawHistories.find((entry) => entry.id === historyId)?.actualSpend ?? null;
+    setEditingSpendId(null);
+    setSpendDraft('');
+    if (nextSpend === previous) {
+      return;
+    }
+    onSpendChange(historyId, nextSpend);
+    try {
+      await randishApi.updateRandomHistorySpend(apiBaseUrlCandidates, historyId, nextSpend);
+    } catch {
+      // 保存できなかったのに数字だけ変わっていると、次に開いたときに戻っていて驚く。
+      onSpendChange(historyId, previous);
+    }
+  }, [apiBaseUrlCandidates, drawHistories, onSpendChange, spendDraft]);
   const [yearlyWrappedOpen, setYearlyWrappedOpen] = useState(false);
   const now = useMemo(() => new Date(), []);
   // 開発者は月末を待たずに生成できる。Premium は「月末に届く」体験そのものが商品なので、
@@ -16499,6 +16560,7 @@ function AnalyticsTab({
       budgetMax: toOptionalNumber(restaurant.budgetMax) ?? null,
       rangeMeters: null,
       userRating: null,
+      actualSpend: null,
       createdAt,
     }));
   }, [drawHistories, history]);
@@ -17023,6 +17085,8 @@ function AnalyticsTab({
             };
             const budget = getHistoryEstimatedBudget(displayEntry);
             const title = `${displayEntry.genre ?? 'お店'}の履歴`;
+            const editing = editingSpendId === entry.id;
+            const hasActual = entry.actualSpend != null && entry.actualSpend > 0;
             return (
               <View key={`${entry.id}-${index}`} style={styles.analysisHistoryRow}>
                 <Text style={styles.analysisHistoryDate}>{formatShortDate(entry.createdAt)}</Text>
@@ -17030,7 +17094,36 @@ function AnalyticsTab({
                   <Text style={styles.analysisHistoryName} numberOfLines={1}>{title}</Text>
                   <Text style={styles.analysisHistoryMeta} numberOfLines={1}>{buildHistoryMetaLine(displayEntry)}</Text>
                 </View>
-                <Text style={styles.analysisHistoryBudget}>{budget == null ? '未計測' : `約${formatYen(budget)}`}</Text>
+                {editing ? (
+                  <View style={styles.analysisSpendEditRow}>
+                    <TextInput
+                      value={spendDraft}
+                      onChangeText={setSpendDraft}
+                      style={styles.analysisSpendInput}
+                      keyboardType="number-pad"
+                      placeholder="円"
+                      placeholderTextColor="#a49a90"
+                      maxLength={7}
+                      autoFocus
+                      onSubmitEditing={() => void commitSpend(entry.id)}
+                    />
+                    <Pressable style={styles.analysisSpendSave} onPress={() => void commitSpend(entry.id)}>
+                      <Ionicons name="checkmark" size={15} color="#ffffff" />
+                    </Pressable>
+                  </View>
+                ) : (
+                  // 金額そのものを押して直せるようにする。編集ボタンを別に置くと、
+                  // 直せること自体に気づかれない。
+                  <Pressable
+                    style={styles.analysisHistoryBudgetButton}
+                    onPress={() => beginSpendEdit(entry.id, entry.actualSpend)}
+                  >
+                    <Text style={[styles.analysisHistoryBudget, !hasActual && styles.analysisHistoryBudgetEstimated]}>
+                      {budget == null ? '入力する' : hasActual ? formatYen(budget) : `約${formatYen(budget)}`}
+                    </Text>
+                    <Ionicons name="create-outline" size={12} color="#a49a90" />
+                  </Pressable>
+                )}
               </View>
             );
           })
@@ -17719,6 +17812,7 @@ function HistorySection({
             budgetMax: toOptionalNumber(restaurant.budgetMax) ?? null,
             rangeMeters: null,
             userRating: null,
+            actualSpend: null,
             createdAt: new Date().toISOString(),
           };
           return (

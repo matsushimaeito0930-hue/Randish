@@ -270,6 +270,8 @@ export type RandomHistory = {
   budgetMax: number | null;
   rangeMeters: number | null;
   userRating: number | null;
+  /** 本人が入力した実際の支払額。null は未入力で、そのときは予算帯から推定する。 */
+  actualSpend: number | null;
   createdAt: string;
 };
 
@@ -674,6 +676,13 @@ export const randishApi = {
     request<RandomHistory>(baseUrl, `api/random-histories/${historyId}/rating`, undefined, {
       method: 'PATCH',
       body: { rating },
+    }),
+
+  /** 実際に払った額を記録する。null を渡すと未入力に戻す。 */
+  updateRandomHistorySpend: (baseUrl: ApiBaseUrlInput, historyId: string, actualSpend: number | null) =>
+    request<RandomHistory>(baseUrl, `api/random-histories/${historyId}/spend`, undefined, {
+      method: 'PATCH',
+      body: { actualSpend },
     }),
 
   addFavorite: (baseUrl: ApiBaseUrlInput, favorite: FavoriteCreateParams) =>

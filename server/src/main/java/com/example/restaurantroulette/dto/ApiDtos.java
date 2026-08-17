@@ -204,10 +204,16 @@ public final class ApiDtos {
       Integer budgetMax,
       Integer rangeMeters,
       Integer userRating,
+      /** 本人が入力した実際の支払額。null は未入力。 */
+      Integer actualSpend,
       Instant createdAt) {
   }
 
   public record RandomHistoryRatingRequest(Integer rating) {
+  }
+
+  /** 実際に払った額の入力。null を渡すと未入力に戻す。 */
+  public record RandomHistorySpendRequest(Integer actualSpend) {
   }
 
   public record UserCreateRequest(

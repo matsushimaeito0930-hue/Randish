@@ -3,6 +3,7 @@ package com.example.restaurantroulette.service;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryCreateRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryRatingRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RandomHistoryResponse;
+import com.example.restaurantroulette.dto.ApiDtos.RandomHistorySpendRequest;
 import com.example.restaurantroulette.dto.ApiDtos.RestaurantResponse;
 import com.example.restaurantroulette.entity.RandomHistory;
 import com.example.restaurantroulette.entity.Restaurant;
@@ -71,8 +72,33 @@ public class RandomHistoryService {
         request.budgetMax(),
         rangeMeters,
         null,
+        // 実際の支払額は、あとから本人が入れる。抽選した時点では分からない。
+        null,
         Instant.now());
     return mapper.toRandomHistoryResponse(randomHistoryRepository.save(history), persistRestaurantId ? restaurant : null);
+  }
+
+  /**
+   * 実際に払った額を記録する。
+   *
+   * <p>分析に出していた金額は、店の予算帯から作った推定だけだった。価格を持たない
+   * 提供元の店は推定すらできず、外食32回のうち18回ぶんしか集計に入らない状態になる。
+   * 本人が入れた額があれば、そちらを使う。
+   */
+  public RandomHistoryResponse updateActualSpend(String id, RandomHistorySpendRequest request) {
+    // updateRating と同じく、存在確認を兼ねて先に引く。
+    randomHistoryRepository.findById(id)
+        .orElseThrow(() -> new NotFoundException("Random history not found: " + id));
+    Integer actualSpend = request == null ? null : request.actualSpend();
+    // 0は「0円だった」ではなく「消したい」として扱う。
+    Integer normalized = actualSpend == null || actualSpend <= 0 ? null : actualSpend;
+    if (normalized != null && normalized > 1_000_000) {
+      throw new BadRequestException("actualSpend must be 1,000,000 or less.");
+    }
+    randomHistoryRepository.updateActualSpend(id, normalized);
+    RandomHistory updated = randomHistoryRepository.findById(id)
+        .orElseThrow(() -> new NotFoundException("Random history not found: " + id));
+    return mapper.toRandomHistoryResponse(updated, findLocalRestaurantForList(updated));
   }
 
   public List<RandomHistoryResponse> findByUserId(String userId) {

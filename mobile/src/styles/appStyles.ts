@@ -10603,11 +10603,52 @@ export const styles = StyleSheet.create({
     color: '#81776b',
   },
   analysisHistoryBudget: {
-    width: 88,
     textAlign: 'right',
     fontSize: 14,
     fontWeight: '900',
     color: INK,
+  },
+  // 推定のままの額。本人が入れた額と見分けられるようにする。
+  analysisHistoryBudgetEstimated: {
+    fontWeight: '800',
+    color: '#8d8478',
+  },
+  // 金額そのものを押して直せる。編集ボタンを別に置くと、直せることに気づかれない。
+  analysisHistoryBudgetButton: {
+    width: 96,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+    paddingVertical: 4,
+  },
+  analysisSpendEditRow: {
+    width: 96,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  analysisSpendInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 32,
+    paddingHorizontal: 8,
+    borderRadius: 9,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e2d7c9',
+    fontSize: 13,
+    fontWeight: '900',
+    color: INK,
+    textAlign: 'right',
+  },
+  analysisSpendSave: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 9,
+    backgroundColor: ORANGE,
   },
   analysisGenreCard: {
     marginTop: 0,
